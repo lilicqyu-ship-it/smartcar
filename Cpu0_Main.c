@@ -28,6 +28,7 @@
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
 #include "IfxPort.h"
+#include "uart.h"
 
 #if defined(__TASKING__)
 #include "FreeRTOS.h"
@@ -45,6 +46,7 @@ static void vBlinkyTask(void *pvParameters)
     while (1)
     {
         IfxPort_setPinState(&MODULE_P00, LED1_PIN_INDEX, IfxPort_State_toggled);
+        UART_println("Hello from TC275 FreeRTOS!");
         vTaskDelay(pdMS_TO_TICKS(BLINKY_PERIOD));
     }
 }
@@ -65,6 +67,10 @@ void core0_main(void)
     IfxCpu_waitEvent(&cpuSyncEvent, 1);
 
 #if defined(__TASKING__)
+    /* Initialize UART for serial printing */
+    UART_init();
+    UART_println("UART initialized");
+
     /* Configure LED1 as push-pull output */
     IfxPort_setPinMode(&MODULE_P00, LED1_PIN_INDEX, IfxPort_Mode_outputPushPullGeneral);
 
