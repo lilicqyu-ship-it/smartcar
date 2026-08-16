@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "codegraph": {
+      "type": "stdio",
+      "command": "codegraph",
+      "args": [
+        "serve",
+        "--mcp",
+        "--path",
+        "C:\\Code\\TC275\\AURIX-v1.10.36-workspace\\myCar"
+      ]
+    }
+  }
+}
