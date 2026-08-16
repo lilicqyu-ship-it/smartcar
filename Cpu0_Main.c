@@ -27,8 +27,28 @@
 #include "Ifx_Types.h"
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
+#include "IfxPort.h"
+
+#if defined(__TASKING__)
+#include "FreeRTOS.h"
+#include "task.h"
+#endif
 
 IfxCpu_syncEvent cpuSyncEvent = 0;
+
+#define LED1_PIN_INDEX 5  /* LED1 on KIT_AURIX_TC275_LITE, Port 0 Pin 5 */
+#define BLINKY_PERIOD  250U
+
+#if defined(__TASKING__)
+static void vBlinkyTask(void *pvParameters)
+{
+    while (1)
+    {
+        IfxPort_setPinState(&MODULE_P00, LED1_PIN_INDEX, IfxPort_State_toggled);
+        vTaskDelay(pdMS_TO_TICKS(BLINKY_PERIOD));
+    }
+}
+#endif
 
 void core0_main(void)
 {
@@ -43,8 +63,29 @@ void core0_main(void)
     /* Wait for CPU sync event */
     IfxCpu_emitEvent(&cpuSyncEvent);
     IfxCpu_waitEvent(&cpuSyncEvent, 1);
+
+#if defined(__TASKING__)
+    /* Configure LED1 as push-pull output */
+    IfxPort_setPinMode(&MODULE_P00, LED1_PIN_INDEX, IfxPort_Mode_outputPushPullGeneral);
+
+    /* Create the LED blinky task */
+    xTaskCreate(vBlinkyTask, "blinky", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+
+    /* Start the FreeRTOS scheduler */
+    vTaskStartScheduler();
+#endif
         
     while(1)
     {
     }
 }
+
+#if defined(__TASKING__)
+void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
+{
+    while (1)
+    {
+        __nop();
+    }
+}
+#endif

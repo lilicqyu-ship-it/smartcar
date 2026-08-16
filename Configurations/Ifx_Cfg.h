@@ -50,4 +50,11 @@
 
 /* #define IFX_CFG_RETURN_FROM_MAIN */
 
+/*********************************************************************************************************************/
+/*-------------------------------------------Configuration for FreeRTOS---------------------------------------------*/
+/*********************************************************************************************************************/
+/* Redirect the CPU0 system call trap to the FreeRTOS port's system call handler (portYIELD uses __syscall) */
+extern int vPortSyscallHandler( unsigned char id );
+#define IFX_CFG_CPU_TRAP_SYSCALL_CPU0_HOOK(t) vPortSyscallHandler(t.tId)
+
 #endif /* IFX_CFG_H */
