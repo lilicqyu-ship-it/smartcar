@@ -119,16 +119,19 @@ static void PROTO_routeFrame(uint8 cmd, const uint8 *data, uint8 len)
         return;
     }
 
+    /* Queue first, then latch the bypass: once CPU0 has seen the command the
+     * fault is latched and it will not clear the bypass; if CPU0 drains before
+     * the command lands, the bypass set afterwards still stands. */
+    msg.cmd = cmd;
+    msg.len = len;
+    memcpy(msg.data, data, len);
+    (void)XCORE_cmdPush(&msg);
+
     if (cmd == PROTO_CMD_EMERGENCY_STOP)
     {
         /* Fast path: brake on CPU1 without waiting for the CPU0 control task */
         XCORE_estopRequest();
     }
-
-    msg.cmd = cmd;
-    msg.len = len;
-    memcpy(msg.data, data, len);
-    (void)XCORE_cmdPush(&msg);
 }
 
 void PROTO_init(void)
