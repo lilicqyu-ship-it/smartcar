@@ -429,9 +429,12 @@ typedef enum
 static WifiMsgType wifiReadMessage(uint8 *payload, uint32 maxPayload, uint32 *payloadLen,
                                    char *line, uint32 lineSize)
 {
-    /* Byte-level reader. Reads the ASCII header up to ':' (IPD frame) or '\n'
-     * (status line), then for IPD reads exactly <len> payload bytes (binary
-     * safe). +IPD format (AT+CIPDINFO=0): +IPD,<link>,<len>:<data> */
+    /* Byte-level reader. A line is accumulated up to '\n' and returned as
+     * WIFI_MSG_LINE. Only lines starting with "+IPD," are treated as data
+     * frames: their header ends at ':' and exactly <len> payload bytes follow
+     * (binary safe). esp-at v3 also emits event lines with colons, e.g.
+     * +STA_CONNECTED:"192.168.4.2" - the colon there is an ordinary character,
+     * otherwise its tail would leak into the stream as a garbage line. */
     char    header[64];
     uint32  hIdx = 0;
     uint8   byte;
@@ -442,18 +445,12 @@ static WifiMsgType wifiReadMessage(uint8 *payload, uint32 maxPayload, uint32 *pa
     *payloadLen = 0;
     line[0] = '\0';
 
-    /* Accumulate header until ':' or '\n' */
-    while (hIdx < sizeof(header) - 1)
+    /* Accumulate until end of line, or until the ':' that terminates an IPD header */
+    while (1)
     {
         if (!wifiReadByte(&byte, 500))
         {
             return WIFI_MSG_NONE;
-        }
-        if (byte == ':')
-        {
-            header[hIdx] = '\0';
-            gotColon = TRUE;
-            break;
         }
         if (byte == '\n')
         {
@@ -469,14 +466,19 @@ static WifiMsgType wifiReadMessage(uint8 *payload, uint32 maxPayload, uint32 *pa
             line[lineSize - 1] = '\0';
             return WIFI_MSG_LINE;
         }
-        header[hIdx++] = (char)byte;
+        if ((byte == ':') && (hIdx >= 5) && (strncmp(header, "+IPD,", 5) == 0))
+        {
+            header[hIdx] = '\0';
+            gotColon = TRUE;
+            break;
+        }
+        if (hIdx < sizeof(header) - 1)
+        {
+            header[hIdx++] = (char)byte;
+        }
+        /* overlong lines keep consuming until '\n' (returned truncated) */
     }
     if (!gotColon)
-    {
-        return WIFI_MSG_NONE;
-    }
-
-    if (strncmp(header, "+IPD,", 5) != 0)
     {
         return WIFI_MSG_NONE;
     }
@@ -632,8 +634,11 @@ void WIFI_main(void)
         }
         else if (msg == WIFI_MSG_LINE)
         {
-            XCORE_log("ESP-C6<- ");
-            XCORE_logln(statusLine);
+            if (statusLine[0] != '\0')   /* skip empty CR LF keep-alive lines */
+            {
+                XCORE_log("ESP-C6<- ");
+                XCORE_logln(statusLine);
+            }
             if (strstr(statusLine, "CONNECT FAIL"))
             {
                 g_clientConnected = FALSE;
