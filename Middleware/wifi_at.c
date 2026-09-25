@@ -22,6 +22,14 @@
 #define WIFI_RX_PRIO        5
 #define WIFI_ER_PRIO        13
 
+/* All three cores share one interrupt vector table (Lcf_*.lsl: __INTTAB_CPUn
+ * are the same address), and this lsl only collects vector-table-0 entries.
+ * Core routing is decided by the SRC TOS bit (IfxSrc_Tos_cpu2), so the ISRs
+ * below MUST be declared on table 0, not table 2, or the linker discards
+ * their entries and the ISRs never run. Priorities do not clash with CPU0
+ * (1/2/4/8/12). */
+#define WIFI_VECTAB         0
+
 #define WIFI_TX_BUFFER_SIZE 512
 #define WIFI_RX_BUFFER_SIZE 1024
 #define WIFI_LINE_MAX       256
@@ -34,21 +42,21 @@ static uint8 g_wifiRxBuffer[WIFI_RX_BUFFER_SIZE + sizeof(Ifx_Fifo) + 8];
 
 static boolean g_clientConnected = FALSE;
 
-IFX_INTERRUPT(wifiTxISR, 2, WIFI_TX_PRIO);
+IFX_INTERRUPT(wifiTxISR, WIFI_VECTAB, WIFI_TX_PRIO);
 
 void wifiTxISR(void)
 {
     IfxAsclin_Asc_isrTransmit(&g_wifiAsclin);
 }
 
-IFX_INTERRUPT(wifiRxISR, 2, WIFI_RX_PRIO);
+IFX_INTERRUPT(wifiRxISR, WIFI_VECTAB, WIFI_RX_PRIO);
 
 void wifiRxISR(void)
 {
     IfxAsclin_Asc_isrReceive(&g_wifiAsclin);
 }
 
-IFX_INTERRUPT(wifiErISR, 2, WIFI_ER_PRIO);
+IFX_INTERRUPT(wifiErISR, WIFI_VECTAB, WIFI_ER_PRIO);
 
 void wifiErISR(void)
 {
@@ -396,9 +404,9 @@ void WIFI_init(void)
 
     const IfxAsclin_Asc_Pins pins = {
             NULL_PTR,                       IfxPort_InputMode_pullUp,
-            &IfxAsclin1_RXE_P11_10_IN,      IfxPort_InputMode_pullUp,
+            &IfxAsclin1_RXA_P15_1_IN,       IfxPort_InputMode_pullUp,
             NULL_PTR,                       IfxPort_OutputMode_pushPull,
-            &IfxAsclin1_TX_P11_12_OUT,      IfxPort_OutputMode_pushPull,
+            &IfxAsclin1_TX_P15_0_OUT,       IfxPort_OutputMode_pushPull,
             IfxPort_PadDriver_cmosAutomotiveSpeed1
     };
     ascConf.pins = &pins;

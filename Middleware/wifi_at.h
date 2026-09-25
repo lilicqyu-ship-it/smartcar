@@ -5,7 +5,7 @@
 
 /* WiFi module driver for an ESP32-C6 running the ESP-AT firmware
  * (source of the flashed firmware: ../esp-at, module esp32c6_default).
- * Runs on CPU2 (bare-metal); the module hangs off ASCLIN1 (P11.12 TX / P11.10 RX).
+ * Runs on CPU2 (bare-metal); the module hangs off ASCLIN1 (P15.0 TX / P15.1 RX).
  * ESP-AT v3 keeps the classic command set used here:
  *   AT+CWMODE=2 / AT+CWSAP (softAP), AT+CIPMUX=1, AT+CIPSERVER=1,<port>,
  *   AT+CIPSEND=<link>,<len> ('>' prompt, then "SEND OK"),

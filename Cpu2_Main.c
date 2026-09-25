@@ -54,7 +54,7 @@ void core2_main(void)
     /* Initialize the binary protocol parser (byte stream comes from WiFi) */
     PROTO_init();
 
-    /* Initialize the ESP32-C6 AT module on ASCLIN1 (P11.12 TX / P11.10 RX) */
+    /* Initialize the ESP32-C6 AT module on ASCLIN1 (P15.0 TX / P15.1 RX) */
     WIFI_init();
 
     WIFI_main();                             /* never returns */
