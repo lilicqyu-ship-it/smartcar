@@ -29,6 +29,10 @@
 #include "IfxScuWdt.h"
 #include "IfxPort.h"
 #include "uart.h"
+#include "motor.h"
+#include "esp8266.h"
+#include "protocol.h"
+#include "robot.h"
 
 #if defined(__TASKING__)
 #include "FreeRTOS.h"
@@ -46,8 +50,33 @@ static void vBlinkyTask(void *pvParameters)
     while (1)
     {
         IfxPort_setPinState(&MODULE_P00, LED1_PIN_INDEX, IfxPort_State_toggled);
-        UART_println("Hello from TC275 FreeRTOS!");
         vTaskDelay(pdMS_TO_TICKS(BLINKY_PERIOD));
+    }
+}
+
+/* Loopback echo test: any byte received on ASCLIN0 RX is echoed back on TX.
+ * Type a character in the terminal; if it comes back, the whole USB-UART
+ * path (P14.1 <-> FT2232 <-> COM port) works. */
+static void vUartEchoTask(void *pvParameters)
+{
+    while (1)
+    {
+        UART_echoTask();
+    }
+}
+
+/* Robot control task: 10 ms loop for safety checks and motion execution.
+ * HTTP mode reports status through /api/status instead of injecting binary
+ * status frames into the browser TCP stream. */
+static void vRobotControlTask(void *pvParameters)
+{
+    (void)pvParameters;
+
+    while (1)
+    {
+        ROBOT_task();
+
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 #endif
@@ -71,11 +100,34 @@ void core0_main(void)
     UART_init();
     UART_println("UART initialized");
 
+
     /* Configure LED1 as push-pull output */
     IfxPort_setPinMode(&MODULE_P00, LED1_PIN_INDEX, IfxPort_Mode_outputPushPullGeneral);
 
     /* Create the LED blinky task */
     xTaskCreate(vBlinkyTask, "blinky", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+
+    /* Create the loopback echo test task */
+    xTaskCreate(vUartEchoTask, "echo", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+
+    /* Initialize the TB6612 motor drivers (4 channels, 2x TB6612) */
+    MOTOR_init();
+
+    /* Initialize the binary protocol parser */
+    PROTO_init();
+
+    /* Initialize the robot state machine / motion controller */
+    ROBOT_init();
+
+    /* Create the robot control task (10 ms safety + status upload) */
+    xTaskCreate(vRobotControlTask, "robot", configMINIMAL_STACK_SIZE * 2, NULL, 2, NULL);
+
+    /* Initialize the ESP8266 WiFi module on ASCLIN1 (P15.0 TX / P15.1 RX) */
+    ESP8266_init();
+
+    /* Create the ESP8266 task (AP mode + TCP bridge) */
+    xTaskCreate(ESP8266_task, "esp8266", configMINIMAL_STACK_SIZE * 4, NULL, 1, NULL);
+
 
     /* Start the FreeRTOS scheduler */
     vTaskStartScheduler();
