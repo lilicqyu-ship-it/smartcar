@@ -50,7 +50,7 @@ ASCLIN0 中断（CPU0）：TX 优先级 8、RX 4、ER 12。FreeRTOS 内核中断
 
 **CPU1（裸机）**：无任务/中断，`MOTOR_ALGO_run()` 1 kHz 节拍（STM0 忙等）。
 
-**CPU2（裸机）**：`WIFI_main()` 超循环。ASCLIN1 中断：`wifiRxISR` 优先级 5、`wifiTxISR` 7、`wifiErISR` 13，`IFX_INTERRUPT(fn, 2, prio)` 声明且 `typeOfService = IfxSrc_Tos_cpu2`（中断表三核共用，`__INTTAB_CPU0/1/2` 同址）。
+**CPU2（裸机）**：`WIFI_main()` 超循环。ASCLIN1 中断：`wifiRxISR` 优先级 5、`wifiTxISR` 7、`wifiErISR` 13，`IFX_INTERRUPT(fn, 0, prio)` 声明且 `typeOfService = IfxSrc_Tos_cpu2`。注意：中断表三核共用（lsl 里 `__INTTAB_CPU0/1/2` 同址），Tasking lsl 只收集 0 号表的向量条目，所以即使 ISR 归 CPU2 也必须声明在 **0 号向量表**（目标核由 SRC 的 TOS 位决定）；写成 2 号表会被链接器以 unreferenced 删除，ISR 永远不进。优先级需避开 CPU0 已用的 1/2/4/8/12。
 
 ## 4. 跨核通信（Middleware/xcore.c/h）
 
@@ -127,7 +127,7 @@ ATE0 → AT+CWMODE=2 → AT+CWSAP="AURIX-SmartDrive","12345678",11,3
 | 0x21 | HEARTBEAT | — | 刷新 lastHeartbeatTick |
 | 0x30 | RESET | — | 复位状态机 |
 | 0x31 | CLEAR_FAULT | — | 解除 FAULT（CPU0 同时清急停旁路） |
-| 0x32 | EMERGENCY_STOP | — | 急停：CPU2 置旁路位（CPU1 立即刹车）+ 命令入队（CPU0 锁存故障） |
+| 0x32 | EMERGENCY_STOP | — | 急停：命令**先入队**（CPU0 锁存 FAULT），**随后**置旁路位（CPU1 当拍刹车）——该顺序防止控制拍在入队前清掉旁路 |
 
 ### 7.3 状态应答（TC275 → 主机），CMD = 0x40，LEN = 6
 

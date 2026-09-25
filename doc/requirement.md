@@ -86,12 +86,14 @@ F05	PWM 开环速度控制	✅
 F06	运动状态机	✅
 F07	自定义通信协议	✅
 F08	通信超时保护	✅
-F09	Watchdog	✅
+F09	Watchdog	🔶 见注
 F10	状态监控	✅
 F11	Emergency Stop	✅
 F12	编码器闭环	V1.1
 F13	IMU	V2.0
 F14	IWR6843 毫米波雷达	V3.0
+
+> F09 说明：软件级看门狗已实现（F08 心跳 100 ms 超时停车、CPU1 电机算法 150 ms 目标失联保护、急停旁路）；CPU/安全**硬件**看门狗在调试期被显式关闭（Cpu0/1/2_Main.c），量产前必须重新启用并周期喂狗，详见 architecture.md §10。
 5. Wi-Fi 功能设计
 5.1 ESP32-C6 工作模式
 
@@ -384,7 +386,8 @@ CMD	功能
 0x05	RIGHT
 0x06	FORWARD_LEFT
 0x07	FORWARD_RIGHT
-0x08	ROTATE
+0x08	ROTATE_LEFT
+0x09	ROTATE_RIGHT
 0x10	SET_SPEED
 0x20	GET_STATUS
 0x21	HEARTBEAT

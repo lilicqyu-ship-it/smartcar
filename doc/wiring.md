@@ -22,8 +22,8 @@ ESP32-C6 硬件板卡：**ESP32-C6-DevKitC-1 V1.2**（ESP32-C6-WROOM-1/-1U 模�
                         │                              │
   ESP32-C6-DevKitC-1    │  ASCLIN1                     │
   ┌───────────────┐     │                              │
-  │ GPIO7 TX ─────────► │ P11.10 RX (X1-34)            │
-  │ GPIO6 RX ◄──────────│ P11.12 TX (X1-32)            │
+  │ GPIO7 TX ─────────► │ P15.1 RX                     │
+  │ GPIO6 RX ◄──────────│ P15.0 TX                     │
   │ GND  ─────────────► │ GND (共地!)                   │
   │ 5V ◄── DC-DC 5V≥2A  │  (板载LDO出3.3V, 见§5)        │
   │ EN/RST 板载已处理    │                              │
@@ -50,7 +50,7 @@ Mermaid 版（支持的查看器可渲染）：
 flowchart LR
     subgraph TC275 [KIT-AURIX-TC275-LITE]
         ASC0[ASCLIN0<br/>P14.0 TX / P14.1 RX]
-        ASC1[ASCLIN1<br/>P11.12 TX / P11.10 RX]
+        ASC1[ASCLIN1<br/>P15.0 TX / P15.1 RX]
         PWM[GTM ATOM PWM 20kHz<br/>P21.0 P21.3 P00.0 P00.8]
         DIR[方向 GPIO<br/>P21.x P22.3 P00.x]
     end
@@ -79,12 +79,12 @@ ESP32-C6 esp-at 固件的 AT 通道是 **UART1**（不是 ESP8266 的 UART0）�
 
 | TC275 (LITE kit) | 方向 | ESP32-C6 (esp-at) | DevKitC-1 位置 | 说明 |
 |---|---|---|---|---|
-| P11.12（X1-32，ASCLIN1 TX） | → | GPIO6（UART1 RX） | J1-5 | 交叉连接；从 X1 排针 32 脚取 |
-| P11.10（X1-34，ASCLIN1 RX，保持上拉） | ← | GPIO7（UART1 TX） | J1-6 | 交叉连接；从 X1 排针 34 脚取 |
+| P15.0（ASCLIN1 TX） | → | GPIO6（UART1 RX） | J1-5 | 交叉连接 |
+| P15.1（ASCLIN1 RX，保持上拉） | ← | GPIO7（UART1 TX） | J1-6 | 交叉连接 |
 | GND | — | GND | J1-15 | **必须共地** |
 | — | — | 5V 供电 | J1-14（5V） | 车载 DC-DC 5V（与 kit 共用 ≥2A 轨），见 §5 |
 
-> AT 串口用 ASCLIN1，引脚改到端口 11：TX=**P11.12（X1 第 32 脚）**、RX=**P11.10（X1 第 34 脚）**（iLLD 符号 `IfxAsclin1_TX_P11_12_OUT` / `IfxAsclin1_RXE_P11_10_IN`）。这两个脚在 X1 上未被板载电路复用。注意同段 X1 上印着 `RXD1/TXD0` 的 P11.9/P11.3 是片上以太网 MII 信号，**不是**串口，勿混用。
+> AT 串口用 ASCLIN1：TX=**P15.0**、RX=**P15.1**（iLLD 符号 `IfxAsclin1_TX_P15_0_OUT` / `IfxAsclin1_RXA_P15_1_IN`）。曾在 V1.1 尝试改用 P11.12/P11.10（X1-32/34），联调无 RX 响应，已改回 P15.0/P15.1。注意 X1 上印着 `RXD1/TXD0` 的 P11.9/P11.3 是片上以太网 MII 信号，**不是**串口，勿混用。
 
 > J1-1 的 3V3 是板载 LDO 的**输出**脚：采用 5V 供电方案时请勿再从外部向 3V3 灌电。
 
@@ -234,4 +234,4 @@ kit 板载 **FT2232HL**，X4 micro-USB 一根线三件事：供电（桌面）�
 | 流控 | 无 | 默认 RTS 使能，需按 §2 关闭或接线 |
 | 供电 | 3.3V ≥500mA | DevKitC-1 车载 5V（板载 LDO），与 kit 共用 ≥2A 轨，见 §5 |
 | 特有功能 | — | BLE 5 / 802.15.4 / Wi-Fi 6 TWT，为 V2.0 后扩展留余地 |
-| TC275 侧引脚 | P15.0/P15.1（旧） | **改为 P11.12（TX）/ P11.10（RX），X1 排针 32/34 脚** |
+| TC275 侧引脚 | P15.0/P15.1（旧） | P15.0（TX）/ P15.1（RX），不变（V1.1 曾迁到 P11.12/P11.10 后又改回） |
