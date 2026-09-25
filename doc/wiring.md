@@ -17,22 +17,22 @@ ESP32-C6 硬件板卡：**ESP32-C6-DevKitC-1 V1.2**（ESP32-C6-WROOM-1/-1U 模�
 ```
                         ┌──────────────────────────────┐
                         │   KIT-AURIX-TC275-LITE       │
-  USB-UART(调试日志)     │  P14.0 TX ──► PC RX          │
-                        │  P14.1 RX ◄── PC TX  ASCLIN0 │
+  X4 micro-USB ────────►│  供电+DAS调试+虚拟COM         │
+  (接PC, 一根线三件事)   │  ASCLIN0 P14.0/P14.1 板内互连 │
                         │                              │
   ESP32-C6-DevKitC-1    │  ASCLIN1                     │
   ┌───────────────┐     │                              │
-  │ GPIO7 TX ─────────► │ P15.1 RX                     │
-  │ GPIO6 RX ◄──────────│ P15.0 TX                     │
+  │ GPIO7 TX ─────────► │ P11.10 RX (X1-34)            │
+  │ GPIO6 RX ◄──────────│ P11.12 TX (X1-32)            │
   │ GND  ─────────────► │ GND (共地!)                   │
-  │ 5V ◄── DC-DC 5V≥1A  │  (板载LDO出3.3V, 见§5)        │
+  │ 5V ◄── DC-DC 5V≥2A  │  (板载LDO出3.3V, 见§5)        │
   │ EN/RST 板载已处理    │                              │
   └───────────────┘     │  GTM PWM 20kHz    方向 GPIO   │
                         │  P21.0 P21.3      P21.2~5    │
      电池(2S~3S)         │  P00.0 P00.8      P00.x P22.3│
         │               └──────────┬──────────┬────────┘
         ├──► VM ──────────────────►│          │
-        ├──► DC-DC 降压 5V ≥1A ──► 5V(DevKit J1-14)     ▼          ▼
+        ├──► DC-DC 降压 5V ≥2A ──► 5V(DevKit J1-14) + kit X302    ▼          ▼
         │                        ┌──────────┐  ┌──────────┐
         └──► GND(全系统共地)      │ TB6612#1 │  │ TB6612#2 │
                                  │ A:电机A   │  │ A:电机C   │
@@ -50,7 +50,7 @@ Mermaid 版（支持的查看器可渲染）：
 flowchart LR
     subgraph TC275 [KIT-AURIX-TC275-LITE]
         ASC0[ASCLIN0<br/>P14.0 TX / P14.1 RX]
-        ASC1[ASCLIN1<br/>P15.0 TX / P15.1 RX]
+        ASC1[ASCLIN1<br/>P11.12 TX / P11.10 RX]
         PWM[GTM ATOM PWM 20kHz<br/>P21.0 P21.3 P00.0 P00.8]
         DIR[方向 GPIO<br/>P21.x P22.3 P00.x]
     end
@@ -58,11 +58,11 @@ flowchart LR
     PHONE((手机/PC<br/>Wi-Fi AP 8080))
     DRV1[TB6612 #1<br/>A=电机A前 B=电机B后]
     DRV2[TB6612 #2<br/>A=电机C后 B=电机D前]
-    BAT[电池 VM 6.5~12V<br/>DC-DC 5V ≥1A → DevKit J1-5V]
+    BAT[电池 VM 6.5~12V<br/>DC-DC 5V ≥2A → DevKit J1-14 + kit X302]
 
     PHONE -- Wi-Fi 2.4G --> ESP
     ASC1 -- TX→RX / RX→TX --> ESP
-    ASC0 --> DBG[USB-UART 调试]
+    ASC0 --> DBG[X4 micro-USB<br/>供电+DAS+虚拟COM]
     PWM --> DRV1
     PWM --> DRV2
     DIR --> DRV1
@@ -79,10 +79,12 @@ ESP32-C6 esp-at 固件的 AT 通道是 **UART1**（不是 ESP8266 的 UART0）�
 
 | TC275 (LITE kit) | 方向 | ESP32-C6 (esp-at) | DevKitC-1 位置 | 说明 |
 |---|---|---|---|---|
-| P15.0（ASCLIN1 TX） | → | GPIO6（UART1 RX） | J1-5 | 交叉连接 |
-| P15.1（ASCLIN1 RX，保持上拉） | ← | GPIO7（UART1 TX） | J1-6 | 交叉连接 |
+| P11.12（X1-32，ASCLIN1 TX） | → | GPIO6（UART1 RX） | J1-5 | 交叉连接；从 X1 排针 32 脚取 |
+| P11.10（X1-34，ASCLIN1 RX，保持上拉） | ← | GPIO7（UART1 TX） | J1-6 | 交叉连接；从 X1 排针 34 脚取 |
 | GND | — | GND | J1-15 | **必须共地** |
-| — | — | 5V 供电 | J1-14（5V） | 车载 DC-DC 5V ≥1A，见 §5 |
+| — | — | 5V 供电 | J1-14（5V） | 车载 DC-DC 5V（与 kit 共用 ≥2A 轨），见 §5 |
+
+> AT 串口用 ASCLIN1，引脚改到端口 11：TX=**P11.12（X1 第 32 脚）**、RX=**P11.10（X1 第 34 脚）**（iLLD 符号 `IfxAsclin1_TX_P11_12_OUT` / `IfxAsclin1_RXE_P11_10_IN`）。这两个脚在 X1 上未被板载电路复用。注意同段 X1 上印着 `RXD1/TXD0` 的 P11.9/P11.3 是片上以太网 MII 信号，**不是**串口，勿混用。
 
 > J1-1 的 3V3 是板载 LDO 的**输出**脚：采用 5V 供电方案时请勿再从外部向 3V3 灌电。
 
@@ -153,31 +155,73 @@ TB6612 驱动板引脚 ↔ TC275：
 
 ## 5. 电源与接地
 
+### 5.1 整车供电架构
+
 ```
-电池(2S~3S, VM 建议 6.5~12V)
+电池(2S~3S, TB6612 VM 建议 6.5~12V)
  ├──► TB6612 #1/#2 VM（电机电源，粗线）
- ├──► DC-DC 降压 5V ──► TC275 kit 供电（或 kit 自带电源输入）
- └──► DC-DC 5V ≥1A ──► ESP32-C6-DevKitC-1 J1-14(5V)
-                        └─ 板载 5V→3.3V LDO 给模组供电（J5 跳线保持短接）
-TB6612 VCC(逻辑) → 3.3V（与 TC275 I/O 电平一致；TC275 GPIO 为 3.3V，勿用 5V 逻辑供电）
+ ├──► DC-DC 降压 5V ≥2A ──┬──► TC275 LITE kit  X302(+5V)（见 §5.2）
+ │                        └──► ESP32-C6-DevKitC-1 J1-14(5V)
+ │                              └─ 板载 5V→3.3V LDO 给模组供电（J5 跳线保持短接）
+ └──► GND（全系统共地）
 
-全系统共地：电池负极 = TB6612 GND = TC275 GND = DevKitC-1 GND(J1-15)
+TB6612 VCC(逻辑) → 3.3V，可从 TC275 kit X1-2(VEXT) 取（见 §5.2 电流预算）
 ```
 
-ESP32-C6-DevKitC-1 供电要点：
+### 5.2 TC275 LITE kit 供电详解（依据官方 User Manual V1.1 §2.1）
 
-- 推荐从车载 DC-DC 的 **5V（≥1A）** 接入 J1-14，由板载 LDO 产生 3.3V 供模组；Wi-Fi 发射瞬时电流峰值 ~350–500 mA，5V 轨裕量不足会导致 Brownout 复位。
+板载电源结构：输入 5V → **LDO G1** 产生 3.3V（板上称 **VEXT**，最大输出 1A）；绿色电源指示灯 **D5** 亮表示 3.3V 正常。另有一路 **VDD_USB**（X4 的 VBUS）。
+
+官方提供 4 种供电方式，**同一时刻只允许一种**：
+
+| 方式 | 入口 | 说明 |
+|---|---|---|
+| ① USB（桌面推荐） | **X4 micro-AB USB** 接 PC | 同时完成供电 + DAS 调试 + ASCLIN0 虚拟串口；USB2.0 口最多 500 mA，建议用 USB3.0 口（900 mA）或带高电流供电能力的外部 USB 电源 |
+| ② 车载 5V（本项目采用） | **X302 Arduino 电源排针的 +5V 脚** | 来自 DC-DC 5V ≥2A（与 C6 共用一路） |
+| ③ 车载 5V（备用入口） | **X1-39 或 X2-2 的 VDD_USB 脚** | 与 ② 等效 |
+| ④ 外部 3.3V 直灌（特殊场景） | **X1-2 / X2-39 的 VEXT 脚** 或 X302 +3V3 脚 | 必须先**拆掉电阻 R27**（0Ω，0805）；副作用：**CAN 收发器失效**（TLE9251 需要 5V）。本项目不用 |
+
+硬性警告（手册原文要点）：
+
+- **X4 插着 USB 时，禁止**再从 ②③④ 任何电源脚输入电压——板上**没有反向电流保护**，会倒灌损坏 USB 主机/PC；反过来用车载 5V 上电时，也不要再把 X4 接到 PC（调试时拔掉 X4 或只保证二者不同时带电，DAS 调试需 X4 时须先断开车载 5V 的判断交给使用者，官方明确要求“ensure X4 is not supplied by any power source or PC”用于方式②③④）。
+- 禁止多个电源脚同时施加电源，否则可能烧毁板子。
+- **VEXT 就是 LDO G1 的输出轨**：向其灌电压会直接损坏 LDO（方式④拆 R27 是唯一合法例外）。
+- 板卡逻辑电平为 **3.3V，不兼容 5V 电平外设**（官方手册 §3.3 明确）。
+
+电流预算（LDO G1 上限 1A）：
+
+| 负载 | 典型电流 |
+|---|---|
+| TC275 + FT2232（板载） | ~200–300 mA |
+| TB6612 ×2 的 VCC（仅逻辑，STBY 同接） | < 30 mA |
+| 余量给扩展 | ~700 mA |
+
+> 结论：TB6612 逻辑 VCC 从 X1-2(VEXT) 取是安全的；**电机功率一律走 VM**，绝不允许从 3.3V 轨取。ESP32-C6 **不要**从 kit 取电（它自己 5V→板载 LDO 独立供电），避免把 C6 的开关噪声和 1A 预算冲突压到 LDO G1 上。
+
+### 5.3 ESP32-C6-DevKitC-1 供电要点
+
+- 推荐从车载 DC-DC 的 **5V** 接入 J1-14（单板最低 ≥1A；与 TC275 kit 共用一路时整轨 ≥2A，见 §5.1），由板载 LDO 产生 3.3V 供模组；Wi-Fi 发射瞬时电流峰值 ~350–500 mA，5V 轨裕量不足会导致 Brownout 复位。
 - 5V 入水口旁加 **≥470 µF 大电容 + 0.1 µF**；远离电机驱动走线，星型接地，避免电机电流纹波耦合。
 - 也可用独立 3.3V ≥1A LDO 接 J1-1(3V3)，但此时须断开板载 LDO 供电路径（拔 J5 跳线），二选一，**禁止两路 3.3V 并联通电**。
 - 调试阶段可临时用 PC USB 给 DevKitC-1 供电，但电机全速运行时 USB 供电电流不足，必须切换为车载 5V。
 
-## 6. 调试串口（保持不变）
+### 5.4 接地与上电顺序
 
-| PC USB-UART (3.3V) | TC275 | 说明 |
+```
+全系统共地：电池负极 = TB6612 GND = kit X1-40/X2-40(GND) = DevKitC-1 GND(J1-15)
+上电顺序：先整车 DC-DC 5V（逻辑上电）→ 电池 VM（动力）；断电顺序相反。
+电机线、编码器线(将来)远离 C6 天线端（WROOM-1 板载天线在 J1 对侧），减少扰动。
+```
+
+## 6. 调试串口（TC275 侧，免外接 USB-UART）
+
+kit 板载 **FT2232HL**，X4 micro-USB 一根线三件事：供电（桌面）、DAS 下载调试、**虚拟 COM 口**。
+
+| PC 侧 | 内部连接 | 说明 |
 |---|---|---|
-| RX | P14.0（ASCLIN0 TX） | 日志输出，115200 8N1 |
-| TX | P14.1（ASCLIN0 RX） | |
-| GND | GND | |
+| 虚拟 COM 口 TX/RX | FT2232 ⇄ **P14.0 / P14.1（ASCLIN0）** | 115200 8N1，本工程日志/回显通道 |
+
+> P14.0/P14.1 **没有**引到任何外接排针（X1/X2/mikroBUS/Shield2Go/Arduino 均无），想脱离 X4 用外接 USB-UART 接 ASCLIN0 是做不到的；改用其他 ASCLIN 或走板载 DAP 10 针调试口另议。
 
 ## 7. 与原 ESP8266 方案的差异摘要
 
@@ -188,6 +232,6 @@ ESP32-C6-DevKitC-1 供电要点：
 | 波特率 | 115200 | 115200（不变） |
 | AT 指令集 | 原生 | 兼容（CWMODE/CWSAP/CIPMUX/CIPSERVER/CIPSEND/+IPD/CIPCLOSE 均可用） |
 | 流控 | 无 | 默认 RTS 使能，需按 §2 关闭或接线 |
-| 供电 | 3.3V ≥500mA | DevKitC-1 车载 5V ≥1A（板载 LDO），见 §5 |
+| 供电 | 3.3V ≥500mA | DevKitC-1 车载 5V（板载 LDO），与 kit 共用 ≥2A 轨，见 §5 |
 | 特有功能 | — | BLE 5 / 802.15.4 / Wi-Fi 6 TWT，为 V2.0 后扩展留余地 |
-| TC275 侧引脚 | P15.0/P15.1 不变 | P15.0/P15.1 不变 |
+| TC275 侧引脚 | P15.0/P15.1（旧） | **改为 P11.12（TX）/ P11.10（RX），X1 排针 32/34 脚** |

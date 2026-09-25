@@ -1,16 +1,7 @@
 #include "robot.h"
-#include "motor.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
-
-#define MOTOR_SCALE  10   /* map -100..+100 (protocol) to -1000..+1000 (motor API) */
-
-/* Left side: MOTOR_A + MOTOR_B (TB6612#1), Right side: MOTOR_C + MOTOR_D (TB6612#2) */
-#define MOTOR_LEFT_0  MOTOR_A
-#define MOTOR_LEFT_1  MOTOR_B
-#define MOTOR_RIGHT_0 MOTOR_C
-#define MOTOR_RIGHT_1 MOTOR_D
 
 typedef enum
 {
@@ -35,18 +26,11 @@ static RobotCtrl g_robot;
 
 static void ROBOT_applySpeeds(sint8 left, sint8 right)
 {
-    sint16 mL, mR;
-
+    /* Only updates the desired side speeds. Actual actuation happens on CPU1:
+     * the control task forwards these targets through xcore and the motor
+     * algorithm there ramps and drives the TB6612s. */
     g_robot.targets.left  = left;
     g_robot.targets.right = right;
-
-    mL = (sint16)left  * MOTOR_SCALE;
-    mR = (sint16)right * MOTOR_SCALE;
-
-    MOTOR_setSpeed(MOTOR_LEFT_0, mL);
-    MOTOR_setSpeed(MOTOR_LEFT_1, mL);
-    MOTOR_setSpeed(MOTOR_RIGHT_0, mR);
-    MOTOR_setSpeed(MOTOR_RIGHT_1, mR);
 }
 
 static void ROBOT_setState(uint8 state)

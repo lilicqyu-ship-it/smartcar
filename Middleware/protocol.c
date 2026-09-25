@@ -1,6 +1,14 @@
+/* Binary control protocol, split across two cores:
+ *  - CPU2 (WiFi owner) parses the byte stream (PROTO_feedByte). A valid frame
+ *    is routed in PROTO_routeFrame: GET_STATUS is answered right away from the
+ *    status block CPU0 publishes, EMERGENCY_STOP additionally latches the
+ *    fast-path e-stop bypass, everything else is queued to CPU0.
+ *  - CPU0 (robot state owner) executes commands in PROTO_handleCommand,
+ *    called from the 10 ms control task with the xcore queue drained. */
 #include "protocol.h"
 #include "robot.h"
-#include "esp8266.h"
+#include "xcore.h"
+#include "wifi_at.h"
 
 #include <string.h>
 
@@ -43,7 +51,8 @@ static uint8 PROTO_calcCrc(uint8 cmd, const uint8 *data, uint8 len)
     return crc;
 }
 
-static void PROTO_dispatch(uint8 cmd, const uint8 *data, uint8 len)
+/* CPU0 only: execute a validated command against the robot controller */
+void PROTO_handleCommand(uint8 cmd, const uint8 *data, uint8 len)
 {
     switch (cmd)
     {
@@ -73,19 +82,7 @@ static void PROTO_dispatch(uint8 cmd, const uint8 *data, uint8 len)
         }
         break;
 
-    case PROTO_CMD_GET_STATUS:
-    {
-        ProtocolStatus status;
-
-        status.state         = ROBOT_getState();
-        status.leftSpeed     = (sint8)ROBOT_getSpeeds().left;
-        status.rightSpeed    = (sint8)ROBOT_getSpeeds().right;
-        status.heartbeatOk   = ROBOT_isHeartbeatOk() ? 1 : 0;
-        status.faultCode     = ROBOT_getFaultCode();
-        status.emergencyStop = ROBOT_isEmergencyStop() ? 1 : 0;
-        PROTO_sendStatus(&status);
-        break;
-    }
+    /* GET_STATUS is answered by CPU2 from the published status block */
 
     case PROTO_CMD_HEARTBEAT:
         ROBOT_cmdHeartbeat();
@@ -106,6 +103,32 @@ static void PROTO_dispatch(uint8 cmd, const uint8 *data, uint8 len)
     default:
         break;
     }
+}
+
+/* CPU2 only: route a CRC-checked frame */
+static void PROTO_routeFrame(uint8 cmd, const uint8 *data, uint8 len)
+{
+    XcoreCmdMsg msg;
+
+    if (cmd == PROTO_CMD_GET_STATUS)
+    {
+        ProtocolStatus status;
+
+        XCORE_statusGet(&status);
+        PROTO_sendStatus(&status);
+        return;
+    }
+
+    if (cmd == PROTO_CMD_EMERGENCY_STOP)
+    {
+        /* Fast path: brake on CPU1 without waiting for the CPU0 control task */
+        XCORE_estopRequest();
+    }
+
+    msg.cmd = cmd;
+    msg.len = len;
+    memcpy(msg.data, data, len);
+    (void)XCORE_cmdPush(&msg);
 }
 
 void PROTO_init(void)
@@ -168,7 +191,7 @@ void PROTO_feedByte(uint8 byte)
     case STATE_CRC:
         if (byte == PROTO_calcCrc(g_parser.cmd, g_parser.payload, g_parser.len))
         {
-            PROTO_dispatch(g_parser.cmd, g_parser.payload, g_parser.len);
+            PROTO_routeFrame(g_parser.cmd, g_parser.payload, g_parser.len);
             g_lastResult = PROTO_RESULT_FRAME;
         }
         else
@@ -191,7 +214,7 @@ ProtoResult PROTO_process(void)
 
 boolean PROTO_sendBytes(const uint8 *data, uint32 len)
 {
-    return ESP8266_sendRaw(data, len);
+    return WIFI_sendRaw(data, len);
 }
 
 void PROTO_sendStatus(const ProtocolStatus *status)

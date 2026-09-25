@@ -42,7 +42,7 @@
 #define ROBOT_STATE_ROTATE_RIGHT   0x09
 #define ROBOT_STATE_FAULT          0x0A
 
-/* Status reply payload layout (sent to host via ESP8266) */
+/* Status reply payload layout (sent to host via the ESP32-C6 WiFi link) */
 typedef struct
 {
     uint8  state;             /* ROBOT_STATE_* */
@@ -62,9 +62,10 @@ typedef enum
 } ProtoResult;
 
 void  PROTO_init(void);
-void  PROTO_feedByte(uint8 byte);                     /* feed one byte from ESP UART */
+void  PROTO_feedByte(uint8 byte);                     /* CPU2: feed one byte from the WiFi UART */
+void  PROTO_handleCommand(uint8 cmd, const uint8 *data, uint8 len); /* CPU0: execute a validated command */
 ProtoResult PROTO_process(void);                      /* non-blocking pump, returns last dispatch result */
-void  PROTO_sendStatus(const ProtocolStatus *status); /* build status frame and send to ESP UART */
-boolean PROTO_sendBytes(const uint8 *data, uint32 len); /* raw write to ESP UART (for host bridge) */
+void  PROTO_sendStatus(const ProtocolStatus *status); /* build status frame and send to the WiFi UART (CPU2) */
+boolean PROTO_sendBytes(const uint8 *data, uint32 len); /* raw write to the WiFi UART (CPU2, for host bridge) */
 
 #endif
