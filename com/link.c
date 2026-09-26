@@ -144,12 +144,19 @@ static boolean link_snapshot(void)
  *                                            targets, doc 11 SS7: +100 is full
  *                                            speed, so the i16 narrows to the
  *                                            demo's sint8 with nothing lost) and
- *                                            for 0x50 DRIVE (v mm/s, omega per
- *                                            second). 0x50 needs the §11
- *                                            kinematics plus the closed speed
- *                                            loop to become wheel targets; with
- *                                            no decoder channel in this build it
- *                                            is refused rather than guessed at.
+ *                                            for 0x50 DRIVE (v mm/s, omega deg/s
+ *                                            per second), which link_driveSpeeds
+ *                                            mixes into two wheel percents and
+ *                                            forwards as SET_SPEED - CPU0's
+ *                                            ROBOT_cmdSetSpeeds already accepts
+ *                                            an arbitrary differential. The mix
+ *                                            normalises at 600 mm/s / 300 deg/s
+ *                                            (the joystick's full deflection,
+ *                                            c6_car assets_src/app.js) instead of
+ *                                            waiting for the SS11 kinematics in
+ *                                            physical units; the closed loop
+ *                                            still lives on CPU1 (motor targets
+ *                                            from CPU0 are percent x 10).
  *   SF_CID_DIAG   {u8 op, ...}               op 0x53 / 0x42, no consumer yet
  *   SF_CID_DPT    {u8 op, ...}               op 0x70..0x79,产测 not implemented
  * The last two go to CPU0 as op + remaining bytes, which is what the demo path
@@ -161,6 +168,12 @@ static boolean link_snapshot(void)
 /* v2 code for the joystick stream (doc 21 SS6.2). It is not in protocol.h,
  * which is the demo's UART command table and stops at 0x32. */
 #define LINK_OP_DRIVE           0x50u
+
+/* Full-deflection anchors of the joystick mix: 600 mm/s and 300 deg/s both
+ * normalise to 100 % (c6_car assets_src/app.js joyMove). Sign convention:
+ * w > 0 is CCW (left turn), so the right wheel gets the +w share. */
+#define LINK_DRIVE_V_FULL       600
+#define LINK_DRIVE_W_FULL       300
 
 static sint8 link_narrowPercent(uint16 raw)
 {
@@ -175,6 +188,38 @@ static sint8 link_narrowPercent(uint16 raw)
         value = -100;
     }
     return (sint8)value;
+}
+
+/* 0x50 DRIVE {v mm/s, w deg/s} -> {left,right} percent, the payload shape of
+ * SET_SPEED that CPU0 already executes. Arcade mix, clamped to +-100 per side
+ * so a full-speed-full-turn command pivots instead of wrapping. */
+static void link_driveSpeeds(sint16 v, sint16 w, uint8 *out)
+{
+    sint32 lPct;
+    sint32 rPct;
+
+    lPct = ((sint32)v * 100 / LINK_DRIVE_V_FULL) - ((sint32)w * 100 / LINK_DRIVE_W_FULL);
+    rPct = ((sint32)v * 100 / LINK_DRIVE_V_FULL) + ((sint32)w * 100 / LINK_DRIVE_W_FULL);
+
+    if (lPct > 100)
+    {
+        lPct = 100;
+    }
+    if (lPct < -100)
+    {
+        lPct = -100;
+    }
+    if (rPct > 100)
+    {
+        rPct = 100;
+    }
+    if (rPct < -100)
+    {
+        rPct = -100;
+    }
+
+    out[0] = (uint8)(sint8)lPct;
+    out[1] = (uint8)(sint8)rPct;
 }
 
 /* Queue one command for CPU0, with the e-stop bypassed ahead of the queue. */
@@ -260,7 +305,11 @@ static void link_dispatch(const SF_Frame *frame)
 
         if (op == LINK_OP_DRIVE)
         {
-            g_stats.cmdUnsupportedOp++;
+            uint8 speeds[2];
+
+            link_driveSpeeds((sint16)SF_getU16(&frame->payload[1]),
+                             (sint16)SF_getU16(&frame->payload[3]), speeds);
+            link_forward(PROTO_CMD_SET_SPEED, speeds, 2u);
             return;
         }
 

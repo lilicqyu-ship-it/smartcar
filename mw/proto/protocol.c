@@ -57,6 +57,11 @@ void PROTO_handleCommand(uint8 cmd, const uint8 *data, uint8 len)
     switch (cmd)
     {
     case PROTO_CMD_STOP:
+        /* Any driving command doubles as the heartbeat (doc 21 SS6.2 for
+         * 0x50): without this the 100 ms ROBOT watchdog keeps zeroing the
+         * wheel targets between commands of a joystick stream that arrives
+         * as SET_SPEED/DRIVE frames and never as an explicit 0x21. */
+        ROBOT_cmdHeartbeat();
         ROBOT_cmdStop();
         break;
 
@@ -68,10 +73,12 @@ void PROTO_handleCommand(uint8 cmd, const uint8 *data, uint8 len)
     case PROTO_CMD_FORWARD_RIGHT:
     case PROTO_CMD_ROTATE_LEFT:
     case PROTO_CMD_ROTATE_RIGHT:
+        ROBOT_cmdHeartbeat();
         ROBOT_cmdMotion(cmd);
         break;
 
     case PROTO_CMD_SET_SPEED:
+        ROBOT_cmdHeartbeat();
         if (len >= 2)
         {
             ROBOT_cmdSetSpeeds((sint8)data[0], (sint8)data[1]);
