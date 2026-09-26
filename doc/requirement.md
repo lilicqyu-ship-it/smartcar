@@ -1,15 +1,18 @@
 AURIX SmartDrive V1.0 产品需求与功能设计
 
-版本： V1.1
-平台： KIT-AURIX-TC275-LITE + 2×TB6612 + ESP32-C6 (esp-at) + 双直流电机
+版本： V1.2
+平台： KIT-AURIX-TC275-LITE + D24A 四路驱动板（双 TB6612 通道 A/B/C/D）+ ESP32-C6（自研固件，esp-at 仅作回退）+ 4×MG310 编码器减速电机（双轮差速布局）
 产品定位： Wi-Fi 双轮智能运动控制平台
+
+> 文档定位：本文件是**产品需求层**（做什么、验收标准）。软件设计基准是 [production-software-design.md](production-software-design.md)（SDD，当前 V1.2）——两者冲突时以 SDD 为准，本文件只描述需求与范围。
 
 变更记录：
 V1.1 — Wi-Fi 模块由 ESP8266 更换为 ESP32-C6（运行 Espressif 官方 esp-at AT 固件，AT 指令集向下兼容 ESP8266），接线详见 wiring.md
+V1.2 — **板间主链路 UART → SPI**（TC275 QSPI3 主机 ↔ C6 SPI2 从机，1 MHz 起 / 5 MHz 量产基线），UART 降级为调试控制台与回退通道；C6 固件改为自研（`c6_car` 工程），esp-at 退居回退；链路帧分为两段：板间 SF 帧 + 手机 v2 帧。详见 SDD §3.7/§6 与 [spi-link-design.md](spi-link-design.md)。文中 esp-at / UART 相关段落（§2 目标、§3 架构图、§5）描述的是 **V1.1 demo 现状**，保留作为回退通道与产线返工依据。
 
 1. 产品概述
 
-AURIX SmartDrive V1.0 是一个以 Infineon AURIX TC275 为实时运动控制核心、ESP32-C6 为 Wi-Fi 通信模块、两块 TB6612 为双电机驱动级的智能双轮差速运动控制平台。
+AURIX SmartDrive 是一个以 Infineon AURIX TC275 为实时运动控制核心、ESP32-C6 为 Wi-Fi 通信模块、D24A 四路驱动板（单板 4 通道 TB6612，J4=A/B、J6=C/D）驱动 4 个 MG310 减速电机的智能双轮差速运动控制平台（每侧 2 电机并联，差速转向）。
 
 核心设计原则：
 
@@ -31,7 +34,7 @@ Watchdog
 V1.0 实现以下核心能力：
 
 手机/PC 通过 Wi-Fi 控制机器人
-ESP32-C6 与 TC275 通过 UART 通信
+ESP32-C6 与 TC275 通过板间链路通信（V1.1 demo = UART 115200；V1.2 起量产主链路 = SPI，UART 降级为调试/回退，见 SDD §3.7）
 TC275 独立控制左右两个电机
 支持前进、后退、左右转向
 支持原地旋转
@@ -45,6 +48,9 @@ TC275 Watchdog 安全保护
 提供 Fault 状态
 预留编码器、IMU、毫米波雷达和 CAN 扩展能力
 3. 系统总体架构
+
+> 下图是 **V1.0 demo 现状**（架构示意，一图看懂分层）。量产目标态（三段：手机 WS ↔ C6 ↔ TC275 三核 ↔ 闭环伺服，含 SF 帧与 OTA/产测通道）见 SDD §3.2/§3.5。
+
                  手机 / PC
                      │
                   Wi-Fi
@@ -52,9 +58,9 @@ TC275 Watchdog 安全保护
                      ▼
               ┌─────────────┐
               │  ESP32-C6   │
-              │ Wi-Fi AT固件 │
+              │ Wi-Fi 接入层 │
               └──────┬──────┘
-                     │ UART
+                     │ SPI（V1.2 主链路；V1.0 demo 为 UART + esp-at）
                      ▼
           ┌─────────────────────┐
           │        TC275        │
@@ -93,11 +99,15 @@ F12	编码器闭环	V1.1
 F13	IMU	V2.0
 F14	IWR6843 毫米波雷达	V3.0
 
-> F09 说明：软件级看门狗已实现（F08 心跳 100 ms 超时停车、CPU1 电机算法 150 ms 目标失联保护、急停旁路）；CPU/安全**硬件**看门狗在调试期被显式关闭（Cpu0/1/2_Main.c），量产前必须重新启用并周期喂狗，详见 architecture.md §10。
+> F09 说明：软件级看门狗已实现（F08 心跳 100 ms 超时停车、CPU1 电机算法 150 ms 目标失联保护、急停旁路）；CPU/安全**硬件**看门狗在调试期被显式关闭（Cpu0/1/2_Main.c），量产前必须重新启用并周期喂狗，详见 SDD §7.2（看门狗链）与 §18 C8。
 5. Wi-Fi 功能设计
 5.1 ESP32-C6 工作模式
 
 V1.0 推荐使用 AP 模式。
+
+量产（V1.2 起）：C6 运行**自研固件**（同级工程 `c6_car/`，其模块级设计见 `c6_car/doc/`），承载 softAP/STA + Captive Portal + HTTP/WS 服务，与 TC275 之间走 SPI + SF 帧；安全逻辑全部留在 TC275，C6 挂死只导致停车。
+
+以下为 V1.0 demo 现状（esp-at 通道，保留作 R7 回退与产线返工）：
 
 ESP32-C6 模组运行 Espressif 官方 esp-at AT 固件（本工程对应 `C:\Code\TC275\AURIX-v1.10.36-workspace\esp-at`，target=esp32c6，module_esp32c6_default）。硬件使用 **ESP32-C6-DevKitC-1 V1.2** 开发板（ESP32-C6-WROOM-1 模组，8 MB flash，板载 USB-UART 桥 + 原生 USB 双 Type-C、5V→3.3V LDO）。ESP32-C6 为 2.4 GHz Wi-Fi 6 芯片（支持 BLE 5 / 802.15.4），其 AT 固件兼容 ESP8266 AT 指令集，原有初始化流程可直接复用。AT 口引脚、板载资源占用与接线详见 wiring.md。
 
@@ -115,7 +125,7 @@ Password:
  │ Wi-Fi (2.4G AP)
  ▼
 ESP32-C6
- │ UART1 (AT 透传)
+ │ SPI 主链路（demo：UART1 AT 透传）
  ▼
 TC275
 
@@ -127,7 +137,7 @@ Internet
 
 机器人可以独立运行。
 
-5.2 AT 初始化流程（TC275 通过 UART1 下发）
+5.2 AT 初始化流程（**V1.0 demo / esp-at 回退通道**，量产自研固件无此流程）
 
 | 步骤 | AT 指令 | 说明 |
 |---|---|---|
@@ -147,6 +157,17 @@ Internet
 - AT+CIPSEND 提示符、+IPD 帧格式与 ESP8266 一致，TC275 侧解析逻辑不变。
 - 若启用 AT+SYSSTORE=1，AP 配置会保存到 NVS，重启后仍生效。
 5.3 通信流程
+
+V1.2 量产（两段两帧，详见 SDD §6）：
+
+手机
+ ↓ Wi-Fi + WebSocket（v2 帧，≤30 Hz 指令 / 20 ms 遥测）
+ESP32-C6（自研固件：网络栈 + WS 服务 + bridge 字段映射）
+ ↓ SPI + SF 帧（TC275 QSPI3 主机拉取，握手寄存器 + IRQ）
+TC275（认证/心跳/安全状态机/闭环伺服全在此侧）
+
+V1.0 demo（esp-at 透明 TCP，保留为回退与产线返工）：
+
 手机
  ↓ Wi-Fi
 ESP32-C6 (esp-at 透明 TCP)
@@ -647,6 +668,9 @@ Runtime Counter
           ▼                 ▼
        Left Motor        Right Motor
 30. 推荐工程目录
+
+> 本节与 §31 是 **V1.0 demo 目录/数据流快照**（历史上下文）。量产目录以 SDD §3.4 为准（`app/ rt/ mw/ bsp/ com/ test/` 分层 + `mw/sf`、`com/link.c`）。
+
 AURIX_SmartDrive_V1
 │
 ├── Application
@@ -751,6 +775,8 @@ AURIX_SmartDrive_V1
  Reset Reason 记录
  Emergency Stop
 33. 产品版本路线
+
+> **口径更新（V1.2）**：本节是 demo 期路线。**编码器已到货且接线方案定稿，闭环速度控制已从 V1.1 提前进 V1.0 量产范围**（SDD §1.2 第 1 条、§5.1/§5.2）；量产阶段的权威划分见 SDD §15 里程碑（M0–M4），IMU/雷达等仍按下述感知层顺序推进。
 V1.0 — Wi-Fi 遥控
 TC275
 +

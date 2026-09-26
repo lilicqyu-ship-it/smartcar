@@ -1,10 +1,10 @@
-# AURIX SmartDrive 接线图（TC275 + ESP32-C6 + 2×TB6612）
+# AURIX SmartDrive 接线图（TC275 + ESP32-C6 + D24A 四路驱动板）
 
-版本：V1.1（Wi-Fi 模块由 ESP8266 更换为 ESP32-C6，运行 esp-at AT 固件）
+版本：V1.3（2026-09-26：板间主链路按量产设计改为 **SPI（§9）**，原 esp-at UART AT 通道（§2）降级为调试控制台/回退链路；驱动板为轮趣 D24A 四路稳压模块，2026-09-26 按原理图 REV1.0 核对）
 
-配套文档：requirement.md（产品需求 V1.1，第 5 章为 ESP32-C6 AT 设计）
+配套文档：requirement.md（产品需求 V1.1）、[production-software-design.md](production-software-design.md)（量产 SDD V1.2）、[spi-link-design.md](spi-link-design.md)（SPI 链路详细设计）
 
-ESP32-C6 固件工程：`C:\Code\TC275\AURIX-v1.10.36-workspace\esp-at`（target = esp32c6，配置 module_esp32c6_default）
+ESP32-C6 固件工程：**自研** `C:\Code\TC275\AURIX-v1.10.36-workspace\c6_car`（ESP-IDF）；`esp-at` 工程仅作 UART 回退参考
 
 ESP32-C6 硬件板卡：**ESP32-C6-DevKitC-1 V1.2**（ESP32-C6-WROOM-1/-1U 模组，8 MB flash，板载 5V→3.3V LDO、USB-UART 桥 + 原生 USB 双 Type-C 口、BOOT/RST 按键、GPIO8 地址彩灯）
 
@@ -30,18 +30,14 @@ ESP32-C6 硬件板卡：**ESP32-C6-DevKitC-1 V1.2**（ESP32-C6-WROOM-1/-1U 模�
   └───────────────┘     │  GTM PWM 20kHz    方向 GPIO   │
                         │  P21.0 P21.3      P21.2~5    │
      电池(2S~3S)         │  P00.0 P00.8      P00.x P22.3│
-        │               └──────────┬──────────┬────────┘
-        ├──► VM ──────────────────►│          │
-        ├──► DC-DC 降压 5V ≥2A ──► 5V(DevKit J1-14) + kit X302    ▼          ▼
-        │                        ┌──────────┐  ┌──────────┐
-        └──► GND(全系统共地)      │ TB6612#1 │  │ TB6612#2 │
-                                 │ A:电机A   │  │ A:电机C   │
-                                 │ B:电机B   │  │ B:电机D   │
-                                 └────┬─────┘  └────┬─────┘
-                                      │AO1/AO2→电机A │AO1/AO2→电机C
-                                      │(前轮)        │(后轮)
-                                      │BO1/BO2→电机B │BO1/BO2→电机D
-                                      │(后轮)        │(前轮)
+        │               └──────────┬──────────────────┘
+        ├──► VM(→D24A VIN) ───────►│
+        ├──► DC-DC 降压 5V ≥2A ──► 5V(DevKit J1-14) + kit X302      ▼
+        │                        ┌────────────────────┐
+        └──► GND(全系统共地)      │ D24A 四路驱动板     │
+                                 │ J4: A=电机A B=电机B│── AO/BO → 同侧两轮电机
+                                 │ J6: A=电机C B=电机D│── CO/DO → 另一侧两轮电机
+                                 └────────────────────┘   (编码器 E1~E4 见 §8)
 ```
 
 Mermaid 版（支持的查看器可渲染）：
@@ -56,24 +52,26 @@ flowchart LR
     end
     ESP[ESP32-C6 esp-at<br/>UART1: RX=GPIO6 TX=GPIO7<br/>115200 8N1]
     PHONE((手机/PC<br/>Wi-Fi AP 8080))
-    DRV1[TB6612 #1<br/>A=电机A前 B=电机B后]
-    DRV2[TB6612 #2<br/>A=电机C后 B=电机D前]
+    DRV[D24A 四路驱动板<br/>J4=电机A/B J6=电机C/D<br/>编码器 E1~E4 见 §8]
     BAT[电池 VM 6.5~12V<br/>DC-DC 5V ≥2A → DevKit J1-14 + kit X302]
 
     PHONE -- Wi-Fi 2.4G --> ESP
     ASC1 -- TX→RX / RX→TX --> ESP
     ASC0 --> DBG[X4 micro-USB<br/>供电+DAS+虚拟COM]
-    PWM --> DRV1
-    PWM --> DRV2
-    DIR --> DRV1
-    DIR --> DRV2
-    BAT --> DRV1
-    BAT --> DRV2
+    PWM --> DRV
+    DIR --> DRV
+    BAT --> DRV
 ```
+
+> **V1.3 现状标注**：上图的 `ASCLIN1 ↔ GPIO6/7` UART 线已**不再是主链路**，仅作 C6 调试控制台与回退通道；量产主链路为 **TC275 QSPI3 主机 ↔ C6 SPI2 从机 + IRQ**，接线见 §9。编码器 8 线见 §8（尚未实施，待确认）。
 
 ---
 
-## 2. TC275 ↔ ESP32-C6（核心变更点，替代原 ESP8266 接线）
+## 2. TC275 ↔ ESP32-C6（UART 通道：V1.3 起降级为调试控制台 / 回退链路）
+
+> **状态变更（V1.3）**：本节描述的 ASCLIN1 ↔ C6 UART 接线**保留不拆**，用途改为 ①C6 自研固件的 115200 调试控制台，②SPI 主链路（§9）波形兼容验证（G1）失败时的回退通道。引脚与流控信息仍按 esp-at 时代记录，供返工查阅。
+>
+> **已知不一致（待随 C6 固件改造一并消除）**：`c6_car/components/c6_link/Kconfig` 里 `C6_LINK_TX_GPIO default 10` / `C6_LINK_RX_GPIO default 11`，与本节记录的 **GPIO6(RX)/GPIO7(TX)** 不一致（Kconfig help 自注为"待 EE 评审的候选脚位矩阵"）。改为 SPI 后这两个配置项应删除，调试串口的脚位在 c6_car 里显式统一为 **GPIO6/7**（与板端 J1-5/J1-6 实物接线一致）。
 
 ESP32-C6 esp-at 固件的 AT 通道是 **UART1**（不是 ESP8266 的 UART0），默认引脚如下（来自 esp-at `docs/en/Get_Started/Hardware_connection.rst` ESP32-C6 章节）。DevKitC-1 排针位置见官方 User Guide 引脚图（引脚号以板端丝印为准）：
 
@@ -84,7 +82,7 @@ ESP32-C6 esp-at 固件的 AT 通道是 **UART1**（不是 ESP8266 的 UART0）�
 | GND | — | GND | J1-15 | **必须共地** |
 | — | — | 5V 供电 | J1-14（5V） | 车载 DC-DC 5V（与 kit 共用 ≥2A 轨），见 §5 |
 
-> AT 串口用 ASCLIN1：TX=**P15.0**、RX=**P15.1**（iLLD 符号 `IfxAsclin1_TX_P15_0_OUT` / `IfxAsclin1_RXA_P15_1_IN`）。曾在 V1.1 尝试改用 P11.12/P11.10（X1-32/34），联调无 RX 响应，已改回 P15.0/P15.1。注意 X1 上印着 `RXD1/TXD0` 的 P11.9/P11.3 是片上以太网 MII 信号，**不是**串口，勿混用。
+> AT 串口用 ASCLIN1：TX=**P15.0**、RX=**P15.1**（iLLD 符号 `IfxAsclin1_TX_P15_0_OUT` / `IfxAsclin1_RXA_P15_1_IN`）。物理位置在板载 **mikroBUS 插座：pin13=TX(P15.0)、pin14=RX(P15.1)**（官方手册 Figure 5，二者不在 X1/X2 上）。曾在 V1.1 尝试改用 P11.12/P11.10（X1-32/34），联调无 RX 响应，已改回 P15.0/P15.1。注意 X1 上印着 `RXD1/TXD0` 的 P11.9/P11.3 是片上以太网 MII 信号，**不是**串口，勿混用；P11.10 还是 Shield2Go 2 的 CS 复用位，插 S2G 板时会冲突。
 
 > J1-1 的 3V3 是板载 LDO 的**输出**脚：采用 5V 供电方案时请勿再从外部向 3V3 灌电。
 
@@ -121,35 +119,40 @@ ESP32-C6 esp-at 固件的 AT 通道是 **UART1**（不是 ESP8266 的 UART0）�
 
 ---
 
-## 3. TC275 ↔ TB6612 #1（电机 A / B，同侧轮，代码 motor.c）
+## 3. TC275 ↔ D24A 控制接线（J4 = 电机 A/B，同侧两轮；代码 motor.c）
 
-TB6612 驱动板引脚 ↔ TC275：
+驱动板为轮趣 **D24A**（双 TB6612 四通道 + 板载稳压，原理图 REV1.0 2023-03-21）：逻辑供电**板载自产**（VIN→5V/3V3，无需外接 VCC）；控制排针 **J4**（电机 A/B + STBY + 3V3 + 编码器 E1/E2）、**J6**（电机 C/D + 编码器 E3/E4 + ADC 电池分压）。
 
-| TB6612 #1 | TC275 引脚 | 功能 |
-|---|---|---|
-| PWMA | P21.0（GTM ATOM2_4 / TOUT51） | 电机A PWM，20 kHz |
-| AIN1 | P21.4 | 电机A 方向 1 |
-| AIN2 | P21.5 | 电机A 方向 2 |
-| PWMB | P21.3（GTM ATOM4_1 / TOUT54） | 电机B PWM，20 kHz |
-| BIN1 | P21.2 | 电机B 方向 1 |
-| BIN2 | P22.3 | 电机B 方向 2 |
-| STBY | 3.3V（常使能） | 后续可改 GPIO 做硬件急停 |
-| AO1/AO2 | 电机A（同侧前轮） | |
-| BO1/BO2 | 电机B（同侧后轮） | |
+| D24A 信号 | J4 脚 | TC275 引脚 | X1 脚位 | 功能 |
+|---|---|---|---|---|
+| PWMA | J4-4 | P21.0 | X1-15 | 电机A PWM，20 kHz（ATOM2_4/TOUT51）|
+| AIN1 | J4-8 | P21.4 | X1-19 | 电机A 方向 1 |
+| AIN2 | J4-6 | P21.5 | X1-22 | 电机A 方向 2 |
+| PWMB | J4-3 | P21.3 | X1-20 | 电机B PWM，20 kHz（ATOM4_1/TOUT54）|
+| BIN1 | J4-7 | P21.2 | X1-17 | 电机B 方向 1 |
+| BIN2 | J4-5 | P22.3 | X1-18 | 电机B 方向 2 |
+| STBY | J4-2 | 跳线到 J4-1（板载 3V3）| — | 常使能，同座相邻脚直接短接 |
+| 3V3 | J4-1 | —（本地）| — | 编码器参考电平/逻辑，勿外部灌电 |
 
-## 4. TC275 ↔ TB6612 #2（电机 C / D，另一侧轮）
+电机 A/B 线圈接 D24A 对应电机座的 AO1/AO2、BO1/BO2。
 
-| TB6612 #2 | TC275 引脚 | 功能 |
-|---|---|---|
-| PWMA | P00.0（GTM ATOM1_0 / TOUT9） | 电机C PWM，20 kHz |
-| AIN1 | P00.2 | 电机C 方向 1 |
-| AIN2 | P00.6 | 电机C 方向 2 |
-| PWMB | P00.8（GTM ATOM0_7 / TOUT17） | 电机D PWM，20 kHz |
-| BIN1 | P00.10 | 电机D 方向 1 |
-| BIN2 | P00.12 | 电机D 方向 2 |
-| STBY | 3.3V | |
-| AO1/AO2 | 电机C（后轮） | |
-| BO1/BO2 | 电机D（前轮） | |
+> **X1 丝印复用说明（已核对，无冲突）**：X1-17（MDC）、X1-18（SCLK）、X1-20（MDIO）丝印是 TC275 **片上以太网 ESC** 的 MII 复用位置，板上**无外部驱动电路**，作电机线安全（实车已验证）。
+
+## 4. TC275 ↔ D24A 控制接线（J6 = 电机 C/D，另一侧两轮）
+
+| D24A 信号 | J6 脚 | TC275 引脚 | X2 脚位 | 功能 |
+|---|---|---|---|---|
+| PWMC | J6-4 | P00.0 | X2-3 | 电机C PWM，20 kHz（ATOM1_0/TOUT9）|
+| CIN1 | J6-8 | P00.2 | X2-5 | 电机C 方向 1 |
+| CIN2 | J6-6 | P00.6 | X2-7 | 电机C 方向 2（兼驱动板载 **LED2**）|
+| PWMD | J6-3 | P00.8 | X2-9 | 电机D PWM，20 kHz（ATOM0_7/TOUT17）|
+| DIN1 | J6-7 | P00.10 | X2-11 | 电机D 方向 1 |
+| DIN2 | J6-5 | P00.12 | X2-13 | 电机D 方向 2 |
+| ADC | J6-1 | —（备用）| — | 电池电压分压输出，可接 AN 脚做低压遥测 |
+
+> **⚠ P00.0 双重身份（本次核对新发现）**：X2-3 丝印 `TXDCAN`——P00.0 同时接在板载 CAN 收发器 TLE9251 的 TXD 输入上。它现在是电机 C 的 PWM 输出：电气上是"输出→输入"并联，**不影响电机运行**，但板载 CAN 连接器会随 PWM 发出随机帧——**运行期间不要将外部 CAN 总线/设备接入板载 CAN 口**（也解释了为何该脚未被 iLLD ETH/CAN 示例占用）。X2-4（RXDCAN，收发器输出）未被工程使用，勿作普通输入用。
+>
+> **P00.6 兼 LED2**：电机 C 方向 2 翻转时板载 LED2 会亮/灭，属预期现象（输出同时驱动板载 LED 与 J6-6），无需处理。
 
 > 电机 B、C 在软件中做了方向翻转（motor.c `g_dirInvert`），接线按本表即可，无需交换电机线。
 
@@ -158,14 +161,12 @@ TB6612 驱动板引脚 ↔ TC275：
 ### 5.1 整车供电架构
 
 ```
-电池(2S~3S, TB6612 VM 建议 6.5~12V)
- ├──► TB6612 #1/#2 VM（电机电源，粗线）
+电池(2S~3S, D24A VIN 建议 6.5~12V)
+ ├──► D24A VIN（电机电源，粗线；逻辑 5V/3V3 由 D24A 板载稳压自产）
  ├──► DC-DC 降压 5V ≥2A ──┬──► TC275 LITE kit  X302(+5V)（见 §5.2）
  │                        └──► ESP32-C6-DevKitC-1 J1-14(5V)
  │                              └─ 板载 5V→3.3V LDO 给模组供电（J5 跳线保持短接）
  └──► GND（全系统共地）
-
-TB6612 VCC(逻辑) → 3.3V，可从 TC275 kit X1-2(VEXT) 取（见 §5.2 电流预算）
 ```
 
 ### 5.2 TC275 LITE kit 供电详解（依据官方 User Manual V1.1 §2.1）
@@ -193,10 +194,10 @@ TB6612 VCC(逻辑) → 3.3V，可从 TC275 kit X1-2(VEXT) 取（见 §5.2 电流
 | 负载 | 典型电流 |
 |---|---|
 | TC275 + FT2232（板载） | ~200–300 mA |
-| TB6612 ×2 的 VCC（仅逻辑，STBY 同接） | < 30 mA |
-| 余量给扩展 | ~700 mA |
+| ~~TB6612 逻辑 VCC~~ | D24A 板载稳压自供，**不再从 kit 取**（历史方案，仅当外接裸 TB6612 模块时才需 X1-2 VEXT 供逻辑） |
+| 余量给扩展（编码器上拉参考等） | ~700 mA |
 
-> 结论：TB6612 逻辑 VCC 从 X1-2(VEXT) 取是安全的；**电机功率一律走 VM**，绝不允许从 3.3V 轨取。ESP32-C6 **不要**从 kit 取电（它自己 5V→板载 LDO 独立供电），避免把 C6 的开关噪声和 1A 预算冲突压到 LDO G1 上。
+> 结论：**电机功率一律走 D24A VIN**，绝不允许从 kit 3.3V 轨取；ESP32-C6 **不要**从 kit 取电（它自己 5V→板载 LDO 独立供电），避免把 C6 的开关噪声和 1A 预算冲突压到 LDO G1 上。
 
 ### 5.3 ESP32-C6-DevKitC-1 供电要点
 
@@ -208,9 +209,9 @@ TB6612 VCC(逻辑) → 3.3V，可从 TC275 kit X1-2(VEXT) 取（见 §5.2 电流
 ### 5.4 接地与上电顺序
 
 ```
-全系统共地：电池负极 = TB6612 GND = kit X1-40/X2-40(GND) = DevKitC-1 GND(J1-15)
-上电顺序：先整车 DC-DC 5V（逻辑上电）→ 电池 VM（动力）；断电顺序相反。
-电机线、编码器线(将来)远离 C6 天线端（WROOM-1 板载天线在 J1 对侧），减少扰动。
+全系统共地：电池负极 = D24A GND = kit X1-40/X2-40(GND) = DevKitC-1 GND(J1-15)
+上电顺序：先整车 DC-DC 5V（逻辑上电）→ 电池 VIN（动力）；断电顺序相反。
+电机线、编码器线(接线见 §8)远离 C6 天线端（WROOM-1 板载天线在 J1 对侧），减少扰动。
 ```
 
 ## 6. 调试串口（TC275 侧，免外接 USB-UART）
@@ -235,3 +236,81 @@ kit 板载 **FT2232HL**，X4 micro-USB 一根线三件事：供电（桌面）�
 | 供电 | 3.3V ≥500mA | DevKitC-1 车载 5V（板载 LDO），与 kit 共用 ≥2A 轨，见 §5 |
 | 特有功能 | — | BLE 5 / 802.15.4 / Wi-Fi 6 TWT，为 V2.0 后扩展留余地 |
 | TC275 侧引脚 | P15.0/P15.1（旧） | P15.0（TX）/ P15.1（RX），不变（V1.1 曾迁到 P11.12/P11.10 后又改回） |
+
+## 8. 编码器接线（MG310 ×4，V1.1 闭环测速方案 —— 待确认后实施）
+
+### 8.1 信号源
+
+四个 **轮趣 MG310** 减速电机内置 **260 线霍尔 AB 正交编码器**，减速比 **1:20.409**。编码器为开漏输出、内部上拉到编码器自身 VCC；当前 VCC 取自板上 3V3 轨，实测 E1A 静态电平 **3.3V**，可直连 TC275，无需分压电阻。
+
+> ⚠️ 约束：编码器供电（D24A 电机 6pin 座的 5/6 脚）**不得改接 5V**，否则编码器输出摆幅抬到 5V，超出 TC275 IO 耐压（见 §5.2 板卡逻辑 3.3V 的警告）。
+
+刻度换算：轮轴每转脉冲 260 × 20.409 ≈ **5306**，×4 正交解码 ≈ **21225 计数/轮转**；电机 2000 rpm 时峰值 ≈ 43333 计数/s（约 43 计数/ms），1 kHz 软件采样会溢出，**必须用 GTM TIM 硬件正交（UDC 上下计数）**。换算式：`轮轴rpm ≈ Δ计数/ms × 2.827`。
+
+### 8.2 TC275 ↔ 编码器（GTM0 TIM 组 0，四对 UDC，全部落在 X2 连续 8 脚）
+
+D24A 板编码器引出（原理图已核对）：**J4**（电机 1/2）= E1A:J4-10、E1B:J4-12、E2A:J4-9、E2B:J4-11；**J6**（电机 3/4）= E3A:J6-10、E3B:J6-12、E4A:J6-9、E4B:J6-11。编码器 VCC 参考 = J4-1 的板载 3V3（禁 5V，见 §8.1）。
+
+| 电机 | 信号 | TC275 引脚 | X2 脚位 | GTM 通道（UDC 对）|
+|---|---|---|---|---|
+| 1（A）| E1A | P33.4 | X2-32 | TIM0_0（计数源）/ TIM0_1（方向）|
+| 1（A）| E1B | P33.5 | X2-33 | ↑ |
+| 2（B）| E2A | P33.6 | X2-34 | TIM0_2 / TIM0_3 |
+| 2（B）| E2B | P33.7 | X2-35 | ↑ |
+| 3（C）| E3A | P33.0 | X2-28 | TIM0_4 / TIM0_5 |
+| 3（C）| E3B | P33.1 | X2-29 | ↑ |
+| 4（D）| E4A | P33.2 | X2-30 | TIM0_6 / TIM0_7 |
+| 4（D）| E4B | P33.3 | X2-31 | ↑ |
+
+依据：iLLD `IfxGtm_PinMap.h` 的 `IfxGtm_TIM0_{0..7}_TIN{22..29}_P33_{0..7}_IN` 符号；X2-27 为板载电位器 AN0、X2-36~38 为 P33.8/9/10（Shield2Go 共享），28~35 恰好完整空闲。共地按 §5.4。
+
+UDC 配对规则：偶数通道接 A 相（上下计数源）、奇数通道接 B 相（方向选择），四对同属 GTM0 TIM 组 0，配置一致。
+
+### 8.3 方案选型依据（为何不用 GPT12）
+
+`production-software-design.md` 早期设想 GPT12 增量编码块 ×4，但本工程只经 X1/X2 排针取信号，实测 pinmap：GPT12 各块 INA/INB/EUD 主要落在 **P02.x / P10.x**（如 T3INA=P02.6、T3INB=P10.4），LITE kit 未引出这两组口；T5INA=P21.7 与 /TRST 复用。故 V1.1 采用 **GTM TIM UDC** 方案。
+
+实现注记：本地 iLLD（含 AURIX-Studio 工具链）**无 IfxEncoder 封装模块**，工程内 `IfxGtm_Tim_In` 亦不含 UDC 支持，需在 TIM 初始化中直接配置 `TIMCH[i].UDCCTRL` / `CLS` / `DUTC` 寄存器（或自写等价封装）。
+
+## 9. SPI 链路接线（V1.0 选定主链路：TC275 QSPI3 主机 ↔ C6 SPI2 从机）
+
+背景：C6 改自研固件（`c6_car`）后不再受 esp-at 约束，板间主链路从 UART 换向 **SPI**。拓扑与安全模型沿用量产 SDD §3.7：TC275 = 唯一时序主人（提供 SCLK 与硬件 CS），C6 = `spi_slave_hd` 从机 + 1 根 IRQ 握手线；C6 死机只会导致"主机事务超时 → 判失联 → 受控停车"，不可能导致失控。链路层帧为**新定 SF 帧**（4 字节对齐、段内多帧、FRAG 位），事务模型/寄存器映射/验证门禁见 [spi-link-design.md](spi-link-design.md)。
+
+### 9.1 接线表（TC275 QSPI3 主 ↔ ESP32-C6 SPI2 从机 HD）
+
+| 信号 | TC275 引脚 | X1 脚位 | 方向 | ESP32-C6 | DevKitC-1 位置 |
+|---|---|---|---|---|---|
+| SCLK | P33.11 | X1-3 | 主→从 | GPIO19 | J3-9 |
+| MOSI（主发 MTSR） | P33.12 | X1-4 | 主→从 | GPIO18 | J3-10 |
+| MISO（主收 MRST） | P33.13 | X1-5 | 从→主 | GPIO20 | J3-8 |
+| CS（SLSO5） | P23.4 | X1-12 | 主→从 | GPIO23 | J3-5 |
+| HANDSHAKE（从忙/数据就绪） | P23.0 | X1-8 | 从→主 | GPIO21 | J3-7 |
+| GND | GND | X1-40/X2-40 | — | GND | J3-1/12/15 |
+
+```
+ TC275 (QSPI3 主, X1 侧)                ESP32-C6-DevKitC-1 (SPI 从, J3 侧)
+ X1-3  P33.11 SCLK    ────────────────►  GPIO19 SCLK   J3-9
+ X1-4  P33.12 MTSR    ────────────────►  GPIO18 MOSI   J3-10
+ X1-5  P33.13 MRST    ◄────────────────  GPIO20 MISO   J3-8
+ X1-12 P23.4  SLSO5   ────────────────►  GPIO23 CS     J3-5
+ X1-8  P23.0  GPIO中断◄────────────────  GPIO21 HS     J3-7
+ GND    ──────────────────────────────────  GND（必须共地）
+```
+
+依据与冲突检查：
+- TC275 侧符号（`IfxQspi_PinMap.h:160,194,226,287`）：`IfxQspi3_SCLK_P33_11_OUT`、`IfxQspi3_MTSR_P33_12_OUT`、`IfxQspi3_MRST_P33_13_OUT`、`IfxQspi3_SLSO5_P23_4_OUT`；P33.11/12/13、P23.0/P23.4 均在 X1 空闲清单（§8 之外），**与编码器 8 线（P33.0~7）零交集**。注意 QSPI3 另有 `SLSO7_P33_7`、`SLSO2_P33_8`、`SLSO11_P33_10` 等备选 CS 脚，**不得改用 P33.7**（已被编码器 E1B 占用），本表固定用 P23.4。
+- C6 侧脚位取自 `esp-at/main/interface/spi/Kconfig` 的 C6 分支默认值（该工程实测可用），自研固件经 GPIO 矩阵同样可用；GPIO18~23 无板载复用、非 strapping 脚。C6 从机半双工能力已核：`soc/esp32c6/include/soc/soc_caps.h:352` `SOC_SPI_SUPPORT_SLAVE_HD_VER2 = 1`。
+- **孔位复核项**（落地前 1 分钟）：X1 的 P23.0/P23.4 孔位号（本表记 X1-8 / X1-12）与 J3 脚号以板端丝印/官方手册 Figure 4 再对一次；脚位本身无冲突。
+- 3.3V 逻辑两端一致，直连；线尽量短（≤20 cm）、SCLK 就近共地回流；**时钟档位 1 MHz（G1 波形门禁）→ 2 → 5（量产基线）→ 10/20（探索）**，每档 30 min CRC 误码判据，不做运行时自适应降速（C6 `spi_slave_hd` 上限 20 MHz）。
+- IRQ（GPIO21）为**开漏 + 10 kΩ 上拉到 3V3**，TC275 侧 P23.0 配 IOM 上升沿中断，且 ISR 声明在 **0 号向量表**（SDD §18 C1）。
+- UART 链路（§2）**保留为调试备份通道**：自研固件里继续起一个 115200 控制台即可，二者不冲突（GPIO6/7 与 GPIO18~23 无重叠）。
+
+### 9.3 实施要点（对应改动清单见 spi-link-design.md §7）
+
+- **事务模型**：半双工定长事务，前导相位 `CMD(8)+ADDR(8)+DUMMY(8)`，数据相位长度取 4 的倍数（从机硬约束）。C6 用 `spi_slave_hd_write_buffer()` 发布 6 个 u32 握手寄存器（`SF_READY/SF_TX_PENDING/SF_RX_ROOM/SF_ALIVE/SF_ERRSTAT/SF_CMDRSP`），主机轮询后决定读/写；**寄存器读非原子 → 连读两次取相同值**（Espressif 官方 `segment_mode` 例子的既有规范）。
+- **谁发起**：TC275 主机是唯一发起方。C6 有帧待出 → 更新寄存器并拉 IRQ → TC275 引脚中断即刻开读事务；无 IRQ 时 2 ms 保活轮询兜底。遥测方向由 TC275 按 20 ms 周期主动写。代价：命令下行最坏时延 = 轮询周期 + 事务 ≈ 2.3 ms（50 ms 预算内）。
+- **帧**：LINK 段用新定 **SF 帧**（`0x5A | VER | TYPE | SEQ | FLAGS | LEN(u16LE) | CID | 载荷 | CRC16`，段末补 0 到 4 倍数，FLAGS.FRAG 表分片）；手机 WS 段仍是 v2 帧，C6 bridge 做字段级映射；OTA CHUNK 上限 62 B → 240 B。
+- **TC275 代码**：新增 `com/link.c`（QSPI3 主机 + IOM 中断 + 事务泵）、`com/spi_hal_pins.c`、`mw/sf/`；`Middleware/wifi_at.c` 退到 `USE_WIFI_AT` 开关后（回退通道）。
+- **C6 代码**：`components/c6_link/link.c` 传输层 UART → `spi_slave_hd`（含删除 0x44 波特率协商状态机与 `C6_LINK_TX/RX_GPIO`），`link.h` 对外 API 签名不变，`bridge/ota_relay` 不感知物理层。
+- **唯一硬风险（R7）**：AURIX QSPI 没有命令/地址相位概念、iLLD 主驱动亦无封装，前导相位只能用数据字节模拟；Espressif HD 从机是否接受该波形**必须台架先验**（G1：两台 ESP32 跑官方例程抓参考波形逐位比对）。退路：① C6 自写寄存器级从机驱动（纯数据相位 + 固定段长）；② 回退 §2 的 UART 链路。
+- 若后续要双/四线提速，还需补 WP/HOLD 两脚（C6 GPIO14/15，TC275 需 QSPI3 备用数据线方案），本版不考虑。

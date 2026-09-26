@@ -1,13 +1,17 @@
-# 软件架构与技术参考
+# 软件架构与技术参考（**当前代码现状 / demo V2.0**）
 
-适用版本：V2.0（三核分区 + Wi-Fi 模块为 ESP32-C6 / esp-at）。本文是信息型参考，按“查得到”组织；设计动机见文末「设计决策」。接线与引脚电气细节在 [wiring.md](wiring.md)，产品需求在 [requirement.md](requirement.md)。
+> **文档定位（重要）**：本文档描述**工作区里现在跑的这套代码**（esp-at + UART 链路、开环 PWM），用于排障、回归与理解现状。量产目标态的设计基准是 [production-software-design.md](production-software-design.md)（SDD，当前 V1.2）——**两者不一致时以 SDD 为准**，本文不描述待实现内容。
+> 本文唯一不可从代码推导、且已被 SDD 吸收的结论是 §3 的**中断向量表/优先级铁律**，权威版本见 **SDD §18**；本文不再维护该条。
+> 历史版本记录：V2.0 = 三核分区 + Wi-Fi 模块换为 ESP32-C6（esp-at）。板间链路已在 V1.2 决策改为 SPI（SDD §3.7），本文相关段落（§1/§5/§6/§8）仍是 UART 口径，属现状描述。
+
+本文是信息型参考，按"查得到"组织；设计动机见文末「设计决策」。接线与引脚电气细节在 [wiring.md](wiring.md)，产品需求在 [requirement.md](requirement.md)。
 
 ## 1. 核间分区（TC275 三核）
 
 | 核 | 运行环境 | 职责 | 入口 |
 |---|---|---|---|
 | CPU0 | FreeRTOS（单核内核，仅此核跑调度器） | 控制任务：命令执行、安全状态机、状态发布、日志桥、控制台 UART、LED | Cpu0_Main.c → `core0_main` |
-| CPU1 | 裸机 1 kHz 超循环 | 电机算法：斜率限幅、失联看门狗、急停刹车，驱动 GTM/TB6612 | Cpu1_Main.c → `core1_main` |
+| CPU1 | 裸机 1 kHz 超循环 | 电机算法：斜率限幅、失联看门狗、急停刹车，驱动 GTM/D24A | Cpu1_Main.c → `core1_main` |
 | CPU2 | 裸机超循环 | ESP32-C6 AT 链路：softAP+TCP 服务、协议解码、HTTP 控制接口 | Cpu2_Main.c → `core2_main` |
 
 规则：**FreeRTOS API 只允许 CPU0 调用**（移植层绑定 CPU0：STM0 产生 tick、上下文切换中断、CCPN 屏蔽均只作用于 CPU0）。CPU1/CPU2 的时基来自 `Bsp/stime.c`（读 STM0 自由计数，unsigned 回绕安全）。
@@ -26,7 +30,7 @@
 │             wifi_at.c/h   ESP32-C6 AT 驱动    (CPU2) │
 ├──────────────────────────────────────────────────────┤
 │ Bsp/     uart.c/h    ASCLIN0 调试串口        (CPU0)  │
-│          motor.c/h   GTM PWM+TB6612          (CPU1)  │
+│          motor.c/h   GTM PWM+D24A            (CPU1)  │
 │          stime.c/h   STM0 毫秒时基       (CPU1/CPU2) │
 ├──────────────────────────────────────────────────────┤
 │ FreeRtos/ + Configurations/FreeRTOSConfig.h  (CPU0)   │
@@ -50,7 +54,9 @@ ASCLIN0 中断（CPU0）：TX 优先级 8、RX 4、ER 12。FreeRTOS 内核中断
 
 **CPU1（裸机）**：无任务/中断，`MOTOR_ALGO_run()` 1 kHz 节拍（STM0 忙等）。
 
-**CPU2（裸机）**：`WIFI_main()` 超循环。ASCLIN1 中断：`wifiRxISR` 优先级 5、`wifiTxISR` 7、`wifiErISR` 13，`IFX_INTERRUPT(fn, 0, prio)` 声明且 `typeOfService = IfxSrc_Tos_cpu2`。注意：中断表三核共用（lsl 里 `__INTTAB_CPU0/1/2` 同址），Tasking lsl 只收集 0 号表的向量条目，所以即使 ISR 归 CPU2 也必须声明在 **0 号向量表**（目标核由 SRC 的 TOS 位决定）；写成 2 号表会被链接器以 unreferenced 删除，ISR 永远不进。优先级需避开 CPU0 已用的 1/2/4/8/12。
+**CPU2（裸机）**：`WIFI_main()` 超循环。ASCLIN1 中断：`wifiRxISR` 优先级 5、`wifiTxISR` 7、`wifiErISR` 13，`IFX_INTERRUPT(fn, 0, prio)` 声明且 `typeOfService = IfxSrc_Tos_cpu2`。
+
+> 为什么是 `0` 号表、优先级怎么分配、踩错的症状与验证方法 —— 见 **SDD §18 C1/C2**（权威版本，本文不再维护）。
 
 ## 4. 跨核通信（Middleware/xcore.c/h）
 
@@ -83,7 +89,7 @@ PC 上位机 ──TCP:8080──►                              │ GET /api/.
                 斜率限幅(±2/ms) → 失联 150 ms 看门狗 → estop 刹车
                                                      ▼
                                     motor.c → GTM ATOM PWM 20kHz
-                                    TB6612 #1(A/B) #2(C/D) → 4 电机
+                                    D24A 四路驱动板（J4=A/B · J6=C/D）→ 4 电机
 ```
 
 应答路径：HTTP 请求由 TC275 现场生成页面/JSON，经 `AT+CIPSEND=<id>,<len>` 回给手机，随后 `AT+CIPCLOSE`。
@@ -99,7 +105,9 @@ ATE0 → AT+CWMODE=2 → AT+CWSAP="AURIX-SmartDrive","12345678",11,3
 
 运行期：`+IPD,<id>,<len>` 二进制安全读取（先读 ASCII 头到 `:`，再读恰好 len 字节）；`CONNECT/CLOSED` 状态行维护 `g_clientConnected`。发送走 `AT+CIPSEND=0,<len>` → 等 `>` → 数据 → 等 `SEND OK`。调试输出经 xcore 日志环转 CPU0 控制台（ASCLIN0 属主是 CPU0，禁止跨核直接打印）。
 
-## 7. 自定义二进制协议参考（protocol.c/h）
+## 7. 自定义二进制协议参考（protocol.c/h，**demo 帧，已非任何链路的真源**）
+
+> 量产协议分两段：板间 LINK 段 = **SF 帧**（SDD §6.1a），手机 WS 段 = **v2 帧**（SDD §6.1b）。本节 `AA 55 CMD LEN DATA XOR-CRC` 只在当前代码里活着，用于回归对照与 esp-at 回退通道。
 
 ### 7.1 帧格式
 
@@ -152,18 +160,29 @@ ATE0 → AT+CWMODE=2 → AT+CWSAP="AURIX-SmartDrive","12345678",11,3
 | `GET /api/heartbeat` / `/api/status` | 仅刷新心跳/取状态 |
 | `GET /api/<其他>` | 视为非法 → 停车 |
 
-响应统一 JSON：`{"state":<u8>,"left":<-100..100>,"right":<..>,"heartbeat":0|1}`，内容取自 xcore 状态块（≤10 ms 旧），`Connection: close` 后主动 `AT+CIPCLOSE`。
+响应统一 JSON：`{"state":<u8>,"left":<-100..100>,"right":<..>,"heartbeat":0|1}`，内容取自 xcore 状态块（≤10 ms 旧）。响应头 `Connection: keep-alive`，回包走来源链路（`+IPD` 解析出的 link id），页面不再每请求重连（旧版 `Connection: close` + `AT+CIPCLOSE` 方案因拥塞已废弃，待烧录验证）。
 
 ## 9. 电机映射参考（motor.c，属主 CPU1）
 
 | 逻辑电机 | 位置 | PWM | IN1 | IN2 | 驱动 | 软件方向翻转 |
 |---|---|---|---|---|---|---|
-| MOTOR_A | 侧1 前 | P21.0 (ATOM2_4) | P21.4 | P21.5 | TB6612#1-A | 否 |
-| MOTOR_B | 侧1 后 | P21.3 (ATOM4_1) | P21.2 | P22.3 | TB6612#1-B | **是** |
-| MOTOR_C | 侧2 后 | P00.0 (ATOM1_0) | P00.2 | P00.6 | TB6612#2-A | **是** |
-| MOTOR_D | 侧2 前 | P00.8 (ATOM0_7) | P00.10 | P00.12 | TB6612#2-B | 否 |
+| MOTOR_A | 侧1 前 | P21.0 (ATOM2_4) | P21.4 | P21.5 | D24A J4-A | 否 |
+| MOTOR_B | 侧1 后 | P21.3 (ATOM4_1) | P21.2 | P22.3 | D24A J4-B | **是** |
+| MOTOR_C | 侧2 后 | P00.0 (ATOM1_0) | P00.2 | P00.6 | D24A J6-C | **是** |
+| MOTOR_D | 侧2 前 | P00.8 (ATOM0_7) | P00.10 | P00.12 | D24A J6-D | 否 |
 
 PWM 20 kHz，`MOTOR_setSpeed(id, -1000..+1000)`；robot 层 -100..+100 → ×10 后经 xcore 下发。轮侧映射（左=A+B，右=C+D）现在定义在 motor_algo.c。
+
+### 9.1 编码器映射（MG310 内置 260 线 AB 正交，方案定稿待实施，接线见 wiring.md §8）
+
+| 电机 | A 相 | B 相 | GTM0 TIM UDC 对 | 排针 |
+|---|---|---|---|---|
+| A（电机1） | P33.4 | P33.5 | TIM0_0 / TIM0_1 | X2-32/33 |
+| B（电机2） | P33.6 | P33.7 | TIM0_2 / TIM0_3 | X2-34/35 |
+| C（电机3） | P33.0 | P33.1 | TIM0_4 / TIM0_5 | X2-28/29 |
+| D（电机4） | P33.2 | P33.3 | TIM0_6 / TIM0_7 | X2-30/31 |
+
+硬件正交计数（×4 解码），≈21225 计数/轮转（减速比 1:20.409）；工程 iLLD 无 IfxEncoder 封装，需直写 TIM `UDCCTRL` 寄存器。测速读数归 CPU1 的 motor_algo 域。
 
 ## 10. 设计决策（解释）
 
@@ -180,7 +199,7 @@ PWM 20 kHz，`MOTOR_setSpeed(id, -1000..+1000)`；robot 层 -100..+100 → ×10 
 C6 只做 AT 透明 TCP 桥，不跑业务。好处：换任何 AT 模组代码零改动；控制逻辑与运动控制同处一个实时域，心跳超时、急停的执行不依赖协议栈之上再通信一次。代价：C6 无法独立提供页面，TC275 要处理 HTTP 文本（本实现只支持单行 GET 请求，够用且可控）。
 
 **为什么 V2.0 仍是开环 PWM，不上 PID？**
-没有编码器反馈，PID 无被控量可用。状态机输出的“速度”实际是占空比期望值；加编码器后在 CPU1 的 motor_algo 内替换实现即可，协议、xcore 与接线不变——这正是把算法独立成核内模块的原因之一。
+没有编码器反馈，PID 无被控量可用。状态机输出的“速度”实际是占空比期望值；加编码器后在 CPU1 的 motor_algo 内替换实现即可，协议、xcore 与接线不变——这正是把算法独立成核内模块的原因之一。V1.1 编码器硬件路线已定稿（MG310 内置 AB 编码器 → GTM0 TIM UDC 硬件计数，引脚映射见 §9.1 与 wiring.md §8），软件侧只替换 motor_algo 的反馈量来源。
 
 **为什么心跳 50 ms / 超时 100 ms？**
 容忍 1 次丢帧不误停车，2 次丢失（100 ms）必须停车——遥控车上电机制响应上限 0.1 s。HTTP 模式由页面 JS 以 50 ms 轮询 `/api/heartbeat` 实现，与二进制协议 `0x21` 语义一致。
@@ -194,4 +213,4 @@ C6 只做 AT 透明 TCP 桥，不跑业务。好处：换任何 AT 模组代码�
 **为什么 CPU1/CPU2 的调试打印不直接走 ASCLIN0？**
 iLLD ASC 驱动的软件 FIFO 与临界区只在属主核内互斥；两个核并发调用会踩 FIFO 状态。因此核间日志统一走 xcore 日志环，由属主 CPU0 落串口。
 
-**看门狗现状**：`Cpu*_Main.c` 目前显式关闭了 CPU/安全看门狗（调试期行为），量产化必须重新启用并在各核循环喂狗——这是 requirement.md F09 的已知未完成项。
+**看门狗现状**：`Cpu*_Main.c` 目前显式关闭了 CPU/安全看门狗（调试期行为），量产化必须重新启用并在各核循环喂狗——这是 requirement.md F09 的已知未完成项，目标态设计见 SDD §7.2 与 §18 C8。
