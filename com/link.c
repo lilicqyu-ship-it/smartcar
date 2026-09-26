@@ -50,6 +50,8 @@ static uint8        g_aliveValid;
 static uint32       g_aliveMs;
 static uint32       g_nextPollMs;
 static uint32       g_telSeq;            /* E2E counter of the telemetry stream */
+static uint8        g_resyncPending;     /* a fresh READY edge needs a SEQ resync
+                                          * handshake with the slave before TX   */
 static Link_Stats   g_stats;
 static Link_Health  g_health;           /* bench watch expression, see link_updateHealth */
 
@@ -447,6 +449,17 @@ static void link_setState(Link_State state)
     }
     else if (state == LINK_READY)
     {
+        /* Fresh READY edge (boot, or recovery from LOST). The two boards power
+         * up independently, so this master's TX SEQ counter and the slave's RX
+         * window are almost never aligned across a restart - the slave would
+         * reject a burst of frames until the numbers happen to fall inside the
+         * 32-frame window again (observed as the slave's seq= counter jumping).
+         * Ask the slave to drop its SEQ window (GEN RESET_LINK clears its
+         * seq_synced), then this side restarts its own SEQ from 0, so the very
+         * next frame re-locks the window cleanly. The GEN transaction is issued
+         * from link_cycle()'s safe point, not here, to avoid re-entering the
+         * pump from inside a state change. */
+        g_resyncPending = 1u;
         XCORE_logln("LINK up");
     }
     else
@@ -489,10 +502,11 @@ void LINK_init(SpiHal_ClockTier tier)
     g_txSeq  = 0u;
 
     SF_parserInit(&g_rxParser);
-    g_aliveValid = 0u;
-    g_aliveSeen  = 0u;
-    g_aliveMs    = 0u;
-    g_state      = LINK_DOWN;
+    g_aliveValid    = 0u;
+    g_aliveSeen     = 0u;
+    g_aliveMs       = 0u;
+    g_state         = LINK_DOWN;
+    g_resyncPending = 0u;    /* the first LINK_READY edge arms the resync */
 
     SPIHAL_init(tier);
     g_nextPollMs = STIME_nowMs();
@@ -538,6 +552,26 @@ static void link_cycle(void)
         g_aliveValid = 0u;
         link_setState(LINK_DOWN);
         return;
+    }
+
+    /* A fresh READY edge asked for a SEQ resync (link_setState). Do it before
+     * any data moves this cycle: tell the slave to drop its RX SEQ window
+     * (RESET_LINK clears its seq_synced), and only once that receipt is in do
+     * we restart our own TX SEQ from 0 - so the first frame after this re-locks
+     * the slave's window instead of landing outside it. If the handshake does
+     * not complete (slave busy / not answering yet), leave the counters alone
+     * and retry next cycle; never restart TX SEQ without the slave having
+     * cleared, or the two ends desynchronise the other way. */
+    if (g_resyncPending != 0u)
+    {
+        if (LINK_gen(LINK_GEN_RESET_LINK, 0u, LINK_GEN_TIMEOUT_MS) == LINK_GEN_OK)
+        {
+            g_txSeq = 0u;
+            g_telSeq = 0u;
+            SF_parserInit(&g_rxParser);
+            g_resyncPending = 0u;
+        }
+        return;      /* resume normal traffic next cycle on clean counters */
     }
 
     pending = link_reg(g_reg, LINK_REG_TX_PENDING);
@@ -772,15 +806,74 @@ void LINK_getHealth(Link_Health *health)
  *   hwErr       QSPI error-interrupt latches
  *   spiErr      link-level transactions that did not complete cleanly
  *   crc/seq     SF frames the codec rejected on CRC / sequence
- */
+ *   wrSeg       WRDMA segments pushed to the slave (compare to the slave's own
+ *               wrdma counter: if this climbs but the slave's does not, the
+ *               write-direction preamble is not being parsed)
+ *   txFrames    SF frames actually put on the wire (telemetry + commands)
+ *   txQFull     LINK_send() refused because the TX queue was full (backpressure)
+ *   rdSeg       RDDMA segments taken from the slave (compare to the slave's rddma)
+ *
+ * Printing policy (bench log hygiene): a healthy idle link would otherwise emit
+ * the same line every LINK_DIAG_PERIOD_MS forever and bury the one line that
+ * matters. So a full line is emitted only when something a human cares about
+ * moved - the link state, the wire clock, or any error/fault counter
+ * (timeout / hwErr / spiErr / crc / seq) - and, failing that, one keep-alive
+ * line every LINK_DIAG_HEARTBEAT calls so a silent console still proves CPU2 is
+ * pumping. An error line is tagged "LINKERR=" so it stands out in the stream;
+ * a steady-state line stays "LINKDBG=". Volatile-by-design fields (irq level,
+ * sinceAlive, the free-running transaction count) are reported but never by
+ * themselves trigger a line, otherwise nothing would ever be suppressed. */
+#define LINK_DIAG_HEARTBEAT   10u   /* keep-alive: one forced line per N calls */
+
 void LINK_diagPrint(void)
 {
-    uint32 vals[14];
+    static uint32  s_prevState   = 0xFFFFFFFFu;
+    static uint32  s_prevClockHz = 0xFFFFFFFFu;
+    static uint32  s_prevReady   = 0xFFFFFFFFu;
+    static uint32  s_prevErrSum  = 0xFFFFFFFFu;
+    static uint32  s_sinceForced = LINK_DIAG_HEARTBEAT;
 
-    vals[0]  = (uint32)g_health.state;
+    uint32 vals[18];
+    uint32 state;
+    uint32 clockHz;
+    uint32 ready;
+    uint32 errSum;
+    uint32 faults;
+    boolean changed;
+    boolean isError;
+
+    state   = (uint32)g_health.state;
+    clockHz = g_health.clockHz;
+    ready   = link_reg(g_reg, LINK_REG_READY);
+
+    /* Fault counters that must stay 0 on a healthy link; their sum is the change
+     * detector for "something went wrong since last time". */
+    faults = g_health.spi.timeouts + g_health.spi.hwErrors
+           + g_health.stats.spiErrors + g_health.stats.crcErrors
+           + g_health.stats.seqErrors;
+    /* Slave-reported error bitfield folds in too, so a slave-side fault surfaces
+     * even when the master's own counters are quiet. */
+    errSum = faults + g_health.slaveErrStat;
+
+    changed = (boolean)((state != s_prevState) || (clockHz != s_prevClockHz)
+                        || (ready != s_prevReady) || (errSum != s_prevErrSum));
+
+    s_sinceForced++;
+    if (!changed && (s_sinceForced < LINK_DIAG_HEARTBEAT))
+    {
+        return;      /* steady state: suppress the duplicate line */
+    }
+    s_sinceForced = 0u;
+
+    s_prevState   = state;
+    s_prevClockHz = clockHz;
+    s_prevReady   = ready;
+    s_prevErrSum  = errSum;
+
+    vals[0]  = state;
     vals[1]  = (SPIHAL_irqAsserted() != FALSE) ? 1u : 0u;
-    vals[2]  = g_health.clockHz;
-    vals[3]  = link_reg(g_reg, LINK_REG_READY);
+    vals[2]  = clockHz;
+    vals[3]  = ready;
     vals[4]  = g_health.txPending;
     vals[5]  = g_health.rxRoom;
     vals[6]  = g_health.sinceAliveMs;
@@ -791,7 +884,17 @@ void LINK_diagPrint(void)
     vals[11] = g_health.stats.spiErrors;
     vals[12] = g_health.stats.crcErrors;
     vals[13] = g_health.stats.seqErrors;
+    /* Transmit-side counters: whether telemetry is really reaching the slave.
+     * wrSeg is the one to compare against the slave's own wrdma counter. */
+    vals[14] = g_health.stats.wrSegments;
+    vals[15] = g_health.stats.txFrames;
+    vals[16] = g_health.stats.txQueueFull;
+    vals[17] = g_health.stats.rdSegments;
 
-    XCORE_logu("LINKDBG=", vals, 14u);
+    /* Tag the line so a fault jumps out of the stream; the field order is
+     * identical under both labels so any parser keys off the values, not the
+     * tag. */
+    isError = (boolean)(errSum != 0u);
+    XCORE_logu(isError ? "LINKERR=" : "LINKDBG=", vals, 18u);
 }
 

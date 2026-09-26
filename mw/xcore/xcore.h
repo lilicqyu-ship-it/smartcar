@@ -57,7 +57,7 @@ void XCORE_logService(void);              /* CPU0 only: print pending lines */
  * low-rate bench observation (e.g. the SPI link state), so the value count is
  * capped and a line that would not fit the ring is dropped whole, exactly like
  * XCORE_log(). Pass n = 0 to print the label alone. */
-#define XCORE_LOG_MAX_VALS   16u
+#define XCORE_LOG_MAX_VALS   20u
 void XCORE_logu(const char *label, const uint32 *vals, uint8 n);
 
 #endif

@@ -5,8 +5,10 @@
 #include <string.h>
 
 #define XCORE_CMD_QUEUE_LEN   8
-#define XCORE_LOG_RING_SIZE   1024U    /* power of two */
-#define XCORE_LOG_LINE_MAX    128
+#define XCORE_LOG_RING_SIZE   2048U    /* power of two; holds several long lines */
+/* One LINKDBG line is "LINKDBG=" + up to XCORE_LOG_MAX_VALS decimal u32 groups
+ * (11 chars each) = ~228 chars, so the line buffer must clear that. */
+#define XCORE_LOG_LINE_MAX    256
 
 typedef struct
 {
