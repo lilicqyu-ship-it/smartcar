@@ -24,20 +24,60 @@
  * CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *********************************************************************************************************************/
-/* CPU2 - bare-metal core: ESP32-C6 AT link (softAP + TCP server + HTTP /
- * binary protocol bridge). Owns ASCLIN1; its interrupts are routed here.
- * No FreeRTOS API may be used here - the kernel runs on CPU0. */
+/* CPU2 - bare-metal core: the board link to the ESP32-C6.
+ * Two builds share this file:
+ *   default      : demo path, AT firmware on ASCLIN1 (P15.0/P15.1) + the AA 55
+ *                  byte protocol. Kept until gate G1 passes on the bench.
+ *   USE_SPI_LINK : production path, SF frames over QSPI3 half duplex
+ *                  transactions (doc/20-design/22-link-spi-design.md).
+ * ASCLIN1 and its interrupts belong to this core; no FreeRTOS API may be used
+ * here - the kernel runs on CPU0. */
 #include "Ifx_Types.h"
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
 #include "stime.h"
 #include "protocol.h"
+
+#ifdef USE_SPI_LINK
+#include "com/link.h"
+#include "xcore.h"
+
+/* 22 SS6: telemetry is aggregated at 20 ms. */
+#define LINK_TELEMETRY_PERIOD_MS  20u
+
+static void link_sendTelemetry(void)
+{
+    ProtocolStatus status;
+    uint8          tel[6];
+
+    XCORE_statusGet(&status);
+
+    /* Same six fields in the same order as the demo's 0x40 status reply, so the
+     * C6 bridge maps this 1:1 onto the phone facing v2 frame (22 SS5.5). Built
+     * byte by byte instead of casting the struct: wire order must not depend on
+     * a compiler's padding decisions. */
+    tel[0] = status.state;
+    tel[1] = (uint8)status.leftSpeed;
+    tel[2] = (uint8)status.rightSpeed;
+    tel[3] = status.heartbeatOk;
+    tel[4] = status.faultCode;
+    tel[5] = status.emergencyStop;
+
+    /* A refused send is counted in Link_Health.stats.txQueueFull, not lost. */
+    (void)LINK_send(SF_TYPE_TEL, SF_CID_TELEMETRY, tel, (uint8)sizeof(tel));
+}
+#else
 #include "wifi_at.h"
+#endif
 
 extern IfxCpu_syncEvent cpuSyncEvent;
 
 void core2_main(void)
 {
+#ifdef USE_SPI_LINK
+    uint32 nextTelMs;
+#endif
+
     IfxCpu_enableInterrupts();
 
     /* !!WATCHDOG2 IS DISABLED HERE!!
@@ -51,15 +91,37 @@ void core2_main(void)
 
     STIME_init();
 
+#ifdef USE_SPI_LINK
+
+    /* First rung of the clock ladder: gate G1 is a waveform compatibility test,
+     * so it starts at 1 MHz and only climbs on measured error rates (22 SS8). */
+    LINK_init(SPIHAL_CLK_1M);
+    nextTelMs = STIME_nowMs() + LINK_TELEMETRY_PERIOD_MS;
+
+    while (1)
+    {
+        LINK_main();                       /* pump: registers, read, write      */
+
+        if ((sint32)(STIME_nowMs() - nextTelMs) >= 0)
+        {
+            nextTelMs += LINK_TELEMETRY_PERIOD_MS;
+            link_sendTelemetry();          /* keeps WRDMA traffic flowing for G5 */
+        }
+    }
+
+#else
+
     /* Initialize the binary protocol parser (byte stream comes from WiFi) */
     PROTO_init();
 
     /* Initialize the ESP32-C6 AT module on ASCLIN1 (P15.0 TX / P15.1 RX) */
     WIFI_init();
 
-    WIFI_main();                             /* never returns */
+    WIFI_main();                           /* never returns */
 
-    while(1)
+    while (1)
     {
     }
+
+#endif
 }

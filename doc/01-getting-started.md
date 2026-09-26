@@ -50,7 +50,7 @@
 
 对照 [23-wiring.md](20-design/23-wiring.md) 完成三类接线，重点核对：
 
-1. **TC275 ↔ ESP32-C6（UART，本教程用）**：`P15.0(TX) → GPIO6`、`P15.1(RX) ← GPIO7`、**必须共地**；TC275 侧物理位置在板载 **mikroBUS 插座 pin13(TX)/pin14(RX)**；DevKitC-1 侧 GPIO6/7 = J1-5/6，5V 接 J1-14（车载 DC-DC ≥2A）。量产主链路 SPI（QSPI3 ↔ C6 SPI2，**已按 23-wiring.md §9.1 实物接线**）目前固件未启用，所以本教程仍走 UART；**这组 UART 线保留不拆**（调试控制台 + 回退）。
+1. **TC275 ↔ ESP32-C6（UART，本教程用）**：`P15.0(TX) → GPIO6`、`P15.1(RX) ← GPIO7`、**必须共地**；TC275 侧物理位置在板载 **mikroBUS 插座 pin13(TX)/pin14(RX)**；DevKitC-1 侧 GPIO6/7 = J1-5/6，5V 接 J1-14（车载 DC-DC ≥2A）。量产主链路 SPI（QSPI3 ↔ C6 SPI2，**已按 23-wiring.md §9.1 实物接线**）两侧代码已实现但**默认未启用、也未通电联调**（TC275 侧要 `-D USE_SPI_LINK`，见 `32 §1`；门禁 `22 §8` G1），所以本教程仍走 UART；**这组 UART 线保留不拆**（调试控制台 + 回退）。
 2. **TC275 ↔ D24A**：8 根 PWM/方向线接 **J4（电机 A/B）/ J6（电机 C/D）**，见 23-wiring.md §3/§4 表格；STBY 直接短接同座 J4-1 的板载 3V3。
 3. **电源**：电池 → D24A VIN（逻辑电源 D24A 板载稳压自产，无需外接 VCC）；DC-DC 5V → TC275 与 C6；全系统共地。
 

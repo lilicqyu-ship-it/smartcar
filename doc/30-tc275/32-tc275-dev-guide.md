@@ -24,6 +24,10 @@
 
 常见编译错误：`FreeRTOS.h not found` = `FreeRtos/` 或 `Configurations/` 未完整检出（它们是工程的一部分，不需要另外安装）。
 
+**切换链路固件（UART ↔ SPI）**：`Cpu2_Main.c` 用 `USE_SPI_LINK` 分流——**不定义 = demo UART/AT 路径（当前默认）**，定义 = SF-over-SPI 量产路径（`Middleware/com/link.c` 泵）。打开方式：`Project > Properties > C/C++ Build > Settings > TASKING C/C++ Compiler > Preprocessor > Defined symbols (-D)` 加一行 `USE_SPI_LINK`（两个构建配置各加一次）。为什么默认还是 UART：SPI 的波形兼容性门禁 G1 未过（`22 §8`），过完之后翻转默认值并把开关改成 `USE_WIFI_AT`（`22 §7.2`、`21 §5.6`）。
+
+**SF 帧层的主机单测**（不需要 TriCore 工具链，改过 `Middleware/sf/` 必须跑）：`test/host/` 下用 MinGW gcc 编译 `test_sf.c`，见 `22 §7.2` 首行判据。
+
 ## 2. 烧录与观测
 
 | 通道 | 位置 | 用途 |
@@ -41,7 +45,7 @@
 |---|---|---|---|
 | CPU0 | FreeRTOS | `Cpu0_Main.c` + `App/robot.c` | 新任务 = 在 `Cpu0_Main.c` 建任务；控制类逻辑进 `robot.c` 的 10 ms 拍 |
 | CPU1 | 裸机 1 kHz | `Cpu1_Main.c` + `App/motor_algo.c` | 算法进 `motor_algo.c`，**不许阻塞、不许打印**（打印走日志环，§6） |
-| CPU2 | 裸机超循环 | `Cpu2_Main.c` + `Middleware/wifi_at.c` | 链路层改动进 `Middleware/`；量产目标态是 `com/link.c`（`21 §5.6`） |
+| CPU2 | 裸机超循环 | UART：`Cpu2_Main.c` + `Middleware/wifi_at.c`；SPI：`Cpu2_Main.c` + `Middleware/com/{link,spi_hal_pins}.c` + `Middleware/sf/`（`-D USE_SPI_LINK`，见 §1） | 链路层改动进 `Middleware/`；SF 帧格式改动要同时改 `21 §6.1a`、`22 §5` 与 C6 侧 `c6_sf`（两处独立实现，靠文档对齐） |
 
 命名与风格（照现有代码，勿另立）：文件名小写下划线、模块前缀大写 `MODULE_`（`ROBOT_task` / `MOTOR_ALGO_run` / `PROTO_feedByte` / `XCORE_estopRequest` / `WIFI_sendRaw`）；头文件守卫 `MODULE_H`；**代码注释用英文，文档与 commit message 用中文**。
 
@@ -52,9 +56,10 @@
 1. **查引脚与外设符号**：在本仓库 `Libraries/iLLD/TC27D/Tricore/_PinMap/` 下找 `Ifx<模块>_PinMap.h` 里的符号名（例如 `IfxQspi3_SLSO5_P23_4_OUT`、`IfxGtm_TIM0_0_TIN26_P33_4_IN`）。**不要凭记忆写引脚**。
 2. **查冲突**：与 `23` 的接线状态一览和各表对一遍（尤其 P33.0~7 编码器、P00.0 CAN、P00.5/P00.6 LED、P15.0/P15.1 WiFi、P2x 组 JTAG/Shield2Go）。
 3. **声明 ISR**：`IFX_INTERRUPT(myIsr, 0, prio)` —— **向量表参数固定写 0**，不论这个中断属于哪个核；目标核由 SRC 的 `typeOfService = IfxSrc_Tos_cpu0|cpu1|cpu2` 决定。原因见 `21 §18 C1`。
-4. **挑优先级**：按 `21 §18 C2` 的已占用表（CPU0 用了 1/2/4/8/12，CPU2 用了 5/7/13）取空闲档，并在该表登记。
-5. **验证真的进表了**：构建后打开 `.map`，在 **Removed Sections** 里搜 `Isr`。出现你的 ISR 名 = 表号写错了，中断永远不会进、且编译链接全程无报错。
-6. 上板验证：在 ISR 里累加计数器，经日志环（§6）或状态字段出到控制台，不要靠"感觉它在跑"。
+4. **挑优先级**：按 `21 §18 C2` 的已占用表（CPU0 用了 1/2/4/8/12，CPU2 用了 5/7/13 + **6/9/10 = QSPI3 TX/RX/ER**）取空闲档，并在该表登记。
+5. **想给排针 GPIO 加边沿中断？TC275 上不行**：P23.x 这类 GPIO 既没有 ERU 通路也不在 IOM 监视输入内，配不出"电平跳变触发 ISR"（`21 §18 C9`）。握手/就绪类信号一律**输入+内部上拉 + 主循环采电平**（SPI 链路就是这么做的，`22 §3.1 E11`）。
+6. **验证真的进表了**：构建后打开 `.map`，在 **Removed Sections** 里搜 `Isr`。出现你的 ISR 名 = 表号写错了，中断永远不会进、且编译链接全程无报错。
+7. 上板验证：在 ISR 里累加计数器，经日志环（§6）或状态字段出到控制台，不要靠"感觉它在跑"。
 
 ## 5. 新增一条跨核消息（xcore）
 
@@ -86,13 +91,16 @@ CPU1/CPU2 打印 = 整行拷进日志环（1 KB，满则整行丢弃），由 CP
 
 | 现象 | 第一嫌疑 | 怎么确认 |
 |---|---|---|
-| 某个核的外设"完全不响应"，无任何报错 | ISR 声明在非 0 号表 → 被链接器删了 | `.map` 的 Removed Sections 搜 `Isr`（§4 步骤 5） |
+| 某个核的外设"完全不响应"，无任何报错 | ISR 声明在非 0 号表 → 被链接器删了 | `.map` 的 Removed Sections 搜 `Isr`（§4 步骤 6） |
 | 中断进了表但打到错的核 | SRC 的 `TOS` 位没设 / 优先级与别的核撞了 | 读对应 `SRC*` 寄存器；对照 `21 §18 C2` 占用表 |
 | AT 链路全超时、三核启动正常 | CPU2 的 ASCLIN1 中断从未触发 | 同第 1 行；再看日志环有没有 RX 计数 |
 | 控制台乱码、偶发卡死 | 跨核直接 printf | 全量搜非 CPU0 代码里的 `IfxAsclin`/`UART_` 调用 |
 | 跑一段时间后复位 | 看门狗被重新启用 / 某核没喂 | 确认 `Cpu*_Main.c` 的看门狗开关状态（`21 §18 C8`） |
 | C6 一加速就重启 | 5V 供电裕量不足（brownout） | `23 §5`；并加 ≥470 µF |
 | 电机一侧转向相反 | `motor.c` 的 `g_dirInvert` 表 vs 实际线序 | `23 §4`，**查表，不要交叉猜测** |
+| SPI 链路"通一帧后就再也不动" | 漏发突发收尾事务（`RDDMA` 后没补 `INT0`、`WRDMA` 后没补 `WR_END`）→ 从机槽位卡死 | 看 `Link_Health.stats` 的 `rdSegments/wrSegments` 是否停止增长；规则见 `21 §18 C10` |
+| SPI 握手寄存器读回全 0 / 值不稳定 | ① 前导相位波形从机不认（G1 未过的预期现象）② 连读两次取稳定值没生效 | 先看 `regUnstable`/`spiErrors`，再上逻辑分析仪比 `22 §4.4` 的事务表 |
+| 想看 SPI 链路状态但没打印 | CPU2 不允许 printf（`21 §18 C3`） | 调试器 Watch 表达式 `g_health`（`Middleware/com/link.c` 的静态 `Link_Health`，每圈刷新） |
 
 ## 9. 提交前自检（文档同步义务）
 

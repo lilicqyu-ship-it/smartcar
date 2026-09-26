@@ -3,9 +3,9 @@
 | 项 | 内容 |
 |---|---|
 | 文档编号 | **21**（域：设计·硬件）· **`doc/` 唯一设计基准** · 上级索引 [00-index.md](../00-index.md) |
-| 文档版本 | V1.2（设计基线草案） |
+| 文档版本 | V1.2a（设计基线草案 + TC275 侧 SPI 代码落地回写） |
 | 日期 | 2026-09-26 |
-| 修订记录 | V1.0 初版；V1.1 新增 §3.6 多核 OS 形态选型（SMP/AMP 决策为 AMP 及演进条件）、§3.7 板间通信方式选型（UART/SPI/TWAI 对比，当时选定 UART @2 Mbps）及 SPI 主从角色分配（TC275 主机 / C6 从机 + CMD_RDY 握手）；**V1.2 板间链路换向：V1.0 主链路改为 SPI（TC275 QSPI3 主机 ↔ C6 SPI2 从机 `spi_slave_hd`，1 MHz 起 / 5 MHz 量产基线），UART 降级为调试与回退通道；LINK 段帧协议改为新定 SF 帧，手机 WS 段仍用 v2 帧；§1.1/§1.3/§2.2/§3.2/§3.4/§3.5/§3.7/§5.6/§6/§12/§14/§15/§16/§17 同步。详细设计、接线表、验证门禁与两固件改动清单见 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。**V1.2 同时确立本文档为 `doc/` 唯一设计基准**：新增 §18 工程级实现约束（吸收 31-firmware-architecture.md 的实测坑），`ux-performance-plan.md` 结论全部并入本文（§3.5/§11/§14），C6 固件详细设计移出本仓库、由 `c6_car/doc/` 承载** |
+| 修订记录 | V1.0 初版；V1.1 新增 §3.6 多核 OS 形态选型（SMP/AMP 决策为 AMP 及演进条件）、§3.7 板间通信方式选型（UART/SPI/TWAI 对比，当时选定 UART @2 Mbps）及 SPI 主从角色分配（TC275 主机 / C6 从机 + CMD_RDY 握手）；**V1.2 板间链路换向：V1.0 主链路改为 SPI（TC275 QSPI3 主机 ↔ C6 SPI2 从机 `spi_slave_hd`，1 MHz 起 / 5 MHz 量产基线），UART 降级为调试与回退通道；LINK 段帧协议改为新定 SF 帧，手机 WS 段仍用 v2 帧；§1.1/§1.3/§2.2/§3.2/§3.4/§3.5/§3.7/§5.6/§6/§12/§14/§15/§16/§17 同步。详细设计、接线表、验证门禁与两固件改动清单见 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。**V1.2 同时确立本文档为 `doc/` 唯一设计基准**：新增 §18 工程级实现约束（吸收 31-firmware-architecture.md 的实测坑），`ux-performance-plan.md` 结论全部并入本文（§3.5/§11/§14），C6 固件详细设计移出本仓库、由 `c6_car/doc/` 承载**；**V1.2a：TC275 侧 SPI 链路代码落地后回写**——§3.4 加落地进度注记（目标态目录 vs 当前 `Middleware/` 布局）、§3.5 命令流补 auth 未落地、§3.7/§5.6 握手改为 **P23.0 电平轮询**（原稿边沿中断在 TC275 上做不出来）、§16 R11 口径随之调整、§17 映射表标出已落地文件、§18 新增 **C9（P23.x 无 GPIO 边沿中断）** 与 **C10（`RDDMA`/`WRDMA` 突发必须用 `INT0`/`WR_END` 收尾，线上命令字节以 `spi_ll.h` 为准）**，C2 登记 QSPI3 优先级 6/9/10。依据见 [22 §3.1 E11/E12](../20-design/22-link-spi-design.md)** |
 | 产品定位 | 从 **demo（硬件调通验证）** 升级为 **可商业化量产** 的智能遥控底盘平台 |
 | 硬件平台 | TC275（AURIX 三核 200 MHz，2×2 MB PFlash 双 bank，128 KB DFlash0 + 64 KB DFlash1）+ ESP32-C6（Wi-Fi 6 + BLE 5，512 KB SRAM，8 MB flash）+ 2×TB6612 + **4× 直流减速电机（带霍尔编码器，A/B 正交输出，预留 C/Index）** |
 | 上游文档 | **本文档是 `doc/` 的设计基准**，其余文档按下列定位引用：[22-link-spi-design.md](../20-design/22-link-spi-design.md)（板间 SPI 链路详细设计，V1.2 决策来源，本文 §3.7/§5.6/§6.1a 的展开）、[23-wiring.md](../20-design/23-wiring.md)（引脚与接线真源）、[11-requirements.md](../10-product/11-requirements.md)（产品需求层，V1.2 起与本文口径对齐）、[12-demo-evaluation.md](../10-product/12-demo-evaluation.md)（demo 问题基线，其 P0/P1 已作为架构约束吸收进本文，不再逐条重复）、[31-firmware-architecture.md](../30-tc275/31-firmware-architecture.md)（**demo 代码现状参考**，量产目标态以本文为准；其唯一不可推导的结论已迁入本文 §18）。历史文档《ux-performance-plan》《esp32c6-fw-design/coding-plan》已删除：前者结论并入本文 §3.5/§11/§14，后者由 `c6_car/doc/` 取代 |
@@ -153,6 +153,8 @@ myCar-mp/
 └── test/                    # 主机端单元测试（Unity），CI 执行
 ```
 
+> **落地进度注记（2026-09-26）**：上表是**目标态目录**。当前仓库仍是 demo 布局（`App/ Middleware/ Bsp/`），已落地的 SPI 代码位于 `Middleware/com/{link,spi_hal_pins}.{c,h}` 与 `Middleware/sf/sf_frame.{c,h}`（`Middleware` 已是工程 include 根，故未新建顶层 `com/`、`mw/`）；整体目录重排属于 §15 里程碑工作，未随本轮 SPI 编码执行。逐文件状态见 [22 §7.2](22-link-spi-design.md)。
+
 ESP32-C6 固件（独立 IDF 工程 `c6_car/`，与本工程同级目录；其模块级设计与编码计划见 `c6_car/doc/`，本仓库不再维护 C6 侧 LLDD）：
 
 ```
@@ -165,12 +167,14 @@ components: net(softAP/STA/Portal/mDNS) · httpd+ws · bridge(WS↔SF 映射) ·
 ### 3.5 关键数据流（命令与遥测）
 
 ```
-命令: 手机 ──WS(≤30Hz)──► C6 bridge ──SF/SPI(拉 IRQ 触发主机读)──► CPU2 auth→xcore队列 ──► CPU0 mission(2ms)
+命令: 手机 ──WS(≤30Hz)──► C6 bridge ──SF/SPI(C6 拉 IRQ，主机采电平后开读事务)──► CPU2 auth→xcore队列 ──► CPU0 mission(2ms)
                                                                         │ 目标轮速(mm/s)+E2E
 遥测: CPU1(1kHz 实测轮速/保护状态) ──xcore──► CPU0 聚合(50Hz) ──xcore──► CPU2 ──SF/SPI(主机写)──► C6 ──WS 广播──► 全部客户端
 ```
 
-端到端时延预算（继承交互方案 Track B 并收紧）：命令 ≤50 ms；遥测 20 ms 周期；**链路段时延 ≤ 2.3 ms**（半双工主机拉取模型：2 ms 保活轮询兜底 + 事务 210 µs，IRQ 命中时更快）；断链→停车 ≤100 ms。
+> 当前实现进度：命令方向的 `auth`（§7）尚未落地，`com/link.c` 校验 SF 帧后直投 xcore 命令队列；急停（`PROTO_CMD_EMERGENCY_STOP`）不经队列，直接走 `XCORE_estopRequest()`（§5.3）。
+
+端到端时延预算（继承交互方案 Track B 并收紧）：命令 ≤50 ms；遥测 20 ms 周期；**链路段时延 ≤ 2.3 ms**（半双工主机拉取模型：泵每圈采电平 + 2 ms 保活轮询兜底 + 事务 210 µs，握手线为高时按泵节拍取，见 §18 C9）；断链→停车 ≤100 ms。
 
 ### 3.6 多核 OS 形态选型：SMP 与 AMP
 
@@ -220,7 +224,7 @@ components: net(softAP/STA/Portal/mDNS) · httpd+ws · bridge(WS↔SF 映射) ·
 
 **角色分配（不做二次论证）**：**TC275 = SPI 主机（QSPI 主机模式，提供 SCLK 与硬件 CS）；C6 = SPI 从机（`spi_slave_hd` + DMA）**。原则是"总线时序归安全/实时域"：主机身份决定总线节拍由谁的时域调度，C6 的 Wi-Fi/HTTPD 任务抖动（毫秒级、不可控）不得污染总线时序；失效方向也正确——从机挂死不会卡住总线，TC275 主机事务超时 / 心跳寄存器不推进 → 判 LINK 丢失 → 走失联停车，延续"C6 死机只导致停车、不可能导致失控"（§3.1）。生态先例一致：esp-at "AT over SPI"、ESP-Hosted 等协处理器方案均为 ESP 从机、主控 MCU 主机。
 
-**接线（四线 + 一根握手）**——**2026-09-26 已按此表完成实物接线**（孔位与线束见 [23-wiring.md](../20-design/23-wiring.md) V1.4 §1/§9.1；固件两侧仍走 UART，启用前须过 G1）：
+**接线（四线 + 一根握手）**——**2026-09-26 已按此表完成实物接线**（孔位与线束见 [23-wiring.md](../20-design/23-wiring.md) V1.5 §1/§9.1；两侧固件代码均已改为 SPI，但**从未通电联调**，TC275 构建默认仍是 UART，启用前须过 G1）：
 
 ```
 TC275 (QSPI3 主机)                 ESP32-C6 (spi_slave_hd + DMA)
@@ -228,7 +232,7 @@ TC275 (QSPI3 主机)                 ESP32-C6 (spi_slave_hd + DMA)
   MTSR  P33.12 ────────────────►     GPIO18  MOSI（遥测/OTA/命令帧下发）
   MRST  P33.13 ◄────────────────     GPIO20  MISO（命令/ACK 上行）
   SLSO5 P23.4  ────────────────►     GPIO23  CS，TC275 硬件片选
-  IOM   P23.0  ◄────────────────     GPIO21  IRQ（开漏）"我有帧待取"
+  GPIO  P23.0  ◄────────────────     GPIO21  IRQ（开漏）"我有帧待取"
   （可选预留不接：TX_RDY 流控线 P23.5 ↔ C6 空闲 GPIO）
 ```
 
@@ -236,8 +240,9 @@ TC275 (QSPI3 主机)                 ESP32-C6 (spi_slave_hd + DMA)
 
 - 半双工定长事务，前导相位 `CMD(8) + ADDR(8) + DUMMY(8)`，数据相位长度取 4 的倍数（从机硬约束）。
 - **共享寄存器握手**（从机用 `spi_slave_hd_write_buffer()` 发布 6 个 u32：`SF_READY / SF_TX_PENDING / SF_RX_ROOM / SF_ALIVE / SF_ERRSTAT / SF_CMDRSP`），主机轮询后决定读多少、写多少；**寄存器读非原子 → 连读两次取相同值**（Espressif 官方 `segment_mode` 例子的既有规范，写入本设计要求）。
-- **主机拉取模型**：C6 无法主动推送。命令下行 = C6 更新寄存器并拉 IRQ → TC275 引脚中断即刻开读事务（µs 级）；无 IRQ 时 2 ms 保活轮询兜底。上行遥测 = TC275 按 20 ms 周期主动写事务。
+- **主机拉取模型**：C6 无法主动推送。命令下行 = C6 更新寄存器并拉 IRQ → TC275 泵**每圈采 P23.0 电平**，高即开读事务；线为低时按 2 ms 保活节拍轮询（**电平轮询是主路径**：P23.x 产生不出边沿中断，§18 C9）。上行遥测 = TC275 按 20 ms 周期主动写事务。
 - SF 帧承载于数据段之上，**CRC16 + SEQ 全部保留**——SPI 解决电气失步，不解决位翻转，§6 的端到端语义不得因物理层升级而削弱。
+- **突发收尾是硬要求**（§18 C10）：`RDDMA` 突发后补一帧 `INT0`、`WRDMA` 突发后补一帧 `WR_END`，从机才释放缓冲；线上命令字节取 `spi_ll.h` 的 `SPI_LL_BASE_CMD_HD_*`，不是 `spi_types.h` 的 `BIT(n)` 枚举。
 
 **诚实的代价**：换到主机拉取模型后，"命令下行最坏时延"从 UART push 的 ~1 ms 变成 `轮询周期 + 事务时间` ≈ 2.3 ms。50 ms 端到端预算下无影响，但不得记成"SPI 全面优于 UART"。
 
@@ -367,13 +372,14 @@ BOOT ───────────────► STANDBY ──配对成功
 
 ### 5.6 com/link —— SPI LINK 事务调度器（CPU2，替代 wifi_at.c）
 
-- **职责**：以 QSPI3 主机身份驱动 §3.7 的事务模型，把半双工 DMA 段装配成 SF 帧流；对上只暴露 `LINK_sendMsg()/LINK_recvMsg()/LINK_health()`（帧类型走 xcore v2 语义）。
-- **一个链路周期**（超循环，事件驱动）：① 读握手寄存器组（连读两次取相同值，最多重试 3 次）→ ② `SF_TX_PENDING>0` 则发读事务取段、解 SF 帧入命令队列 → ③ 有待发帧且 `SF_RX_ROOM` 足够则发写事务 → ④ 心跳/错误统计。IRQ（P23.0，**0 号向量表**）只置事件位并唤醒泵，中断内不碰 FIFO 之外的状态。
+- **职责**：以 QSPI3 主机身份驱动 §3.7 的事务模型，把半双工 DMA 段装配成 SF 帧流；对上只暴露发送/主循环/健康查询三个入口（当前实现：`LINK_init/LINK_main/LINK_send/LINK_isUp/LINK_getHealth`，帧类型走 SF TYPE + `PROTO_CMD_*` 语义，见 [22-link-spi-design.md](22-link-spi-design.md) §5.5）。
+- **一个链路周期**（超循环）：① 读握手寄存器组（一次 `RDBUF` 块读 24 B，**连读两次取相同值**，最多重试 3 次）→ ② `SF_TX_PENDING>0` 则发 `RDDMA` 段读突发（单段 ≤260 B、4 字节对齐）取段、解 SF 帧入命令队列，**突发结束后补一次 `INT0` 事务**（E12）→ ③ 有待发帧且 `SF_RX_ROOM` 足够则发 `WRDMA` 段写突发，**结束后补 `WR_END`** → ④ 残帧超时回收 + 心跳/错误统计。
+- **握手取法：P23.0 电平轮询，不是中断**。TC275 无 ERU、P23.x 不在 IOM 监视输入内，P23.0 **产生不出边沿中断**（[22 §3.1 E11](22-link-spi-design.md)），原稿"IRQ 置事件位唤醒泵"作废：泵每圈 `IfxPort_getPinState` 采电平，高即开读事务，低时按 2 ms 保活节拍轮询。代价已计入 §14 时延预算（命令下行 ≈2.3 ms）。QSPI3 自身的 TX/RX/ER 三个 ISR **必须声明在 0 号向量表**（§18 C1）。
 - **丢弃策略**：命令/ACK 类不丢（队列满即反压并上报 `ERR_LINK_OVF`）；遥测/日志类丢旧留新。
 - **链路健康判定**：`SF_ALIVE` 500 ms 未推进，或事务连续超时/CRC 失败 5 帧 → `ERR_LINK_LOST`（C6 侧同时向手机报断链，TC275 侧 mission 置目标零）。心跳帧 TYPE 0x04 兼作 RTT 测量，主机在事务边界取时间戳（比 UART 时代更准）。
 - **时钟档位管理**：1/2/5/10/20 MHz 固定档位，由产测/诊断命令切换并持久化到 DFlash1；**无运行时自适应降速**（UART 的 0x44 BAUD 协商概念作废）。
 - 帧格式与命令表见 §6；鉴权见 §7；波形兼容性门禁见 §16 R7 与 [22-link-spi-design.md](../20-design/22-link-spi-design.md) §8。
-- **demo `wifi_at.c` 与 UART 物理通道保留在 `USE_WIFI_AT` 编译开关后**：作为调试控制台、产线返工与 R7 验证失败时的回退链路，量产构建默认关闭。
+- **回退通道开关（现状与目标态的差异，务必按此读）**：目标态是"量产构建默认 SPI，`wifi_at.c` + UART 退到 `USE_WIFI_AT` 后默认关闭"。**当前实现是反向开关**：默认构建仍是 UART，SPI 需 `-D USE_SPI_LINK` 显式打开。原因是 G1 波形门禁未过之前 UART 仍是唯一可用链路（§16 R7）；G1 通过后翻转默认值，届时本节口径无需再改。
 
 ---
 
@@ -624,7 +630,7 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 | R8 | 从机 RX 缓冲须 4 字节对齐、DMA 能力、前导位数为 8 的倍数 | 帧/段设计 | 已由 SF 帧"补 0 到 4 倍数 + LEN 只数字节载荷"吸收（§6.1a） |
 | R9 | 握手寄存器逐字节搬运、读值非原子 | 主机误判待发长度 | 连读两次取相同值 + 重试 3 次，仍不等判失联（§5.6/§7.1） |
 | R10 | C6 自身 OTA 写 flash 期间 SPI 从机是否掉事务 | OTA 过程链路抖动 | 台架实测；必要时写块间隙保活、OTA 期间限速 50%（对齐 R3） |
-| R11 | IRQ 开漏 + 杜邦线长导致丢中断 | 命令下行时延退化 | 2 ms 保活轮询兜底；量产线束定长屏蔽 |
+| R11 | IRQ 开漏 + 杜邦线长导致**电平读错**（握手是电平轮询，P23.x 无边沿中断能力，§5.6，依据见 [22 §3.1 E11](22-link-spi-design.md)） | 命令下行时延退化、偶发空读事务 | 2 ms 保活轮询兜底 + 寄存器快照连读校验；量产线束定长屏蔽，实测该脚静态电平须为高 |
 | Q1 | 电池节数与 BMS 断流阀值（影响欠压曲线） | 待硬件确认 | 配置项 `cellCount` 预留 |
 | Q2 | 灯效/蜂鸣硬件是否上（影响 UX 文案与引脚） | 待产品定义 | 配置驱动，默认无 |
 
@@ -637,9 +643,9 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 | `App/robot.c` | 拆分：`app/mission`（状态机+许可）+ `app/drive_policy`（速度策略）；心跳锁存/急停竞态按 §5.3 修复 |
 | `App/motor_algo.c` | 演进为 `rt/servo`（PI）+ `rt/motor_guard`；双斜率参数进配置 |
 | `Middleware/xcore.c` | 升级 xcore v2（E2E 头、类型化消息），锁与日志环设计保留 |
-| `Middleware/protocol.c` | 不再是 LINK 段真源：解析器骨架/状态机迁移进 `mw/sf`（SF 帧，§6.1a）；`mw/proto` 只保留手机 WS 段 v2 帧（§6.1b）。两者均为主机单测对象 |
-| `Middleware/wifi_at.c` | 退出主链路：`USE_WIFI_AT` 开关后保留为**调试控制台 + R7 失败回退 + 产线返工**通道；前端页面字符串迁移至 C6 assets |
-| （新增，无 demo 对应） | `com/link.c`（QSPI3 主机事务调度器，§5.6）、`com/spi_hal_pins.c`（引脚与时钟档位表）、`mw/sf/`（SF 编解码） |
+| `Middleware/protocol.c` | 不再是 LINK 段**容器**真源：SF 编解码新建于 `Middleware/sf/`（目标态 `mw/sf/`，§6.1a），主机单测对象。命令**码表**（`PROTO_CMD_*`）仍是唯一真源并被 `link.c` 直接复用为 SF 载荷首字节，被取代的只是 UART 时代的 `AA 55` 容器；`mw/proto` 只保留手机 WS 段 v2 帧（§6.1b，在 C6 侧实现） |
+| `Middleware/wifi_at.c` | 退出主链路：目标态退到 `USE_WIFI_AT` 后默认关闭，**当前实现为反向开关**（默认 UART，`-D USE_SPI_LINK` 切 SPI，§5.6 末条）；保留为**调试控制台 + R7 失败回退 + 产线返工**通道；前端页面字符串迁移至 C6 assets |
+| （新增，无 demo 对应） | 已落地：`Middleware/com/link.c`（QSPI3 主机事务调度器，§5.6）、`Middleware/com/spi_hal_pins.c`（引脚/时钟档/前导模拟）、`Middleware/sf/sf_frame.c`（SF 编解码，`test/host/test_sf.c` 2855 断言通过）。尚未落地：`com/auth`、`com/fw_stream`（OTA 走 SF TYPE 0x06/0x07，§9） |
 | `Bsp/motor.c` | 保留，增加 STBY 控制与钳位职责确认 |
 | `Bsp/uart.c` / `Bsp/stime.c` | 保留（console 归 diag；时基归 `rt/timebase` 并承担喂狗） |
 | `Cpu0/1/2_Main.c` | 重写为 §3.4 初始化时序（POST → 任务创建 → 看门狗链启动） |
@@ -654,13 +660,15 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 | # | 约束 | 后果与验证方式 |
 |---|---|---|
 | C1 | **向量表只有 0 号表生效**：lsl 中 `__INTTAB_CPU0/1/2` 同址，Tasking lsl 只收集 0 号表的 `IFX_INTERRUPT` 条目。CPU1/CPU2 的中断也必须写成 `IFX_INTERRUPT(fn, 0, prio)`，目标核由 SRC 的 `typeOfService = IfxSrc_Tos_cpuN` 决定 | 声明成 1/2 号表时 ISR 体被链接器按 unreferenced 删除，**链接与编译全部通过、中断永远不进**，表现为"收不到任何数据/节拍"。验证：查 `.map` 的 *Removed Sections* 里有无 `.*Isr.*` |
-| C2 | **ISR 优先级是跨核共享的全局资源**，编号不得重复。当前占用：CPU0 = 1（FreeRTOS 上下文切换）/2（STM0 tick）/4·8·12（ASCLIN0 RX/TX/ER）；CPU2 = 5·7·13（ASCLIN1 RX/TX/ER） | 新增中断（QSPI3 IRQ、GTM TIM 溢出、回退 UART）从余下档位取，并在本行登记；抢同优先级会让两核互相吞中断 |
+| C2 | **ISR 优先级是跨核共享的全局资源**，编号不得重复。当前占用：CPU0 = 1（FreeRTOS 上下文切换）/2（STM0 tick）/4·8·12（ASCLIN0 RX/TX/ER）；CPU2 = 5·7·13（ASCLIN1 RX/TX/ER）+ **6·9·10（QSPI3 TX/RX/ER，`com/spi_hal_pins.c` 已登记）** | 新增中断（GTM TIM 溢出、回退 UART）从余下档位取并在本行登记；抢同优先级会让两核互相吞中断。验证：查 `.map` 的 *Removed Sections* 无 `.*Isr.*`，且 SRC 表无重复优先级 |
 | C3 | **调试串口只归 CPU0**：iLLD ASC 的软件 FIFO 与临界区仅在属主核内互斥 | 跨核直接 `printf` 会踩 FIFO 状态（偶发乱码/死循环）。CPU1/CPU2 日志统一走日志环（§5.5）由 CPU0 落串口 |
 | C4 | **FreeRTOS API 只允许 CPU0 调用**：移植层的 tick（STM0）、上下文切换中断与 CCPN 屏蔽全部只绑 CPU0 | CPU1/CPU2 的时基直读 STM0 自由计数（unsigned 减法回绕安全），不经 OS 抽象 |
 | C5 | **三核共用一个二进制**，启动期靠 `IfxCpu_emitEvent/waitEvent` 同步；共享数据必须在同步点**之前**由 CPU0 完成初始化 | 否则 CPU1/CPU2 可能读到未初始化锁/队列。量产初始化时序（§3.4）保留该前置条件 |
 | C6 | TC275 无数据 Cache，跨核共享内存落在默认数据段（CPU0 DSPR）即可，**无需 Cache 维护** | 不要为跨核同步添加 `__sync()`/Cache 无效化代码，那是无效噪声 |
 | C7 | **片选脚固定用 QSPI3 SLSO5 = P23.4，不得改用 SLSO7 = P33.7**（P33.0~P33.7 已被四对编码器 UDC 占满，见 [23-wiring.md](../20-design/23-wiring.md) §8/§9） | 改脚即与 E1B 短路，硬件级冲突 |
 | C8 | 硬件看门狗在 demo 中被 `Cpu*_Main.c` 显式关闭（调试期行为） | 量产必须按 §7.2 重新启用并在各核循环喂狗；这是 11-requirements.md F09 的未完成项，交付前必须关闭 |
+| C9 | **P23.x 上做不出 GPIO 边沿中断**：TC27x 的 GPIO 边沿事件只有 ERU 与 IOM 两条硬件通路，二者都不覆盖 P23.x（TC27D 无 ERU 模块目录、无 `IfxIom_PinMap.h`，iLLD `Iom/` 也不提供 `initRiseInterrupt/initFallInterrupt`）。证据：[22 §3.1 E11](22-link-spi-design.md) | 握手线只能**输入+内部上拉 + 电平轮询**。若按原稿去配 IOM/边沿中断，会浪费一轮调试才发现"中断永不触发"；同理任何"排针 GPIO 触发中断"的需求在 TC275 上都要先查这两条通路 |
+| C10 | **`spi_slave_hd` 的 DMA 突发必须由额外事务收尾**：一次 `RDDMA` 突发要再发一帧 `INT0`(0x08)、一次 `WRDMA` 突发要再发一帧 `WR_END`(0x07)，从机才会计数完毕并释放缓冲。线上命令字节取自 `spi_ll.h` 的 `SPI_LL_BASE_CMD_HD_*`（`WRBUF 0x01 / RDBUF 0x02 / WRDMA 0x03 / RDDMA 0x04 / SEG_END 0x05 / EN_QPI 0x06 / WR_END 0x07 / INT0 0x08`）；`spi_types.h` 的 `BIT(n)` 是内部枚举，**照抄到线上必错**。证据：[22 §3.1 E12](22-link-spi-design.md) | 漏掉收尾事务 = 从机 TX/RX 槽位永久卡住，链路表现为"握手寄存器全零、只在第一次能通"。G1 台架若出现"能通一帧后死掉"，先查本条 |
 
 
 > 本文档为设计基线 V1.2，接口签名以代码落地时的头文件为准；任何架构级变更需回写本文档并升版。板间 SPI 链路的详细设计（接线表、事务模型、SF 帧、两固件改动清单、台架门禁）见 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。
