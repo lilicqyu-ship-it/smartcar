@@ -30,10 +30,10 @@
 #include "Ifx_Types.h"
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
-#include "motor.h"
-#include "motor_algo.h"
-#include "encoder.h"
-#include "stime.h"
+#include "bsp/motor.h"
+#include "rt/motor_algo.h"
+#include "rt/encoder.h"
+#include "bsp/stime.h"
 
 extern IfxCpu_syncEvent cpuSyncEvent;
 

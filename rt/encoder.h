@@ -26,8 +26,8 @@
 
 void    ENCODER_init(void);                   /* CPU1, after MOTOR_init (GTM CLK0) */
 void    ENCODER_task(void);                   /* CPU1 1 kHz step: window, publish  */
-void    ENCODER_getSpeedsMmS(int32 v[2]);     /* left/right side, mm/s            */
-void    ENCODER_getRawCounts(int32 c[4]);     /* E1..E4 signed x4 counts           */
+void    ENCODER_getSpeedsMmS(sint32 v[2]);     /* left/right side, mm/s            */
+void    ENCODER_getRawCounts(sint32 c[4]);     /* E1..E4 signed x4 counts           */
 void    ENCODER_getOdometer(uint32 m[2]);     /* left/right side, mm               */
 boolean ENCODER_isAlive(void);                /* edges seen within the alive window */
 

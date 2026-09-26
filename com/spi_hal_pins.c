@@ -4,12 +4,12 @@
  * See spi_hal_pins.h for the pin map, the preamble simulation and the command
  * byte table. Owner core: CPU2 (bare metal). No FreeRTOS API is used here.
  */
-#include "spi_hal_pins.h"
+#include "com/spi_hal_pins.h"
 
 #include "Qspi/SpiMaster/IfxQspi_SpiMaster.h"
 #include "Qspi/Std/IfxQspi.h"
 #include "Port/Std/IfxPort.h"
-#include "stime.h"
+#include "bsp/stime.h"
 
 #include <string.h>
 

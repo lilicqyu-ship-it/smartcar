@@ -2,7 +2,7 @@
 #define XCORE_H
 
 #include "Ifx_Types.h"
-#include "protocol.h"
+#include "mw/proto/protocol.h"
 
 /* Cross-core shared memory for the 3-core partition:
  *   CPU0 (FreeRTOS) : robot control task
@@ -11,6 +11,7 @@
  * All blocks live in shared data RAM (TC275 has no data cache, so no cache
  * maintenance is needed) and are guarded by one tiny hardware-swap spinlock.
  * Call XCORE_init() once on CPU0 before the IfxCpu sync event is released. */
+void XCORE_init(void);
 
 /* One decoded protocol frame, queued CPU2 -> CPU0 for execution */
 typedef struct

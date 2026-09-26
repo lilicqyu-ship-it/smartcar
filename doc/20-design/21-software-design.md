@@ -3,9 +3,9 @@
 | 项 | 内容 |
 |---|---|
 | 文档编号 | **21**（域：设计·硬件）· **`doc/` 唯一设计基准** · 上级索引 [00-index.md](../00-index.md) |
-| 文档版本 | V1.2c（V1.2b + §5.1 编码器随实现纠错回写：UDC 不存在于 GTM gen3，改 TIEM 边沿中断 + 软件 ×4 正交，`Bsp/encoder.c` 已落地） |
+| 文档版本 | V1.3（V1.2c + §3.4 目标态目录落地：仓库由 demo 布局重排为 `app/ rt/ com/ mw/ bsp/`，`Bsp/encoder.c` 随之迁至 `rt/encoder.c`） |
 | 日期 | 2026-09-26 |
-| 修订记录 | V1.0 初版；V1.1 新增 §3.6 多核 OS 形态选型（SMP/AMP 决策为 AMP 及演进条件）、§3.7 板间通信方式选型（UART/SPI/TWAI 对比，当时选定 UART @2 Mbps）及 SPI 主从角色分配（TC275 主机 / C6 从机 + CMD_RDY 握手）；**V1.2 板间链路换向：V1.0 主链路改为 SPI（TC275 QSPI3 主机 ↔ C6 SPI2 从机 `spi_slave_hd`，1 MHz 起 / 5 MHz 量产基线），UART 降级为调试与回退通道；LINK 段帧协议改为新定 SF 帧，手机 WS 段仍用 v2 帧；§1.1/§1.3/§2.2/§3.2/§3.4/§3.5/§3.7/§5.6/§6/§12/§14/§15/§16/§17 同步。详细设计、接线表、验证门禁与两固件改动清单见 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。**V1.2 同时确立本文档为 `doc/` 唯一设计基准**：新增 §18 工程级实现约束（吸收 31-firmware-architecture.md 的实测坑），`ux-performance-plan.md` 结论全部并入本文（§3.5/§11/§14），C6 固件详细设计移出本仓库、由 `c6_car/doc/` 承载**；**V1.2a：TC275 侧 SPI 链路代码落地后回写**——§3.4 加落地进度注记（目标态目录 vs 当前 `Middleware/` 布局）、§3.5 命令流补 auth 未落地、§3.7/§5.6 握手改为 **P23.0 电平轮询**（原稿边沿中断在 TC275 上做不出来）、§16 R11 口径随之调整、§17 映射表标出已落地文件、§18 新增 **C9（P23.x 无 GPIO 边沿中断）** 与 **C10（`RDDMA`/`WRDMA` 突发必须用 `INT0`/`WR_END` 收尾，线上命令字节以 `spi_ll.h` 为准）**，C2 登记 QSPI3 优先级 6/9/10。依据见 [22 §2 E11/E12](../20-design/22-link-spi-design.md)**；**V1.2b：C6 已烧录固件后按契约完善 TC275 侧的回写**——SF 常量表以从机为真源更正三处（`FLAGS bit1=FRAG_END` 非 ACK、OTA CID 补 `0x35 ABORT`、`ERRSTAT` 位图整张重写，原 V1.2 值系臆造，22 §2 E13）；§6.1c 映射表按"五条 CMD 通道形状不统一"重写并落**三层白名单分派**规则；§6.3 遥测表补**逐字节偏移 + 38 B 定长硬约束 + 当前有源/填 0 字段**；§6.3 遥测表补**逐字节偏移 + 38 B 定长硬约束 + 当前有源/填 0 字段**；22 §4.3 补 `SF_REG_GEN(24)` 寄存器与 `GEN` 命令表、本文 §5.6 补 `LINK_gen/LINK_setClock`（含 `CLOCK_SET` payload 单位 MHz、回执跨两次从机任务故必须带超时，22 §2 E14）；§18 新增 **C11（跨侧常量整表比对 + 编译对方源码的测试）**、**C12（定长载荷短一点=全丢）**、**C13（不得假设首字节是命令码）** |
+| 修订记录 | V1.0 初版；V1.1 新增 §3.6 多核 OS 形态选型（SMP/AMP 决策为 AMP 及演进条件）、§3.7 板间通信方式选型（UART/SPI/TWAI 对比，当时选定 UART @2 Mbps）及 SPI 主从角色分配（TC275 主机 / C6 从机 + CMD_RDY 握手）；**V1.2 板间链路换向：V1.0 主链路改为 SPI（TC275 QSPI3 主机 ↔ C6 SPI2 从机 `spi_slave_hd`，1 MHz 起 / 5 MHz 量产基线），UART 降级为调试与回退通道；LINK 段帧协议改为新定 SF 帧，手机 WS 段仍用 v2 帧；§1.1/§1.3/§2.2/§3.2/§3.4/§3.5/§3.7/§5.6/§6/§12/§14/§15/§16/§17 同步。详细设计、接线表、验证门禁与两固件改动清单见 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。**V1.2 同时确立本文档为 `doc/` 唯一设计基准**：新增 §18 工程级实现约束（吸收 31-firmware-architecture.md 的实测坑），`ux-performance-plan.md` 结论全部并入本文（§3.5/§11/§14），C6 固件详细设计移出本仓库、由 `c6_car/doc/` 承载**；**V1.2a：TC275 侧 SPI 链路代码落地后回写**——§3.4 加落地进度注记（目标态目录 vs 当前 `Middleware/` 布局）、§3.5 命令流补 auth 未落地、§3.7/§5.6 握手改为 **P23.0 电平轮询**（原稿边沿中断在 TC275 上做不出来）、§16 R11 口径随之调整、§17 映射表标出已落地文件、§18 新增 **C9（P23.x 无 GPIO 边沿中断）** 与 **C10（`RDDMA`/`WRDMA` 突发必须用 `INT0`/`WR_END` 收尾，线上命令字节以 `spi_ll.h` 为准）**，C2 登记 QSPI3 优先级 6/9/10。依据见 [22 §2 E11/E12](../20-design/22-link-spi-design.md)**；**V1.2b：C6 已烧录固件后按契约完善 TC275 侧的回写**——SF 常量表以从机为真源更正三处（`FLAGS bit1=FRAG_END` 非 ACK、OTA CID 补 `0x35 ABORT`、`ERRSTAT` 位图整张重写，原 V1.2 值系臆造，22 §2 E13）；§6.1c 映射表按"五条 CMD 通道形状不统一"重写并落**三层白名单分派**规则；§6.3 遥测表补**逐字节偏移 + 38 B 定长硬约束 + 当前有源/填 0 字段**；§6.3 遥测表补**逐字节偏移 + 38 B 定长硬约束 + 当前有源/填 0 字段**；22 §4.3 补 `SF_REG_GEN(24)` 寄存器与 `GEN` 命令表、本文 §5.6 补 `LINK_gen/LINK_setClock`（含 `CLOCK_SET` payload 单位 MHz、回执跨两次从机任务故必须带超时，22 §2 E14）；§18 新增 **C11（跨侧常量整表比对 + 编译对方源码的测试）**、**C12（定长载荷短一点=全丢）**、**C13（不得假设首字节是命令码）**；**V1.3：§3.4 目标态目录落地（M1 目录项）**——仓库由 demo 布局（`App/ Middleware/ Bsp/`）重排为 `app/ rt/ com/ mw/ bsp/`，全部内部 include 改为工程根模块限定路径（`"com/link.h"`、`"mw/sf/sf_frame.h"`…），`.cproject` 四个构建配置 include 路径同步；主机单测回归全绿（SF 2855 断言 + 遥测跨侧 154 断言）；§3.4 注记、§5.1、§6.1c、§6.3、§15、§16、§17、§18 C2 路径同步 |
 | 产品定位 | 从 **demo（硬件调通验证）** 升级为 **可商业化量产** 的智能遥控底盘平台 |
 | 硬件平台 | TC275（AURIX 三核 200 MHz，2×2 MB PFlash 双 bank，128 KB DFlash0 + 64 KB DFlash1）+ ESP32-C6（Wi-Fi 6 + BLE 5，512 KB SRAM，8 MB flash）+ 2×TB6612 + **4× 直流减速电机（带霍尔编码器，A/B 正交输出，预留 C/Index）** |
 | 上游文档 | **本文档是 `doc/` 的设计基准**，其余文档按下列定位引用：[22-link-spi-design.md](../20-design/22-link-spi-design.md)（板间 SPI 链路详细设计，V1.2 决策来源，本文 §3.7/§5.6/§6.1a 的展开）、[23-wiring.md](../20-design/23-wiring.md)（引脚与接线真源）、[11-requirements.md](../10-product/11-requirements.md)（产品需求层，V1.2 起与本文口径对齐）、[12-demo-evaluation.md](../10-product/12-demo-evaluation.md)（demo 问题基线，其 P0/P1 已作为架构约束吸收进本文，不再逐条重复）、[31-firmware-architecture.md](../30-tc275/31-firmware-architecture.md)（**demo 代码现状参考**，量产目标态以本文为准；其唯一不可推导的结论已迁入本文 §18）。历史文档《ux-performance-plan》《esp32c6-fw-design/coding-plan》已删除：前者结论并入本文 §3.5/§11/§14，后者由 `c6_car/doc/` 取代 |
@@ -134,7 +134,7 @@ myCar-mp/
 │   ├── ota_mgr.c/.h         # 双板 OTA 编排（§9）
 │   └── post.c/.h            # 上电/运行自检（§8.3）
 ├── rt/                      # 实时域（CPU1）
-│   ├── encoder.c/.h         # GTM TIM TIEM 边沿中断 + 软件 ×4 正交解码 + 速度/里程（§5.1；demo 已实现于 Bsp/encoder.c）
+│   ├── encoder.c/.h         # GTM TIM TIEM 边沿中断 + 软件 ×4 正交解码 + 速度/里程（§5.1；已实现，demo 期位于 Bsp/encoder.c）
 │   ├── servo.c/.h           # 速度 PI×2 + 前馈 + 双斜率（替代 motor_algo.c）
 │   ├── motor_guard.c/.h     # 堵转/滑差/过流(预留)/欠压联动 + STBY 硬线
 │   └── timebase.c/.h        # STM 时基 + 看门狗喂狗节点
@@ -153,7 +153,7 @@ myCar-mp/
 └── test/                    # 主机端单元测试（Unity），CI 执行
 ```
 
-> **落地进度注记（2026-09-26）**：上表是**目标态目录**。当前仓库仍是 demo 布局（`App/ Middleware/ Bsp/`），已落地的 SPI 代码位于 `Middleware/com/{link,spi_hal_pins}.{c,h}` 与 `Middleware/sf/sf_frame.{c,h}`（`Middleware` 已是工程 include 根，故未新建顶层 `com/`、`mw/`）；整体目录重排属于 §15 里程碑工作，未随本轮 SPI 编码执行。逐文件状态见 [22 §7.2](22-link-spi-design.md)。
+> **落地进度注记（2026-09-26，V1.3 更新）**：**目录重排已落地**——仓库已从 demo 布局（`App/ Middleware/ Bsp/`）迁入上表目标态：`app/robot.*`、`rt/{motor_algo,encoder}.*`、`com/{link,spi_hal_pins,wifi_at}.*`、`mw/{xcore,proto,sf}/`、`bsp/{motor,uart,stime}.*`；`Cpu*_Main.c` 与 `Configurations/` 留在工程根；全部内部 include 已改为工程根限定的模块路径，`.cproject` 四个构建配置的 include 路径同步（工程根本就是 include 根之一）。**尚未做的只有"文件级拆分/新建"类工作**：`app/robot.c` 拆分 `mission` + `drive_policy`、`rt/motor_algo` 演进 `servo` + `motor_guard`、`bsp/stime` 归属 `rt/timebase`（并承担喂狗）、`mw/log` 独立目录、未实现模块 `app/{config,diag,telemetry,post,ota_mgr}`、`com/{auth,fw_stream}` 与 `bl/`（SBL，独立工程）。逐文件状态见 [22 §7.2](22-link-spi-design.md)。
 
 ESP32-C6 固件（独立 IDF 工程 `c6_car/`，与本工程同级目录；其模块级设计与编码计划见 `c6_car/doc/`，本仓库不再维护 C6 侧 LLDD）：
 
@@ -304,11 +304,11 @@ typedef struct {                 /* 每页 = 头(16B) + 载荷 + CRC32 */
 
 > 每个模块给出：职责 / 上下文 / 关键接口 / 失败行为。全部模块禁止动态内存（除 CPU0 FreeRTOS 堆在初始化期），全部跨模块数据经 xcore v2 或只读快照。
 
-### 5.1 rt/encoder —— 霍尔编码器接口（量产核心模块；**demo 侧已实现 `Bsp/encoder.c`**）
+### 5.1 rt/encoder —— 霍尔编码器接口（量产核心模块；**已实现 `rt/encoder.c`，demo 期位于 `Bsp/encoder.c`**）
 
 - **职责**：4 路霍尔正交信号解码，输出每侧轮速（mm/s，1 kHz）与累计里程；为伺服/保护/产测/遥测提供统一数据源。
 - **硬件方案（2026-09-26 随实现纠错）**：**GTM0 TIM 组 0 八通道 TIEM（输入事件模式）双边沿中断 + 软件 ×4 正交解码**，A 相进偶数通道、B 相进奇数通道；引脚 P33.0~P33.7 = X2-28~35（接线表 23-wiring.md §8.2）。原稿的 "TIM UDC 硬件正交（`UDCCTRL/CLS/DUTC`）" 是 **GTM gen2 寄存器，TC275 的 gen3 TIM 没有 UDC**（模式仅 TPWM/TPIM/TIEM/TIPM/TBCM/TGPS，`IfxGtm_regdef.h` 可证），GPT12 增量口与 ERU 输入又都不在引出脚上（P33.x 无 ERU 通路，详见 23-wiring §8.3）——ISR 解码不丢计数的代价是峰值 139k 中断/s ≈ 5% CPU1（2000 rpm 上限）。霍尔开漏上拉至 3V3（禁 5V），TIM 通道配 2 µs 去毛刺滤波。
-- **已实现接口（`Bsp/encoder.c/h`，属主 CPU1）**：
+- **已实现接口（`rt/encoder.c/h`，属主 CPU1，原 `Bsp/encoder.c/h` 随 §3.4 目录重排迁入）**：
   - `ENCODER_getSpeeds(int32 v[2])` —— 左/右侧轮速 mm/s（8 ms 滑窗 + 中值滤波；轮径 65 mm 为假设值，**台架标定**）；
   - `ENCODER_getOdometer(uint32 m[2])`；`ENCODER_getRawCounts(int32 c[4])`（产测判向用）；
   - `ENCODER_isAlive()` —— 500 ms 窗口内有边沿即 alive；`ENCODER_task()` 在 1 kHz 算法环内运行并把实测速度（percent×10）经 `XCORE_encoderSet` 出遥测，alive 时 CPU0 用实测值覆盖状态块 leftSpeed/rightSpeed。
@@ -426,7 +426,7 @@ FLAGS: bit0=FRAG(段内后续还有分片)  bit1=FRAG_END(本帧末片)  bit2..7
 | 0x60..0x6F OTA | 0x06/0x07 | CHUNK 载荷上限 **62 B → 240 B**（1 MB 镜像分片数 16k → 4.3k）；CID 非连续：`0x30 BEGIN/0x31 CHUNK/0x35 ABORT` 在 0x06，`0x32 ACK/0x33 STATUS/0x34 SWAP` 在 0x07 |
 | 0x70..0x7F 产测 | 0x01 / 0x04 | `{u8 op, ...}`，op 保留 |
 
-**TC275 侧消费规则（2026-09-26 定，`Middleware/com/link.c:link_dispatch`）**：上表五条 CMD 通道**形状不统一**，所以不存在"CMD 帧的 `payload[0]` 就是命令字节"这种通则——照它实现会把配置键号或配对 token 当命令真的执行。现行是 TYPE→CID→长度**三层白名单**，任何一层不过就整帧拒收并计数，绝不按偏移猜；细则与依据见 [22-link-spi-design.md](../20-design/22-link-spi-design.md) §5.2/§5.5。
+**TC275 侧消费规则（2026-09-26 定，`com/link.c:link_dispatch`）**：上表五条 CMD 通道**形状不统一**，所以不存在"CMD 帧的 `payload[0]` 就是命令字节"这种通则——照它实现会把配置键号或配对 token 当命令真的执行。现行是 TYPE→CID→长度**三层白名单**，任何一层不过就整帧拒收并计数，绝不按偏移猜；细则与依据见 [22-link-spi-design.md](../20-design/22-link-spi-design.md) §5.2/§5.5。
 
 ### 6.2 命令表（v2 段，0x01–0x32 语义与 demo 兼容；LINK 段经 §6.1c 映射为 SF TYPE/CID）
 
@@ -443,7 +443,7 @@ FLAGS: bit0=FRAG(段内后续还有分片)  bit1=FRAG_END(本帧末片)  bit2..7
 
 ### 6.3 遥测表（0x41 / SF `TYPE=0x02 CID=0x10`，20 ms 周期，**固定 38 字节**）
 
-偏移即契约：小端、**无对齐填充**（偏移 9/11/…/33 是刻意非对齐的）。真源三处必须同步——本表、`Middleware/sf/sf_telemetry.h`、从机 `proto_frames.c:proto_telemetry_*`，由 `test/host/test_sf_telemetry.c` 编译从机源码做双向交叉锁死。
+偏移即契约：小端、**无对齐填充**（偏移 9/11/…/33 是刻意非对齐的）。真源三处必须同步——本表、`mw/sf/sf_telemetry.h`、从机 `proto_frames.c:proto_telemetry_*`，由 `test/host/test_sf_telemetry.c` 编译从机源码做双向交叉锁死。
 
 | 偏移 | 字段 | 类型 | 说明 | TC275 现状 |
 |---|---|---|---|---|
@@ -630,7 +630,7 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 |---|---|---|
 | **M0 量产基线**（1 周） | demo 安全 P0 修复（看门狗链/急停竞态/心跳锁存/CPU2 栈）、仓库瘦身、CI headless 构建、主机单测框架 | 评估报告 P0 清零；CI 绿 |
 | **M1 架构重构**（2 周） | §3 目录结构落地、xcore v2 + E2E、SF + v2 双段协议、config/diag/telemetry、C6 固件骨架 + **SPI 链路打通（R7/G1 波形兼容为 M1 入口门禁）** | 主机单测达标；G1 通过；1/2/5 MHz 各档 CRC 误码 0（30 min/档） |
-| **M2 实时闭环**（2 周） | 编码器 ×4 解码（**解码层已实现** `Bsp/encoder.c`，TIEM 边沿中断 + 软件正交，见 §16 R2）、速度 PI + 双斜率、堵转/滑差/欠压保护、STBY 硬线、电池 ADC | 坡道/负载速度误差 <5%；堵转 500 ms 进安全态 |
+| **M2 实时闭环**（2 周） | 编码器 ×4 解码（**解码层已实现** `rt/encoder.c`，原 `Bsp/encoder.c`，TIEM 边沿中断 + 软件正交，见 §16 R2）、速度 PI + 双斜率、堵转/滑差/欠压保护、STBY 硬线、电池 ADC | 坡道/负载速度误差 <5%；堵转 500 ms 进安全态 |
 | **M3 OTA + 安全 + 产测**（2 周） | SBL + 双 bank 切换、双板 OTA、签名/secure boot、配对、产测序列 + 标定 + SN | 断电回滚 100/100；产测 ≤90 s/台 |
 | **M4 试产验证**（2 周） | HIL 回归、30 台试产、老化、EMC 预扫、制造/维修文档 | 72 h 老化 0 异常复位；试产直通率 ≥95% |
 
@@ -641,7 +641,7 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 | # | 事项 | 影响 | 处置 |
 |---|---|---|---|
 | R1 | 霍尔信号电平/开漏上拉与 3.3 V 兼容性未确认 | 编码器不可用 | EE 评审第 1 项；`encoder.h` 接口已隔离解码方案；实测 E1A 静态 3.3 V 可直连（23-wiring §8.1） |
-| R2 | ~~GPT12 四块引脚与现有 PWM/DIR/UART 冲突~~ → **已定案并实现**：GPT12 增量口与 ERU 输入均不在引出脚，GTM gen3 TIM 无 UDC，最终为 **GTM0 TIM 八通道 TIEM 双边沿中断 + 软件 ×4 正交，P33.0~P33.7 = X2-28~35**（纠错依据 23-wiring §8.3） | 闭环测速实现路径（`Bsp/encoder.c` 已落地） | 接线按 23-wiring.md §8.2 实施后，按 §8.4 台架判向 |
+| R2 | ~~GPT12 四块引脚与现有 PWM/DIR/UART 冲突~~ → **已定案并实现**：GPT12 增量口与 ERU 输入均不在引出脚，GTM gen3 TIM 无 UDC，最终为 **GTM0 TIM 八通道 TIEM 双边沿中断 + 软件 ×4 正交，P33.0~P33.7 = X2-28~35**（纠错依据 23-wiring §8.3） | 闭环测速实现路径（`rt/encoder.c` 已落地） | 接线按 23-wiring.md §8.2 实施后，按 §8.4 台架判向 |
 | R3 | PFlash1 擦写期间 CPU0 取指抖动 | OTA 时控制周期抖动 | 擦写全程仅 CPU2、例程驻 PSPR；OTA 中限速 50% |
 | R4 | （降级）UART 回退通道在整机线束上的信号完整性 | 仅影响回退/调试路径 | 回退通道固定 115200，不追求带宽；量产默认不走它 |
 | R5 | ed25519/TLS 在 C6 上的资源 | 固件体积 | C6 侧 mbedTLS 成熟；TC275 只做 ed25519 验签（OTA 时执行） |
@@ -663,9 +663,9 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 | `App/robot.c` | 拆分：`app/mission`（状态机+许可）+ `app/drive_policy`（速度策略）；心跳锁存/急停竞态按 §5.3 修复 |
 | `App/motor_algo.c` | 演进为 `rt/servo`（PI）+ `rt/motor_guard`；双斜率参数进配置 |
 | `Middleware/xcore.c` | 升级 xcore v2（E2E 头、类型化消息），锁与日志环设计保留 |
-| `Middleware/protocol.c` | 不再是 LINK 段**容器**真源：SF 编解码新建于 `Middleware/sf/`（目标态 `mw/sf/`，§6.1a），主机单测对象。命令**码表**（`PROTO_CMD_*`）仍是唯一真源并被 `link.c` 直接复用为 SF 载荷首字节，被取代的只是 UART 时代的 `AA 55` 容器；`mw/proto` 只保留手机 WS 段 v2 帧（§6.1b，在 C6 侧实现） |
-| `Middleware/wifi_at.c` | 退出主链路：目标态退到 `USE_WIFI_AT` 后默认关闭，**当前实现为反向开关**（默认 UART，`-D USE_SPI_LINK` 切 SPI，§5.6 末条）；保留为**调试控制台 + R7 失败回退 + 产线返工**通道；前端页面字符串迁移至 C6 assets |
-| （新增，无 demo 对应） | 已落地：`Middleware/com/link.c`（QSPI3 主机事务调度器，§5.6）、`Middleware/com/spi_hal_pins.c`（引脚/时钟档/前导模拟）、`Middleware/sf/sf_frame.c`（SF 编解码，`test/host/test_sf.c` 2855 断言通过）、`Middleware/sf/sf_telemetry.c`（38 B 遥测 codec，`test/host/test_sf_telemetry.c` 154 断言，含编译从机解码器的交叉验证，§6.3）。尚未落地：`com/auth`、`com/fw_stream`（OTA 走 SF TYPE 0x06/0x07，§9）、`rt/encoder`（→ §5.1，DRIVE 与速度/里程遥测都卡在它） |
+| `Middleware/protocol.c` | 不再是 LINK 段**容器**真源：SF 编解码落地于 `mw/sf/`（§6.1a），主机单测对象。命令**码表**（`PROTO_CMD_*`，现 `mw/proto/protocol.h`）仍是唯一真源并被 `link.c` 直接复用为 SF 载荷首字节，被取代的只是 UART 时代的 `AA 55` 容器；`mw/proto` 只保留手机 WS 段 v2 帧（§6.1b，在 C6 侧实现） |
+| `Middleware/wifi_at.c` | 现位于 `com/wifi_at.c`。退出主链路：目标态退到 `USE_WIFI_AT` 后默认关闭，**当前实现为反向开关**（默认 UART，`-D USE_SPI_LINK` 切 SPI，§5.6 末条）；保留为**调试控制台 + R7 失败回退 + 产线返工**通道；前端页面字符串迁移至 C6 assets |
+| （新增，无 demo 对应） | 已落地：`com/link.c`（QSPI3 主机事务调度器，§5.6）、`com/spi_hal_pins.c`（引脚/时钟档/前导模拟）、`mw/sf/sf_frame.c`（SF 编解码，`test/host/test_sf.c` 2855 断言通过）、`mw/sf/sf_telemetry.c`（38 B 遥测 codec，`test/host/test_sf_telemetry.c` 154 断言，含编译从机解码器的交叉验证，§6.3）。尚未落地：`com/auth`、`com/fw_stream`（OTA 走 SF TYPE 0x06/0x07，§9）；`rt/encoder` 解码层已落地（原 `Bsp/encoder.c`），§5.1 的量产增量（自检、`ERR_ENC_DEAD` 联动、标定回存）仍待做 |
 | `Bsp/motor.c` | 保留，增加 STBY 控制与钳位职责确认 |
 | `Bsp/uart.c` / `Bsp/stime.c` | 保留（console 归 diag；时基归 `rt/timebase` 并承担喂狗） |
 | `Cpu0/1/2_Main.c` | 重写为 §3.4 初始化时序（POST → 任务创建 → 看门狗链启动） |
@@ -680,7 +680,7 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 | # | 约束 | 后果与验证方式 |
 |---|---|---|
 | C1 | **向量表只有 0 号表生效**：lsl 中 `__INTTAB_CPU0/1/2` 同址，Tasking lsl 只收集 0 号表的 `IFX_INTERRUPT` 条目。CPU1/CPU2 的中断也必须写成 `IFX_INTERRUPT(fn, 0, prio)`，目标核由 SRC 的 `typeOfService = IfxSrc_Tos_cpuN` 决定 | 声明成 1/2 号表时 ISR 体被链接器按 unreferenced 删除，**链接与编译全部通过、中断永远不进**，表现为"收不到任何数据/节拍"。验证：查 `.map` 的 *Removed Sections* 里有无 `.*Isr.*` |
-| C2 | **ISR 优先级是跨核共享的全局资源**，编号不得重复。当前占用：CPU0 = 1（FreeRTOS 上下文切换）/2（STM0 tick）/4·8·12（ASCLIN0 RX/TX/ER）；CPU2 = 5·7·13（ASCLIN1 RX/TX/ER）+ **6·9·10（QSPI3 TX/RX/ER，`com/spi_hal_pins.c` 已登记）**；CPU1 = **16~23（GTM TIM0 编码器八通道 NEWVAL，`Bsp/encoder.c` 已登记）** | 新增中断（GTM TIM 溢出、回退 UART）从余下档位取并在本行登记；抢同优先级会让两核互相吞中断。验证：查 `.map` 的 *Removed Sections* 无 `.*Isr.*`，且 SRC 表无重复优先级 |
+| C2 | **ISR 优先级是跨核共享的全局资源**，编号不得重复。当前占用：CPU0 = 1（FreeRTOS 上下文切换）/2（STM0 tick）/4·8·12（ASCLIN0 RX/TX/ER）；CPU2 = 5·7·13（ASCLIN1 RX/TX/ER）+ **6·9·10（QSPI3 TX/RX/ER，`com/spi_hal_pins.c` 已登记）**；CPU1 = **16~23（GTM TIM0 编码器八通道 NEWVAL，`rt/encoder.c` 已登记）** | 新增中断（GTM TIM 溢出、回退 UART）从余下档位取并在本行登记；抢同优先级会让两核互相吞中断。验证：查 `.map` 的 *Removed Sections* 无 `.*Isr.*`，且 SRC 表无重复优先级 |
 | C3 | **调试串口只归 CPU0**：iLLD ASC 的软件 FIFO 与临界区仅在属主核内互斥 | 跨核直接 `printf` 会踩 FIFO 状态（偶发乱码/死循环）。CPU1/CPU2 日志统一走日志环（§5.5）由 CPU0 落串口 |
 | C4 | **FreeRTOS API 只允许 CPU0 调用**：移植层的 tick（STM0）、上下文切换中断与 CCPN 屏蔽全部只绑 CPU0 | CPU1/CPU2 的时基直读 STM0 自由计数（unsigned 减法回绕安全），不经 OS 抽象 |
 | C5 | **三核共用一个二进制**，启动期靠 `IfxCpu_emitEvent/waitEvent` 同步；共享数据必须在同步点**之前**由 CPU0 完成初始化 | 否则 CPU1/CPU2 可能读到未初始化锁/队列。量产初始化时序（§3.4）保留该前置条件 |

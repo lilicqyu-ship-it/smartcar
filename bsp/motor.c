@@ -1,4 +1,4 @@
-#include "motor.h"
+#include "bsp/motor.h"
 
 #include "IfxGtm_Atom_Pwm.h"
 #include "IfxGtm_PinMap.h"

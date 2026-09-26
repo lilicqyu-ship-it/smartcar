@@ -7,14 +7,14 @@
  *   - 4-byte padding, multi-frame segments, residual (FRAG) timeout
  *
  * Build & run (MSYS2/MinGW host):
- *   gcc -std=c99 -Wall -Wextra -Werror -O2 -I Middleware/sf \
- *       test/host/test_sf.c Middleware/sf/sf_frame.c -o test/host/test_sf.exe
+ *   gcc -std=c99 -Wall -Wextra -Werror -O2 -I . \
+ *       test/host/test_sf.c mw/sf/sf_frame.c -o test/host/test_sf.exe
  */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "sf_frame.h"
+#include "mw/sf/sf_frame.h"
 
 static int g_checks;
 static int g_failed;

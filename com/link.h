@@ -3,10 +3,10 @@
  *
  * Wire truth source: doc/20-design/22-link-spi-design.md SS4.2 (the pump
  * sequence), SS4.3 (shared register map), SS5 (SF frame) and SS6 (budgets).
- * Layers below: Middleware/com/spi_hal_pins.c (one raw half duplex
- * transaction) and Middleware/sf/sf_frame.c (frame codec).
+ * Layers below: com/spi_hal_pins.c (one raw half duplex
+ * transaction) and mw/sf/sf_frame.c (frame codec).
  *
- * This is the production LINK. The demo UART path (Middleware/wifi_at.c) stays
+ * This is the production LINK. The demo UART path (com/wifi_at.c) stays
  * the build default until gate G1 passes, so Cpu2_Main.c mounts one or the
  * other behind USE_SPI_LINK.
  */
@@ -15,10 +15,10 @@
 
 #include "Ifx_Types.h"
 
-#include "protocol.h"
+#include "mw/proto/protocol.h"
 #include "com/spi_hal_pins.h"
-#include "sf/sf_frame.h"
-#include "sf/sf_telemetry.h"
+#include "mw/sf/sf_frame.h"
+#include "mw/sf/sf_telemetry.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -170,7 +170,7 @@ boolean LINK_send(uint8 type, uint8 cid, const uint8 *payload, uint8 len);
 /* Queue one telemetry frame (SF_TYPE_TEL / SF_CID_TELEMETRY).
  *
  * The payload is the fixed 38 byte proto v2 0x41 layout from
- * Middleware/sf/sf_telemetry.h, and the length is not negotiable: the slave
+ * mw/sf/sf_telemetry.h, and the length is not negotiable: the slave
  * drops every TEL frame that is not exactly that CID with at least
  * SF_TELEMETRY_LEN bytes (c6_car components/c6_link/link.c:sf_to_v2), so a short
  * telemetry payload is not "less information", it is no information.

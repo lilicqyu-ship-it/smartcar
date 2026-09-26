@@ -1,4 +1,4 @@
-#include "stime.h"
+#include "bsp/stime.h"
 #include "IfxStm.h"
 
 static uint32 g_ticksPerMs;

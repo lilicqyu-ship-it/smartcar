@@ -1,5 +1,5 @@
-#include "xcore.h"
-#include "uart.h"
+#include "mw/xcore/xcore.h"
+#include "bsp/uart.h"
 #include "IfxCpu.h"
 
 #include <string.h>

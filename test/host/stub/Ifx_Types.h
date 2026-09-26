@@ -1,7 +1,7 @@
 /*
  * Ifx_Types.h - host stand-in for the iLLD base types
  *
- * Only what Middleware compiles against on the host. Lives on the include path
+ * Only what the firmware compiles against on the host. Lives on the include path
  * of test/host so the production sources stay untouched; the TriCore build never
  * sees this file.
  */

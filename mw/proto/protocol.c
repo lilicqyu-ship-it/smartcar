@@ -5,10 +5,10 @@
  *    fast-path e-stop bypass, everything else is queued to CPU0.
  *  - CPU0 (robot state owner) executes commands in PROTO_handleCommand,
  *    called from the 10 ms control task with the xcore queue drained. */
-#include "protocol.h"
-#include "robot.h"
-#include "xcore.h"
-#include "wifi_at.h"
+#include "mw/proto/protocol.h"
+#include "app/robot.h"
+#include "mw/xcore/xcore.h"
+#include "com/wifi_at.h"
 
 #include <string.h>
 

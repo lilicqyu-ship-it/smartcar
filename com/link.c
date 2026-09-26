@@ -5,10 +5,10 @@
  * the document fixes it: register snapshot, then read (higher priority), then
  * write, then liveness. Owner core: CPU2, bare metal, superloop context only.
  */
-#include "link.h"
+#include "com/link.h"
 
-#include "xcore.h"
-#include "stime.h"
+#include "mw/xcore/xcore.h"
+#include "bsp/stime.h"
 
 #include <string.h>
 

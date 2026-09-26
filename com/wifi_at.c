@@ -4,11 +4,11 @@
  * CPU0 control task through the xcore queue, status replies are built from
  * the status block CPU0 publishes, and debug output goes through the xcore
  * log bridge (CPU0 owns the console UART). */
-#include "wifi_at.h"
-#include "stime.h"
-#include "xcore.h"
-#include "protocol.h"
-#include "robot.h"
+#include "com/wifi_at.h"
+#include "bsp/stime.h"
+#include "mw/xcore/xcore.h"
+#include "mw/proto/protocol.h"
+#include "app/robot.h"
 #include "IfxAsclin_Asc.h"
 #include "IfxAsclin_PinMap.h"
 #include "IfxPort.h"

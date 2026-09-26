@@ -5,7 +5,7 @@
  * free of target-specific includes so the TriCore build, the ESP-IDF build on
  * the C6 side and the host unit tests all compile it verbatim.
  */
-#include "sf_frame.h"
+#include "mw/sf/sf_frame.h"
 
 #define SF_ST_MAGIC     0u
 #define SF_ST_FIELD     1u      /* VER .. CID (bytes 1 .. 7)                 */

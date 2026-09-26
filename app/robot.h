@@ -2,7 +2,7 @@
 #define ROBOT_H
 
 #include "Ifx_Types.h"
-#include "protocol.h"
+#include "mw/proto/protocol.h"
 
 #define ROBOT_HEARTBEAT_TIMEOUT_MS  100U   /* requirement section 22 */
 #define ROBOT_DEFAULT_SPEED         50     /* initial S for motion commands */

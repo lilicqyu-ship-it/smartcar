@@ -4,9 +4,9 @@
  * See sf_telemetry.h for the byte table this file is a transcription of, and for
  * why a short payload means the slave drops the frame entirely.
  */
-#include "sf_telemetry.h"
+#include "mw/sf/sf_telemetry.h"
 
-#include "sf_frame.h"          /* SF_putU16 / SF_putU32 and their getters      */
+#include "mw/sf/sf_frame.h"          /* SF_putU16 / SF_putU32 and their getters      */
 
 int16_t SF_telemetryEncode(const SF_Telemetry *tel, uint8_t *out, uint16_t cap)
 {

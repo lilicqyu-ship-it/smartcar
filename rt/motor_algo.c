@@ -1,8 +1,8 @@
-#include "motor_algo.h"
-#include "motor.h"
-#include "encoder.h"
-#include "stime.h"
-#include "xcore.h"
+#include "rt/motor_algo.h"
+#include "bsp/motor.h"
+#include "rt/encoder.h"
+#include "bsp/stime.h"
+#include "mw/xcore/xcore.h"
 
 /* Left side: MOTOR_A + MOTOR_B (TB6612#1), Right side: MOTOR_C + MOTOR_D (TB6612#2)
  * (same wheel mapping the robot controller uses) */

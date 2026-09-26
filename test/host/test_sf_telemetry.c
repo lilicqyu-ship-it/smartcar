@@ -8,25 +8,25 @@
  * against the C6's own decoder rather than against a copy of my expectations.
  *
  * Build and run (MSYS2/MinGW host, from the repo root):
- *   gcc -std=c99 -Wall -Wextra -Werror -O2 -I Middleware/sf \
- *       test/host/test_sf_telemetry.c Middleware/sf/sf_telemetry.c \
- *       Middleware/sf/sf_frame.c -o test/host/out/test_sf_telemetry.exe \
+ *   gcc -std=c99 -Wall -Wextra -Werror -O2 -I . \
+ *       test/host/test_sf_telemetry.c mw/sf/sf_telemetry.c \
+ *       mw/sf/sf_frame.c -o test/host/out/test_sf_telemetry.exe \
  *       && test/host/out/test_sf_telemetry.exe
  *
  * With the cross-check against the sibling c6_car checkout (recommended, it is
  * the part that tests the contract and not just the encoder). proto_frames.c
  * compiles warning free but is third party here, hence -Werror is dropped:
- *   gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I Middleware/sf \
+ *   gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
  *       -I ../c6_car/components/c6_proto -I ../c6_car/components/c6_sf \
- *       test/host/test_sf_telemetry.c Middleware/sf/sf_telemetry.c \
- *       Middleware/sf/sf_frame.c ../c6_car/components/c6_proto/proto_frames.c \
+ *       test/host/test_sf_telemetry.c mw/sf/sf_telemetry.c \
+ *       mw/sf/sf_frame.c ../c6_car/components/c6_proto/proto_frames.c \
  *       -o test/host/out/test_sf_telemetry.exe
  */
 #include <stdio.h>
 #include <string.h>
 
-#include "sf_frame.h"
-#include "sf_telemetry.h"
+#include "mw/sf/sf_frame.h"
+#include "mw/sf/sf_telemetry.h"
 
 static int g_checks;
 static int g_failed;

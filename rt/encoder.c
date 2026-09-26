@@ -1,4 +1,4 @@
-#include "encoder.h"
+#include "rt/encoder.h"
 
 #include "IfxGtm.h"
 #include "IfxGtm_Cmu.h"
@@ -7,8 +7,8 @@
 #include "IfxPort.h"
 #include "IfxSrc.h"
 #include "IfxCpu.h"
-#include "stime.h"
-#include "xcore.h"
+#include "bsp/stime.h"
+#include "mw/xcore/xcore.h"
 
 /* Wheel Hall encoder decode, CPU1 (doc/20-design/23-wiring.md section 8,
  * doc/20-design/21-software-design.md section 5.1).
@@ -59,11 +59,11 @@ static const IfxGtm_Tim_TinMap *const g_tinPins[8] = {
  * bench with the production test's direction check (doc 21 section 15.3). */
 static const sint8 g_encInvert[ENCODER_COUNT] = { +1, +1, +1, +1 };
 
-static volatile int32  g_count[ENCODER_COUNT];   /* x4 decoded, signed        */
+static volatile sint32  g_count[ENCODER_COUNT];   /* x4 decoded, signed        */
 static volatile uint32 g_lastEdgeMs[ENCODER_COUNT];
 
 /* published snapshot (ENCODER_task single writer) */
-static int32   g_speedMmS[2];
+static sint32   g_speedMmS[2];
 static uint32  g_odometerMm[2];
 static boolean g_alive;
 
@@ -192,17 +192,17 @@ void ENCODER_init(void)
 
 void ENCODER_task(void)
 {
-    static int32   prev[ENCODER_COUNT];
-    static int32   winL[ENC_WINDOW_MS];
-    static int32   winR[ENC_WINDOW_MS];
+    static sint32   prev[ENCODER_COUNT];
+    static sint32   winL[ENC_WINDOW_MS];
+    static sint32   winR[ENC_WINDOW_MS];
     static uint8   winIdx = 0u;
     static boolean winFull = FALSE;
     static float32 odomAcc[2];
     static uint32  lastMoveMs;
     static boolean firstCall = TRUE;
 
-    int32  d[ENCODER_COUNT];
-    int32  dl, dr;
+    sint32  d[ENCODER_COUNT];
+    sint32  dl, dr;
     uint32 now = STIME_nowMs();
     uint8  i;
 
@@ -237,14 +237,14 @@ void ENCODER_task(void)
     {
         /* median of the window (doc 21 section 5.1): insertion sort of <=8
          * samples, middle value(s) averaged; cost is negligible at 1 kHz. */
-        int32  sortedL[ENC_WINDOW_MS], sortedR[ENC_WINDOW_MS];
+        sint32  sortedL[ENC_WINDOW_MS], sortedR[ENC_WINDOW_MS];
         uint8  n     = winFull ? ENC_WINDOW_MS : winIdx;
         uint8  j, k;
-        int32  medL  = 0, medR = 0;
+        sint32  medL  = 0, medR = 0;
 
         for (j = 0u; j < n; j++)
         {
-            int32 v = winL[j];
+            sint32 v = winL[j];
 
             for (k = j; (k > 0u) && (sortedL[k - 1u] > v); k--)
             {
@@ -273,9 +273,9 @@ void ENCODER_task(void)
             float32 circMm            = 3.14159265f * 65.0f;   /* wheel dia, bench-confirm */
             float32 mmPerS            = ((float32)medL * 1000.0f / countsPerWheelRev) * circMm;
 
-            g_speedMmS[0] = (int32)mmPerS;
+            g_speedMmS[0] = (sint32)mmPerS;
             mmPerS        = ((float32)medR * 1000.0f / countsPerWheelRev) * circMm;
-            g_speedMmS[1] = (int32)mmPerS;
+            g_speedMmS[1] = (sint32)mmPerS;
         }
 
         odomAcc[0] += (dl >= 0) ? (float32)dl : (float32)(-dl);
@@ -304,13 +304,13 @@ void ENCODER_task(void)
     }
 }
 
-void ENCODER_getSpeedsMmS(int32 v[2])
+void ENCODER_getSpeedsMmS(sint32 v[2])
 {
     v[0] = g_speedMmS[0];
     v[1] = g_speedMmS[1];
 }
 
-void ENCODER_getRawCounts(int32 c[4])
+void ENCODER_getRawCounts(sint32 c[4])
 {
     uint8 i;
 

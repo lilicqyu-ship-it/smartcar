@@ -2,9 +2,9 @@
 
 以 **Infineon TC275**（KIT-AURIX-TC275-LITE）为实时运动控制核心、**ESP32-C6**（DevKitC-1 V1.2）为 Wi-Fi 通信模块、**TB6612 四路驱动板（轮趣 D24A）**驱动 4 个 MG310 直流减速电机的智能双轮差速小车。手机通过 Wi-Fi 连接小车的 AP，用网页或自定义二进制协议下发运动指令。
 
-> **两条线并存，别混淆**：本仓库**当前代码**是 demo 现状（C6 跑官方 esp-at、板间走 UART 115200、开环 PWM）；**量产设计基准**是 [doc/20-design/21-software-design.md](doc/20-design/21-software-design.md)（SDD V1.2：C6 自研固件、板间 SPI + SF 帧、编码器闭环、OTA/产测/安全）。工程与文档改动以 SDD 为准，本文其余章节描述的是现状。
+> **两条线并存，别混淆**：本仓库**当前代码**是 demo 现状（C6 跑官方 esp-at、板间走 UART 115200、开环 PWM）；**量产设计基准**是 [doc/20-design/21-software-design.md](doc/20-design/21-software-design.md)（SDD V1.3：C6 自研固件、板间 SPI + SF 帧、编码器闭环、OTA/产测/安全）。工程与文档改动以 SDD 为准，本文其余章节描述的是现状。
 
-核心设计原则：**通信与控制解耦、按实时特性分核、安全逻辑只在一侧** —— ESP32-C6 只做通信（不碰电机，挂死最多导致停车）；TC275 内部三核分区：CPU0（FreeRTOS）跑控制任务与安全状态机、CPU1（裸机 1 kHz）跑电机算法、CPU2（裸机）跑板间链路，核间通过 `Middleware/xcore` 共享内存交换命令、目标与状态。
+核心设计原则：**通信与控制解耦、按实时特性分核、安全逻辑只在一侧** —— ESP32-C6 只做通信（不碰电机，挂死最多导致停车）；TC275 内部三核分区：CPU0（FreeRTOS）跑控制任务与安全状态机、CPU1（裸机 1 kHz）跑电机算法、CPU2（裸机）跑板间链路，核间通过 `mw/xcore` 共享内存交换命令、目标与状态。
 
 ## 系统架构（当前代码 / demo）
 
@@ -16,18 +16,18 @@
                                               │   当前固件仍走下面这条 UART，SPI 启用待 G1 门禁
                                               ▼
  ┌───────────────────────── TC275 三核分区 ─────────────────────────┐
- │ CPU2 (裸机)        Middleware/wifi_at.c                          │
+ │ CPU2 (裸机)        com/wifi_at.c                                 │
  │   softAP+TCP 服务 · AT 收发 · +IPD 帧解码 · HTTP 控制页          │
  │        │ xcore 命令队列（急停另有直达 CPU1 的旁路位）            │
  │        ▼                                                         │
- │ CPU0 (FreeRTOS)    App/robot.c + 控制任务 (10 ms)                │
+ │ CPU0 (FreeRTOS)    app/robot.c + 控制任务 (10 ms)                │
  │   命令执行 · 心跳超时/故障锁存 · 状态发布 · 调试串口 ASCLIN0     │
  │        │ xcore 电机目标（左右 -1000..+1000 + 急停位 + seq）      │
  │        ▼                                                         │
- │ CPU1 (裸机 1 kHz)  App/motor_algo.c                              │
+ │ CPU1 (裸机 1 kHz)  rt/motor_algo.c                               │
  │   斜率限幅 · 失联看门狗 · 急停立即刹车                           │
  │        │                                                         │
- │        ▼ Bsp/motor.c → GTM ATOM PWM 20 kHz + 方向 GPIO           │
+ │        ▼ bsp/motor.c → GTM ATOM PWM 20 kHz + 方向 GPIO           │
  └──────────────────────────────────────────────────────────────────┘
                                     │ PWM/DIR
                                     ▼
@@ -51,17 +51,22 @@
 
 ## 目录结构
 
+2026-09-26 起按 SDD §3.4 目标态目录组织（demo 布局 `App/ Middleware/ Bsp/` 已重排；`app/robot.c→mission+drive_policy`、`rt/motor_algo→servo` 等文件级拆分仍属后续里程碑）：
+
 ```
 myCar/
 ├── Cpu0_Main.c            # CPU0 入口：XCORE 初始化 + FreeRTOS 任务（blinky/echo/robot 控制任务）
 ├── Cpu1_Main.c            # CPU1 入口：MOTOR_ALGO_run() 1 kHz 裸机超循环（电机算法）
-├── Cpu2_Main.c            # CPU2 入口：WIFI_main() 裸机超循环（ESP32-C6 AT 链路）
-├── App/                   # 应用层：robot 运动状态机(CPU0)、motor_algo 电机算法(CPU1)
-├── Middleware/            # 中间件：protocol 解码(CPU2)/执行(CPU0)、xcore 跨核共享内存、wifi_at AT 驱动(CPU2)
-├── Bsp/                   # 板级驱动：uart 调试串口(CPU0)、motor GTM PWM+D24A(CPU1)、stime 毫秒时基(CPU1/CPU2)
+├── Cpu2_Main.c            # CPU2 入口：WIFI_main() 裸机超循环（ESP32-C6 AT 链路；USE_SPI_LINK 切 SPI 泵）
+├── app/                   # 应用服务层（CPU0）：robot 运动状态机（目标态拆分 mission + drive_policy）
+├── rt/                    # 实时域（CPU1）：motor_algo 电机算法、encoder 霍尔编码器 ×4 测速
+├── com/                   # 通信域（CPU2）：wifi_at AT/UART 链路、link QSPI3 SF 帧主机泵、spi_hal_pins
+├── mw/                    # 中间件：xcore 跨核共享内存、proto 命令码表/v2 帧、sf SF 帧编解码
+├── bsp/                   # 板级驱动：uart 调试串口(CPU0)、motor GTM PWM+D24A(CPU1)、stime 毫秒时基(CPU1/CPU2)
 ├── Configurations/        # FreeRTOSConfig.h、Ifx_Cfg.h
 ├── FreeRtos/              # FreeRTOS 内核源码（TriCore 移植，仅 CPU0 运行）
 ├── Libraries/             # Infineon iLLD 驱动库
+├── test/host/             # 主机端单元测试（SF 帧/遥测契约，gcc 直编，见 32-tc275-dev-guide.md）
 └── doc/                   # 本项目文档
 ```
 
@@ -101,9 +106,10 @@ myCar/
 ## 当前状态与已知事项
 
 - ✅ 三核分区（CPU0 控制 / CPU1 电机算法 / CPU2 WiFi）、双轮 4 电机驱动、FreeRTOS、UART 调试输出、AP + HTTP 控制页、心跳超时与急停保护
-- ✅ Wi-Fi 模块已从 ESP8266 更换为 **ESP32-C6 esp-at**：驱动为 `Middleware/wifi_at.c`（CPU2 裸机超循环），AT 串口 P15.0/P15.1；跨核通信见 `Middleware/xcore`
+- ✅ Wi-Fi 模块已从 ESP8266 更换为 **ESP32-C6 esp-at**：驱动为 `com/wifi_at.c`（CPU2 裸机超循环），AT 串口 P15.0/P15.1；跨核通信见 `mw/xcore`
+- ✅ **目录已重排为 SDD §3.4 目标态**（2026-09-26）：`App/Middleware/Bsp` → `app/ rt/ com/ mw/ bsp/`，include 改为模块限定路径（如 `"com/link.h"`、`"mw/sf/sf_frame.h"`），`.cproject` 四个构建配置同步
 - ⚠️ 迁移遗留项：esp-at 的 UART1 默认开启 RTS 流控，建议在 AT 初始化序列开头补发 `AT+UART_CUR=115200,8,1,0,0`（见 [23-wiring.md](doc/20-design/23-wiring.md) §2）
-- ⚠️ `Middleware/wifi_at.c` 的 HTTP keep-alive 修复（控制页按键不灵敏根因）**待烧录验证**，未提交
+- ⚠️ `com/wifi_at.c` 的 HTTP keep-alive 修复（控制页按键不灵敏根因）**待烧录验证**，未提交
 - 📋 **板间链路 UART → SPI 已定案**（SDD V1.2 §3.7，接线表 23-wiring.md V1.4 §9.1，详细设计 22-link-spi-design.md）：TC275 QSPI3 主机 ↔ C6 SPI2 从机 + IRQ 握手，LINK 段换新 SF 帧；UART 保留为调试控制台与回退。**实物接线已按 §9.1 完成（2026-09-26，五行 + 共地）**，当前固件两侧仍走 UART；**启用入口 = G1 台架门禁**（验证 AURIX QSPI 无 CMD/ADDR 前导相位能否被 Espressif HD 从机解析，风险 R7），需先补 IRQ 10 kΩ 上拉确认与两侧最小验证代码
 - 📋 C6 侧自研固件在同级工程 `c6_car/`（审查修复未提交）
 - 📋 编码器接线方案已定稿**待确认实施**：MG310 内置 AB 编码器 → GTM0 TIM UDC 硬件正交计数，四对引脚集中在 X2-28~35（详见 23-wiring.md §8、SDD §5.1）

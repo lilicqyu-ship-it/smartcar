@@ -31,10 +31,10 @@
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
 #include "IfxPort.h"
-#include "uart.h"
-#include "xcore.h"
-#include "protocol.h"
-#include "robot.h"
+#include "bsp/uart.h"
+#include "mw/xcore/xcore.h"
+#include "mw/proto/protocol.h"
+#include "app/robot.h"
 
 #if defined(__TASKING__)
 #include "FreeRTOS.h"

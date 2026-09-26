@@ -35,12 +35,12 @@
 #include "Ifx_Types.h"
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
-#include "stime.h"
-#include "protocol.h"
+#include "bsp/stime.h"
+#include "mw/proto/protocol.h"
 
 #ifdef USE_SPI_LINK
 #include "com/link.h"
-#include "xcore.h"
+#include "mw/xcore/xcore.h"
 #include <string.h>
 
 /* 22 SS6: telemetry is aggregated at 20 ms. */
@@ -118,7 +118,7 @@ static void link_sendTelemetry(void)
     (void)LINK_sendTelemetry(&tel);
 }
 #else
-#include "wifi_at.h"
+#include "com/wifi_at.h"
 #endif
 
 extern IfxCpu_syncEvent cpuSyncEvent;
