@@ -3,11 +3,11 @@
 | 项 | 内容 |
 |---|---|
 | 文档编号 | **22**（域：设计·硬件）· 定位：21（SDD）§3.7/§6 的 LINK 段展开 · 上级索引 [00-index.md](../00-index.md) |
-| 文档版本 | V1.2（SDD V1.2b 的 LINK 段展开，结论**已回写基准**；V1.1 追加两侧代码落地状态（§7）与 E11/E12 两条实测证据；**V1.2 = C6 已烧录 SPI 固件后完善 TC275 侧的回写**：新增证据 **E13（两侧常量表三处不一致，按从机更正）**、**E14（`GEN` 回执跨两次从机任务、`CLOCK_SET` 单位 MHz）**，§4.3 补 `SF_GEN` 与 `ERRSTAT` 位表、§5.1 定 `FLAGS`、§5.2 补五条 CMD 通道的载荷形状、§5.5 分派规则改为三层白名单 + 38 B 遥测硬契约、§7 撤掉"主机缺 `LINK_gen()`"、§8 G2 已过项加遥测交叉单测、§9 加 R12。实施仍待 G1 台架门禁通过，未拍板项见 §11） |
+| 文档版本 | V1.3（V1.2 = C6 已烧录 SPI 固件后完善 TC275 侧的回写：E13/E14 证据、SF 常量对齐、三层白名单、38 B 遥测硬契约；**V1.3 = 2026-09-26 目录重排与构建闭合**：TC275 侧代码随 SDD V1.3 由 `Middleware/{com,sf}/` 迁至目标态 `com/`、`mw/sf/`（§7.2 表内路径已同步），**TASKING IDE 构建链接闭合达成**（Debug 0 错误，顺带修复 `rt/encoder.c` 的 `int32`→`sint32` 类型错，该文件此前从未被 TriCore 编译过），§11 第 1 问的 IDE 构建前置已销项。实施仍待 G1 台架门禁通过，未拍板项见 §11） |
 | 日期 | 2026-09-26 |
 | 参考体例 | [21-software-design.md](../20-design/21-software-design.md) §3.7（板间通信选型）、§6（协议）、§16（风险） |
 | 决策范围 | C6↔TC275 主链路物理层 = **SPI**；帧协议 = **新定 SPI 专用 SF 帧**；拓扑 = **TC275 QSPI3 主机 ↔ ESP32-C6 SPI2 从机（`spi_slave_hd`）+ 1 根握手线** |
-| 交付状态 | **设计 + 两侧固件代码 + 文档回写均已落地**：C6 侧见 `c6_car` `22e15f2`（§7.1），TC275 侧见 `Middleware/com/`+`Middleware/sf/`（§7.2），SDD **V1.2b**、23-wiring.md **V1.6**。主机单测：帧层 2855 断言 + 遥测层 154 断言（后者**把从机 `proto_frames.c` 编进同一可执行文件**做双向交叉）。**未做**：G1 台架波形验证、一次 TASKING IDE 构建确认链接闭合、整车通电联调。本轮**不提交**（等用户确认） |
+| 交付状态 | **设计 + 两侧固件代码 + 文档回写均已落地**：C6 侧见 `c6_car` `22e15f2`（§7.1），TC275 侧见 `com/`+`mw/sf/`（§7.2，2026-09-26 随 SDD V1.3 目录重排迁入目标态目录）。SDD **V1.3**、23-wiring.md **V1.8**。主机单测：帧层 2855 断言 + 遥测层 154 断言（后者**把从机 `proto_frames.c` 编进同一可执行文件**做双向交叉）。**TASKING IDE 构建链接已闭合**（2026-09-26，Debug 配置 0 错误）。**未做**：G1 台架波形验证、整车通电联调 |
 | 前提变化 | ① C6 改为自研固件（`c6_car` 工程），不再受 esp-at 约束；② `c6_car` 的 proto v2 与 myCar 的 demo 异或 CRC 帧**本来就不兼容**，链路换向时一并按 SPI 特性重定帧，成本最低 |
 
 ---
@@ -37,12 +37,12 @@
 | E6 | 从机硬件按命令字节识别 4 类事件（CMD7/CMD8/CMD9/CMDA）并产生中断 | `esp_hal_gpspi/.../spi_slave_hd_hal.c:43-151`（`SPI_LL_INTR_CMD7/8/9/A`） |
 | E7 | TC275 侧 QSPI3 四线可全部落在 LITE kit X1 空闲脚，且与编码器 8 线（P33.0~7 = X2-28~35）**零交集** | `myCar/Libraries/iLLD/TC27D/Tricore/_PinMap/IfxQspi_PinMap.h:160,194,226,287`：`IfxQspi3_SCLK_P33_11_OUT` / `_MTSR_P33_12_OUT` / `_MRST_P33_13_OUT` / `_SLSO5_P23_4_OUT`；空闲清单见 23-wiring.md §9 与记忆脚位表 |
 | E8 | **AURIX TC275 QSPI 没有"命令/地址相位"硬件概念，iLLD 主驱动也没有对应封装**（只有数据相位 + CS/时钟参数） | 全量 grep `Libraries/iLLD/TC27D/Tricore/Qspi` 无 `command_bits/address_bits/IfxQspi_AddrMode` 任何符号 |
-| E9 | **（结论已过时，保留作决策依据）** myCar 工程当时**没有任何** `IfxQspi` 使用点：量产链路的 SPI 侧在 TC275 上是全新代码 → 现已由 `Middleware/com/spi_hal_pins.c` 补上 | 采集时点 `App/`、`Bsp/`、`Middleware/` 内 grep `IfxQspi` 无命中；现有 WIFI 链路 = `Middleware/wifi_at.c`（ASCLIN1，P15.0/P15.1）上的 AT 文本 + `Middleware/protocol.c` 的 `AA 55 CMD LEN DATA XOR-CRC` 帧（`PROTO_MAX_PAYLOAD 16`，无 VER/SEQ） |
+| E9 | **（结论已过时，保留作决策依据）** myCar 工程当时**没有任何** `IfxQspi` 使用点：量产链路的 SPI 侧在 TC275 上是全新代码 → 现已由 `com/spi_hal_pins.c` 补上（原 `Middleware/com/spi_hal_pins.c`，随 SDD V1.3 目录重排迁移） | 采集时点 `App/`、`Bsp/`、`Middleware/` 内 grep `IfxQspi` 无命中；现有 WIFI 链路 = `Middleware/wifi_at.c`（ASCLIN1，P15.0/P15.1）上的 AT 文本 + `Middleware/protocol.c` 的 `AA 55 CMD LEN DATA XOR-CRC` 帧（`PROTO_MAX_PAYLOAD 16`，无 VER/SEQ） |
 | E10 | **（结论已过时，保留作决策依据）** c6_car 当时链路层是纯 UART 实现，且含 UART 专有的波特率协商状态机 → 现已改为 `spi_slave_hd`（`22e15f2`），0x44 状态机与 `C6_LINK_TX/RX_GPIO` 删除（§7.1） | 采集时点 `c6_car/components/c6_link/link.c`（`LINK_UART_NUM UART_NUM_1`、`uart_set_baudrate`、0x44 BAUD REQ/ACK/NAK）；`c6_car/components/c6_link/Kconfig`（`C6_LINK_TX_GPIO default 10` / `RX_GPIO default 11`） |
 | **E11**（2026-09-26 新增，作废"§3.1/§4.1 原稿的 IOM 上升沿中断"） | **P23.0 在本工程里做不出边沿中断，只能电平轮询**。TC27x 的 GPIO 边沿事件只有两条硬件通路：ERU 或 IOM 输入；两者都不覆盖 P23.x | ① `Libraries/iLLD/TC27D/Tricore/` 下**无 Eru 模块目录**（`ls` 无匹配），TC275 无 ERU；② `_PinMap/` 下**无 `IfxIom_PinMap.h`**（`ls` 无匹配），即 TC27D 没有"GPIO → IOM 输入"的映射表，P23.0 无法作为 IOM 监视输入；③ `Iom/` 全量 grep `initRiseInterrupt\|initFallInterrupt` **零命中**，iLLD 的 IOM 驱动只暴露 LAM/ISM 事件窗（`IfxIom.h` 的 `IfxIom_Lam*` 枚举），源是 GTM/Ccu6 捕获量而非任意 GPIO |
 | **E12**（2026-09-26 新增，前导相位的命令字节已可冻结） | Espressif HD 从机的**上 wire 命令字节**已用本地 IDF 5.4.4 源码确认，1 线模式下就是基命令值（`cmd_mod = 0x00`）：`WRBUF=0x01 / RDBUF=0x02 / WRDMA=0x03 / RDDMA=0x04 / SEG_END=0x05 / EN_QPI=0x06 / WR_END=0x07 / INT0=0x08`。注意 `spi_types.h` 里的 `SPI_CMD_HD_* = BIT(n)` 只是**内部枚举**（WRDMA=0x04、RDDMA=0x08…），不是 wire 值，照抄必错。且 **RDDMA 突发必须以一次 `INT0` 事务收尾、WRDMA 突发必须以 `WR_END` 收尾**，否则从机不释放缓冲 | `components/hal/esp32c6/include/hal/spi_ll.h:81-90`（`SPI_LL_BASE_CMD_HD_*` 实际值）、`:1575-1598`（`spi_ll_get_slave_hd_command()`：1 线时 `cmd_mod=0x00`，返回 `cmd_base \| cmd_mod`）、`:1605-1608`（`dummy_bits` 恒为 8）；对比 `components/hal/include/hal/spi_types.h:67-76`（内部枚举位值）；成对收尾规则见 `components/driver/test_apps/components/esp_serial_slave_link/essl_spi.c:184-250`（`essl_spi_rddma()` 末段后固定调 `essl_spi_rddma_done()`→`INT0`；`essl_spi_wrdma()` 固定调 `essl_spi_wrdma_done()`→`WR_END`）；寄存器地址按**字节**寻址并做 `addr % 72`（同文件 `:104,136`），例 `seg_master/main/app_main.c:37-48` 用 0/4/8/12/16；从机侧 `command_bits=address_bits=dummy_bits=8`、`mode=0`、`SPI_DEVICE_HALFDUPLEX`（`app_main.c:65-82`） |
 | **E13**（2026-09-26 新增，本轮完善 TC275 侧时发现的同名不同义） | 主机侧初版与已烧录的从机固件有**三处常量表分歧**，一律以**从机为准**修正（从机已烧录 = 事实真源）：① `FLAGS` bit1 从机是 `FRAG_END`（一帧的末片），主机原写 `ACK`——ACK 按 §5.2 是 TYPE `0x03`，不是 flag，位值复用会让分片帧被误判；② OTA 控制 CID 为 `0x30 BEGIN / 0x31 CHUNK / 0x32 ACK / 0x33 STATUS / 0x34 SWAP / 0x35 ABORT`（即 v2 CMD−0x30 关系保持），主机原写 `SF_CID_OTA_END` 且缺 `0x35`；③ `SF_ERRSTAT` 位图真值是 `CRC 0x01 / FMT 0x02 / SEQ 0x04 / RXOVFL 0x08 / TXOVFL 0x10 / TRUN 0x20 / LINKLOST 0x40`（各自粘滞），主机原表是臆造值 → G1 读到的错误位会被完全错读 | 从机侧 `c6_car/components/c6_sf/sf_frame.h:37-39,70-75,94-101`；主机侧改动见 §7.2 `sf_frame.h`/`link.h` 行；38 B 遥测偏移另由 `test/host/test_sf_telemetry.c` **直接编译从机 `proto_frames.c`** 做双向交叉验证（154 断言 / 0 失败） |
-| **E14**（2026-09-26 新增，`GEN` 回执的时序契约） | `GEN` 事务**不是** SPI 中断里同步应答的：从机 `cb_buffer_rx()`（ISR）只置 `gen_notif` 标志，真正的 `link_handle_gen()` 在从机链路任务里执行，处理完才 `regs_set_u32(SF_REG_CMDRSP, cmd \| result<<8)` 并 `regs_publish()`。因此主机侧"写 GEN → 读回执"必然跨**两次从机任务调度**，必须带超时而非死等。另两点同源事实：`SF_GEN_NOP(0)` 落到 `default` 分支 → 回执 `result = RSP_UNKNOWN(1)`（不是 OK），正好可当**清粘滞回执的探针**；`CLOCK_SET` 的 payload 单位是 **MHz**（从机 `payload * 1000000u`） | `c6_car/components/c6_link/link.c:561-569`（ISR 置标志）、`:603-607`（任务里处理）、`:484-518`（`link_handle_gen()`，`:510` 的 `* 1000000u`、`:512-514` 的 default→UNKNOWN、`:516` 回执拼装）；主机侧实现 `Middleware/com/link.c:link_genWriteAndWait()`/`LINK_gen()`/`LINK_setClock()`，超时 `LINK_GEN_TIMEOUT_MS = 20` |
+| **E14**（2026-09-26 新增，`GEN` 回执的时序契约） | `GEN` 事务**不是** SPI 中断里同步应答的：从机 `cb_buffer_rx()`（ISR）只置 `gen_notif` 标志，真正的 `link_handle_gen()` 在从机链路任务里执行，处理完才 `regs_set_u32(SF_REG_CMDRSP, cmd \| result<<8)` 并 `regs_publish()`。因此主机侧"写 GEN → 读回执"必然跨**两次从机任务调度**，必须带超时而非死等。另两点同源事实：`SF_GEN_NOP(0)` 落到 `default` 分支 → 回执 `result = RSP_UNKNOWN(1)`（不是 OK），正好可当**清粘滞回执的探针**；`CLOCK_SET` 的 payload 单位是 **MHz**（从机 `payload * 1000000u`） | `c6_car/components/c6_link/link.c:561-569`（ISR 置标志）、`:603-607`（任务里处理）、`:484-518`（`link_handle_gen()`，`:510` 的 `* 1000000u`、`:512-514` 的 default→UNKNOWN、`:516` 回执拼装）；主机侧实现 `com/link.c:link_genWriteAndWait()`/`LINK_gen()`/`LINK_setClock()`，超时 `LINK_GEN_TIMEOUT_MS = 20` |
 
 **由 E8 得到的关键结论（本方案唯一的真风险）**：TC275 作主机时，E1/E4 所要求的 `8bit CMD + 8bit ADDR + 8bit DUMMY` 前导相位只能用**普通数据字节**在 CS 有效期内连续发出（QSPI 的移位器把 CMD/ADDR/DATA 一律当数据搬）。Espressif 的 HD 从机是否会把这段波形正确解析，属于**必须在台架上一次性验证**的事项，不能靠读手册下结论 → 见 §8 门禁 G1。
 
@@ -121,13 +121,13 @@ loop:
 | 20 | `SF_CMDRSP` | 主机 `GEN` 命令的执行回执，编码 `cmd \| result<<8`（`result`：`0=OK`，`1=UNKNOWN`） | C6 |
 | 24 | `SF_GEN` | **唯一由主机写的寄存器**：`WR_REG`(WRBUF) 写 4 B `{cmd, p0, p1, p2}`，`p = p0\|p1<<8\|p2<<16`（24 bit） | TC275 |
 
-- `SF_ERRSTAT` 位值（E13，从机 `sf_frame.h:95-101`）：`CRC 0x01`（帧 CRC 失败）、`FMT 0x02`（帧格式/VER 错）、`SEQ 0x04`（SEQ 前进窗口违例）、`RXOVFL 0x08`（RX 队列溢出/丢帧）、`TXOVFL 0x10`（TX 队列满 BUSY）、`TRUN 0x20`（跨段残帧）、`LINKLOST 0x40`（连续 5 次 CRC 失败）。主机 `Middleware/com/link.h` 的 `LINK_ERRSTAT_SLAVE_*` 与此逐项对齐，G1 判读只看这七位。
+- `SF_ERRSTAT` 位值（E13，从机 `sf_frame.h:95-101`）：`CRC 0x01`（帧 CRC 失败）、`FMT 0x02`（帧格式/VER 错）、`SEQ 0x04`（SEQ 前进窗口违例）、`RXOVFL 0x08`（RX 队列溢出/丢帧）、`TXOVFL 0x10`（TX 队列满 BUSY）、`TRUN 0x20`（跨段残帧）、`LINKLOST 0x40`（连续 5 次 CRC 失败）。主机 `com/link.h` 的 `LINK_ERRSTAT_SLAVE_*` 与此逐项对齐，G1 判读只看这七位。
 - 从机发布区共 **28 B**（含 `GEN` 槽回显），主机每次 `RD_REG` 只读前 **24 B**（偏移 0..23）——读的是前缀，不冲突；`GEN` 是主写槽，主机读回它没有意义。
 - **`GEN` 命令表与时序（E14，主机侧 `LINK_gen()` 已按此实现）**：`NOP 0`（探针）、`RESET_LINK 1`（从机重置解析器与 RX SEQ）、`SILENCE_ON 2` / `SILENCE_OFF 3`（强制/恢复 IRQ 静默，G4 的台架注入手段）、`CLOCK_SET 4`（**payload 单位 MHz**，从机只记入诊断回显，真正的时钟归主机）。回执**跨两次从机任务调度**才可见，故 `LINK_gen()` 必须带超时（`LINK_GEN_TIMEOUT_MS = 20`），超时计 `stats.genNoAck`。因 `NOP` 走从机 `default` 分支（回执 `result=UNKNOWN`），`LINK_gen()` 的用法是：**先写一发 NOP 清掉粘滞的旧回执，再发真命令**，这样"重复下发同一条命令"也不会被旧回执假命中。
 - 前 5 项与官方 `segment_mode` 例子的 5 寄存器一一对应（E4），只是字段语义按本产品重定义；例子的读法（连读两次相同）作为硬性规范继承（E5）。
 - 命令/地址相位取值：`command_bits=8, address_bits=8, dummy_bits=8`（E3），低 4 位需命中 E6 的 CMD7/8/9/A 事件编码。**编码表已按 E12 的源码证据冻结**（不再等 G1 猜测）；G1 要验的是"TC275 用数据相位模拟出的这段前导，从机能否正确解析"，而不是"取值对不对"。
 
-### 4.4 事务类型（取值已按 E12 冻结，见 `Middleware/com/spi_hal_pins.h`）
+### 4.4 事务类型（取值已按 E12 冻结，见 `com/spi_hal_pins.h`）
 
 | 事务 | 方向 | CMD 字节 | ADDR 字节 | 数据相位 | 收尾事务 | 用途 |
 |---|---|---|---|---|---|---|
@@ -228,13 +228,13 @@ loop:
 | 0x60..0x6F OTA | 0x06/0x07 | CHUNK 载荷上限由 62 B 提到 **240 B**（SF LEN ≤248）→ 1 MB 镜像分片数从 16k 降到 4.3k |
 | 0x70..0x7F 产测 | 0x01/0x04 | 不变 |
 
-**TC275 侧已实现的分派规则**（`Middleware/com/link.c:link_dispatch`，2026-09-26 按已烧录从机固件重写）：**不存在"payload[0] 就是命令字节"这一条通用约定**——上一版文档这么写，而 §5.2 表里 `CFG`/`PAIR` 两个通道的首字节并不是命令码，照那句话实现就会把配置键号或配对 token 当成命令执行。现行规则是**三层白名单，任何一层不过就整帧拒收并计数，绝不按偏移猜**：
+**TC275 侧已实现的分派规则**（`com/link.c:link_dispatch`，2026-09-26 按已烧录从机固件重写）：**不存在"payload[0] 就是命令字节"这一条通用约定**——上一版文档这么写，而 §5.2 表里 `CFG`/`PAIR` 两个通道的首字节并不是命令码，照那句话实现就会把配置键号或配对 token 当成命令执行。现行规则是**三层白名单，任何一层不过就整帧拒收并计数，绝不按偏移猜**：
 
 1. **TYPE 白名单**：只有 `0x01 CMD` 会被当作命令；其它 TYPE（TEL/EVT/DBG…是 TC275 自己发的方向）落到 `stats.unhandledType`。
 2. **CID 白名单**：CMD 里只认 `DRIVE(0x01)`、`DIAG(0x03)`、`DPT(0x04)` 三条"带 op 前缀"的通道；`CFG(0x02)`、`PAIR(0x05)` 的首字节不是命令码，落到 `stats.cmdUnsupportedCid` 直接丢——**本工程 V1.0 不消费这两条通道**，将来要用必须按 §5.2 载荷表单独解析，不能复用命令入队路径。
 3. **长度/取值校验**：`LEN < 1` → `cmdBadLen`；`CID=DRIVE` 要求 `LEN == 5`（`{op,i16,i16}` 形状由发送端固定，不符即版本错配，按偏移解出来的是错命令而不是"部分命令"）→ 否则 `cmdBadLen`；`LEN-1 > PROTO_MAX_PAYLOAD(16)` → `cmdOversize`（**不截断**，截断会造出"看起来合法但语义错"的命令）。
 
-过检后的入队方式，按 op 分类（`Middleware/protocol.h` 的 `PROTO_CMD_*` 仍是命令码唯一真源）：
+过检后的入队方式，按 op 分类（`mw/proto/protocol.h` 的 `PROTO_CMD_*` 仍是命令码唯一真源）：
 
 | op | 处理 | 依据 |
 |---|---|---|
@@ -245,7 +245,7 @@ loop:
 | `DIAG`/`DPT` | 转发 op + 原样数据 `payload[1..]` | 这两条通道确实带 op（§5.2） |
 
 - **demo 状态里的 `heartbeatOk` / `emergencyStop` 两个布尔在 38 B 布局中没有槽位**（从机解码器的字段表是固定的，不能私自加字节）。它们的语义由 `state` + `faultCode` 承载：急停在 `App/robot.c:ROBOT_cmdEmergencyStop()` 里就是 `state=ROBOT_STATE_FAULT(0x0A)` + `fault=EMERGENCY_STOP`，心跳超时同理。**手机页面要判"是否急停"就读 `state`，不要再找独立标志位**。
-- **遥测方向（TC275→C6，`TYPE=0x02 / CID=0x10`）的 38 字节载荷是硬契约**：偏移表见 SDD §6.3 与 `Middleware/sf/sf_telemetry.h`，与 v2 `0x41` **逐字节相同**（从机不复建表，直接用 `proto_frames.c:proto_telemetry_decode` 解）。从机对 TEL 帧的接受条件是"CID 正确**且长度 ≥ 38**"（`c6_link/link.c:sf_to_v2`），所以短载荷不是"遥测少几个字段"，而是**整帧被丢弃、手机页面无数据**——主机初版发 6 字节正是这个故障形态，现已改为 38 字节并由 `test/host/test_sf_telemetry.c` 编译从机解码器做双向交叉验证。`linkErrRate` 在 SPI 口径下由 `crcErr + seqErr` 对已收帧数算出（0.1% 单位）；`linkRttMs` 需 `HBT` 事务打点才有真值，当前填 0。
+- **遥测方向（TC275→C6，`TYPE=0x02 / CID=0x10`）的 38 字节载荷是硬契约**：偏移表见 SDD §6.3 与 `mw/sf/sf_telemetry.h`，与 v2 `0x41` **逐字节相同**（从机不复建表，直接用 `proto_frames.c:proto_telemetry_decode` 解）。从机对 TEL 帧的接受条件是"CID 正确**且长度 ≥ 38**"（`c6_link/link.c:sf_to_v2`），所以短载荷不是"遥测少几个字段"，而是**整帧被丢弃、手机页面无数据**——主机初版发 6 字节正是这个故障形态，现已改为 38 字节并由 `test/host/test_sf_telemetry.c` 编译从机解码器做双向交叉验证。`linkErrRate` 在 SPI 口径下由 `crcErr + seqErr` 对已收帧数算出（0.1% 单位）；`linkRttMs` 需 `HBT` 事务打点才有真值，当前填 0。
 - **急停旁路在 `link_forward()` 里、白名单之后**：`op == 0x32 (EMERGENCY_STOP)` 时先落 `XCORE_estopRequest()`（不等 CPU0 出队）再照常入队。这条路径是通的，因为从机把 16 条驾驶族命令（含 `0x30/0x31/0x32`、`0x20/0x21`）**全部**送进 `CID_DRV` 且固定 `LEN=5`（`c6_link/link.c:v2_is_drv`，已逐条核对）；也就是说急停**只能**走 CMD/DRIVE 这一条路，`CFG`/`PAIR` 通道里没有急停，白名单挡掉它们不会挡住急停。
 - CPU0 命令队列满 → 计数 `cmdRejectedQueue` + 一条日志，**不覆盖旧命令**；该计数器必须为 0，否则说明 §5.2 的"命令不丢"没做到。
 
@@ -283,26 +283,26 @@ loop:
 | `components/c6_ota/*` | CHUNK 上限 62 B → 240 B（同步 §5.5）；分片计数逻辑随之简化 | **已完成**（`link_send_ota_chunk` 快路径） |
 | `c6_car/doc/04-link.md`、`02-proto.md`、`08-bridge.md` | 同步（UART 段落改为 SPI；波特率协商章节删除） | **已完成**（`b8e12bf`） |
 
-**两侧兼容性静态核对（2026-09-26 第一轮，源码比对）**：`Middleware/com/link.h` 与 `components/c6_sf/sf_frame.h` 逐项比对结果为——寄存器偏移 `READY/TX_PENDING/RX_ROOM/ALIVE/ERRSTAT/CMDRSP = 0/4/8/12/16/20` 一致、`SF_READY_MAGIC = 0x5F534601` 一致、`SF_MAX_PAYLOAD = 248` 一致、ALIVE 步进 10 ms 对 500 ms 判活窗口一致、主机单段 260 B ≤ 从机段缓冲 512 B 一致。主机侧一次 `RDBUF` 读 24 B（偏移 0..23），从机发布 28 B（含 `GEN` 槽回显）→ 读的是前缀，不冲突。**这只是源码比对，不等于波形通**（G1 未做）。
+**两侧兼容性静态核对（2026-09-26 第一轮，源码比对）**：`com/link.h` 与 `components/c6_sf/sf_frame.h` 逐项比对结果为——寄存器偏移 `READY/TX_PENDING/RX_ROOM/ALIVE/ERRSTAT/CMDRSP = 0/4/8/12/16/20` 一致、`SF_READY_MAGIC = 0x5F534601` 一致、`SF_MAX_PAYLOAD = 248` 一致、ALIVE 步进 10 ms 对 500 ms 判活窗口一致、主机单段 260 B ≤ 从机段缓冲 512 B 一致。主机侧一次 `RDBUF` 读 24 B（偏移 0..23），从机发布 28 B（含 `GEN` 槽回显）→ 读的是前缀，不冲突。**这只是源码比对，不等于波形通**（G1 未做）。
 
 **同一轮比对的失败项（诚实记录，E13）**：上一段那句"逐项一致"当时是**按我列的清单**比对的，结论不完整——把从机头文件的**全部**常量拉过来逐行比之后，查出三处主机侧臆造/错位（`FLAGS` bit1 名、OTA CID 缺 `0x35`、`ERRSTAT` 位图整张表），另查出两处**行为**级缺陷（分派不看 CID、遥测只发 6 B）。教训已固化成两条做法：① 常量对齐必须"整表覆盖"而不是"抽查关心的项"；② 跨侧布局由 `test_sf_telemetry.c` 那种**直接编译对方源码**的测试来保证，文档承诺不算验证。
 
-**主机侧 `GEN` 下发（原"尚未实现"项，现已补齐）**：`LINK_gen()` / `LINK_setClock()` 已落地（`Middleware/com/link.c`），语义与时序见 §4.3 与 E14 —— `WRBUF` 写 `SF_REG_GEN(24)` 4 B，NOP 探针清粘滞回执，20 ms 超时计 `genNoAck`。这解锁了 **G4 的 `SILENCE_ON` 故障注入**（台架上可强制从机不拉 IRQ）与 G5 的**运行时档位镜像**（`CLOCK_SET` 只让从机记录诊断，时钟真值仍归主机）。
+**主机侧 `GEN` 下发（原"尚未实现"项，现已补齐）**：`LINK_gen()` / `LINK_setClock()` 已落地（`com/link.c`），语义与时序见 §4.3 与 E14 —— `WRBUF` 写 `SF_REG_GEN(24)` 4 B，NOP 探针清粘滞回执，20 ms 超时计 `genNoAck`。这解锁了 **G4 的 `SILENCE_ON` 故障注入**（台架上可强制从机不拉 IRQ）与 G5 的**运行时档位镜像**（`CLOCK_SET` 只让从机记录诊断，时钟真值仍归主机）。
 
 ### 7.2 TC275 侧（`myCar`）—— **2026-09-26 已落地，状态见"实测"列**
 
-> 目录名按本工程既有布局落在 `Middleware/` 下（原稿写的 `com/`、`mw/sf/` 是 SDD 目标态目录，`Middleware/` 已是本工程 include 根，故未新建顶层目录）。
+> 目录位置：落地时曾按当时布局放在 `Middleware/` 下，**2026-09-26 随 SDD V1.3 目录重排已迁至目标态 `com/`、`mw/sf/`**，下表路径为现路径。
 
 | 文件 | 动作 | 实测状态 |
 |---|---|---|
-| `Middleware/sf/sf_frame.c/.h` | SF 帧编解码（纯 C99，无 OS/iLLD 依赖，TriCore/RISC-V/主机三目标同份源码） | **已完成**：`test/host/test_sf.c` 2855 项断言 0 失败（含 0..248 全长度往返、段内多帧、乱字节重同步、SEQ 窗口与回绕、残帧超时、400 万字节随机风暴 + 金库哨兵未越界）→ **门禁 G2 的帧层部分已过**。本轮按 E13 把 `FLAGS`/OTA CID 与从机对齐，并删掉零引用、从机也没有的 `SF_FLAG_RESYNC 0x04` |
-| `Middleware/sf/sf_telemetry.c/.h`（新增） | 38 B 遥测载荷 codec（纯 C99、显式小端、不做结构体强转——TriCore 大端） | **已完成并验证**：`test/host/test_sf_telemetry.c` 把**从机自己的 `proto_frames.c` 编进同一可执行文件**做双向交叉（我编→从机解 / 从机编→我解，含"短于 38 B 必须拒解"），`154 断言 / 0 失败`，`-Wall -Wextra -Werror` 干净。全表仅此一条测试直接证明"两侧字节一致"，其余都是源码比对 |
-| `Middleware/com/spi_hal_pins.c/.h` | QSPI3 主机：E7 符号集中、§4.4 前导模拟、时钟档位表、一次裸事务。**ISR 声明在 0 号向量表**（SDD §18 C1），优先级 **TX=6 / RX=9 / ER=10**（C2 表中 CPU2 空档，避开 ASCLIN1 的 5/7/13） | 已完成，未经 IDE 编译（本机无 TriCore 工具链）。已核对：`channelBasedCs=disabled` + `mode=short` 下 iLLD 全程保持 CS 有效（"begin stream" BACON + 末字 LAST=1，`deactivateSlso()` 仅在 `rx.remaining==0` 时执行）→ 前导与数据在同一次片选内 |
-| `Middleware/com/link.c/.h` | §4.2 泵：寄存器连读两次取稳定快照（重试 3 次）、`TX_PENDING` 门控 RDDMA 突发 + `INT0` 收尾、`RX_ROOM` 门控 WRDMA 突发 + `WR_END` 收尾、`SF_ALIVE` 500 ms 判活、P23.0 **电平轮询 + 2 ms 保活**（原稿"IOM 中断"作废，E11）、§5.5 命令入队；本轮再加 `LINK_gen()`/`LINK_setClock()`（§4.3 + E14）、`LINK_sendTelemetry()`、按 TYPE/CID 白名单的 `link_dispatch` | 已完成（主机 `-Wall -Wextra -Werror` 语法干净）；`Link_Health` 作为 G1/G5 的观测点（CPU2 无可打印串口，见 SDD §18 C3）。**本轮修掉的自身缺陷**：① 分派不看 CID（会把 `CFG`/`PAIR` 首字节当命令执行，§5.2）；② `txFrames` 按"段"而非"帧"计数，G5 的吞吐判据会虚高；③ `ERRSTAT` 位表臆造（E13）；④ 遥测 6 B（E13/§5.5）。新增观测计数器：`cmdBadLen`/`cmdUnsupportedCid`/`cmdUnsupportedOp`/`unhandledType`/`genWrites`/`genNoAck`，G1 台架上这几个**必须全 0 或可解释** |
+| `mw/sf/sf_frame.c/.h` | SF 帧编解码（纯 C99，无 OS/iLLD 依赖，TriCore/RISC-V/主机三目标同份源码） | **已完成**：`test/host/test_sf.c` 2855 项断言 0 失败（含 0..248 全长度往返、段内多帧、乱字节重同步、SEQ 窗口与回绕、残帧超时、400 万字节随机风暴 + 金库哨兵未越界）→ **门禁 G2 的帧层部分已过**。本轮按 E13 把 `FLAGS`/OTA CID 与从机对齐，并删掉零引用、从机也没有的 `SF_FLAG_RESYNC 0x04` |
+| `mw/sf/sf_telemetry.c/.h`（新增） | 38 B 遥测载荷 codec（纯 C99、显式小端、不做结构体强转——TriCore 大端） | **已完成并验证**：`test/host/test_sf_telemetry.c` 把**从机自己的 `proto_frames.c` 编进同一可执行文件**做双向交叉（我编→从机解 / 从机编→我解，含"短于 38 B 必须拒解"），`154 断言 / 0 失败`，`-Wall -Wextra -Werror` 干净。全表仅此一条测试直接证明"两侧字节一致"，其余都是源码比对 |
+| `com/spi_hal_pins.c/.h` | QSPI3 主机：E7 符号集中、§4.4 前导模拟、时钟档位表、一次裸事务。**ISR 声明在 0 号向量表**（SDD §18 C1），优先级 **TX=6 / RX=9 / ER=10**（C2 表中 CPU2 空档，避开 ASCLIN1 的 5/7/13） | 已完成，**已随 2026-09-26 IDE 构建闭合通过 TriCore 编译**。已核对：`channelBasedCs=disabled` + `mode=short` 下 iLLD 全程保持 CS 有效（"begin stream" BACON + 末字 LAST=1，`deactivateSlso()` 仅在 `rx.remaining==0` 时执行）→ 前导与数据在同一次片选内 |
+| `com/link.c/.h` | §4.2 泵：寄存器连读两次取稳定快照（重试 3 次）、`TX_PENDING` 门控 RDDMA 突发 + `INT0` 收尾、`RX_ROOM` 门控 WRDMA 突发 + `WR_END` 收尾、`SF_ALIVE` 500 ms 判活、P23.0 **电平轮询 + 2 ms 保活**（原稿"IOM 中断"作废，E11）、§5.5 命令入队；本轮再加 `LINK_gen()`/`LINK_setClock()`（§4.3 + E14）、`LINK_sendTelemetry()`、按 TYPE/CID 白名单的 `link_dispatch` | 已完成（主机 `-Wall -Wextra -Werror` 语法干净，**已通过 TriCore 编译与链接**）；`Link_Health` 作为 G1/G5 的观测点（CPU2 无可打印串口，见 SDD §18 C3）。**本轮修掉的自身缺陷**：① 分派不看 CID（会把 `CFG`/`PAIR` 首字节当命令执行，§5.2）；② `txFrames` 按"段"而非"帧"计数，G5 的吞吐判据会虚高；③ `ERRSTAT` 位表臆造（E13）；④ 遥测 6 B（E13/§5.5）。新增观测计数器：`cmdBadLen`/`cmdUnsupportedCid`/`cmdUnsupportedOp`/`unhandledType`/`genWrites`/`genNoAck`，G1 台架上这几个**必须全 0 或可解释** |
 | `Cpu2_Main.c` | 挂载 `LINK_init(SPIHAL_CLK_1M)` + `LINK_main()` 超循环 + 20 ms 遥测发送 | 已完成，**默认仍走 demo UART 路径**，SPI 路径需 `-D USE_SPI_LINK` 打开（G1 未过前不改默认，见下表 `wifi_at.c` 行）。遥测已改填完整 `SF_Telemetry`：**有真源的**只有 `seq`/`uptimeMs`/`state`/`faultCode`/`fwVer`(0x00010200)/`linkErrRate`；**其余显式填 0 并在代码里逐条注明缺什么**——`v_target/v_meas` 缺编码器测速与 §11 运动学、`battery_mv/pct` 缺 ADC 通道、`odo_*` 缺编码器累计、`linkRttMs` 缺 HBT 打点、`hwRev` 缺板级标识来源。手机页面据此显示 0 是**如实**，不是丢包 |
-| `.cproject` | 两个 TASKING 配置解除 `Libraries/iLLD/TC27D/Tricore/Qspi{,/.Std,.SpiMaster}` 与 `Dma{,/.Dma,.Std}` 排除项（`Qspi/SpiSlave` 仍排除）；`test/` 加入排除（主机单测不得进 TriCore 构建） | 已完成，**待一次 IDE 构建确认链接闭合**（`IfxQspi_SpiMaster.c` 即使 `useDma=FALSE` 也引用三个非内联 `IfxDma_Dma_*`，故 Dma 必须一并放开） |
-| `Middleware/wifi_at.c` | 量产构建默认关闭（`USE_WIFI_AT`），保留为 G1 失败回退与产线返工通道 | **未做**：当前是反向开关（默认 UART，`USE_SPI_LINK` 才切 SPI）。G1 通过后翻转默认值，同步改 SDD §5.6 末条（该条已按此口径写明"现状与目标态相反"） |
-| `Middleware/protocol.c` | 不再是 LINK 帧真源；命令语义迁移进 `mw/sf` | 保持不动：命令**码表**仍是唯一真源（`link.c` 把白名单通道 `CMD/DRIVE·DIAG·DPT` 的 op 字节直接当 `PROTO_CMD_*` 用，`CFG`/`PAIR` 不参与，§5.2/§5.5），被取代的只是 UART 时代的 `AA 55` 容器 |
+| `.cproject` | 两个 TASKING 配置解除 `Libraries/iLLD/TC27D/Tricore/Qspi{,/.Std,.SpiMaster}` 与 `Dma{,/.Dma,.Std}` 排除项（`Qspi/SpiSlave` 仍排除）；`test/` 加入排除（主机单测不得进 TriCore 构建）；V1.3 又随目录重排把 `App/Bsp/Middleware{,/com,/sf}` include 项换成 `app/bsp/mw{,/xcore,/proto}/com/mw/sf` | 已完成，**IDE 构建链接闭合已于 2026-09-26 达成**（Debug 配置 0 错误；`IfxQspi_SpiMaster.c` 即使 `useDma=FALSE` 也引用三个非内联 `IfxDma_Dma_*`，故 Dma 必须一并放开——构建结果证实该判断） |
+| `com/wifi_at.c`（原 `Middleware/wifi_at.c`） | 量产构建默认关闭（`USE_WIFI_AT`），保留为 G1 失败回退与产线返工通道 | **未做**：当前是反向开关（默认 UART，`USE_SPI_LINK` 才切 SPI）。G1 通过后翻转默认值，同步改 SDD §5.6 末条（该条已按此口径写明"现状与目标态相反"） |
+| `mw/proto/protocol.c`（原 `Middleware/protocol.c`） | 不再是 LINK 帧真源；命令语义迁移进 `mw/sf` | 保持不动：命令**码表**仍是唯一真源（`link.c` 把白名单通道 `CMD/DRIVE·DIAG·DPT` 的 op 字节直接当 `PROTO_CMD_*` 用，`CFG`/`PAIR` 不参与，§5.2/§5.5），被取代的只是 UART 时代的 `AA 55` 容器 |
 | [23-wiring.md](../20-design/23-wiring.md) §9、§2 | §9 标题从"预研方案，待拍板"改"V1.0 选定"；§2 标注 UART 降级为调试/回退通道 | 已随 V1.4 接线更新完成；V1.5 再按本文 E11/E12 改握手与 §9.2 落地状态 |
 
 ### 7.3 不在本轮范围
@@ -315,7 +315,7 @@ loop:
 
 ## 8. 验证计划与门禁（逐档，不可跳级）
 
-> **执行状态（2026-09-26 第二轮）**：**G2 的"主机单测"子项已过两件事**——① SF 编解码（`test/host/test_sf.c`，2855 断言 / 400 万随机字节）；② 38 B 遥测布局（`test/host/test_sf_telemetry.c`，154 断言，且是把从机 `proto_frames.c` 编进来做双向交叉，这条才算跨侧证据）。**其余门禁全部未执行**。前置条件**只剩一件**：TC275 侧一次 TASKING IDE 构建（确认 QSPI+DMA 链接闭合，§7.2）——上一轮列的"缺 `LINK_gen()`"已补齐（§7.1 末），G4 的注入手段在软件侧不再欠账。
+> **执行状态（2026-09-26 第三轮）**：**G2 的"主机单测"子项已过两件事**——① SF 编解码（`test/host/test_sf.c`，2855 断言 / 400 万随机字节）；② 38 B 遥测布局（`test/host/test_sf_telemetry.c`，154 断言，且是把从机 `proto_frames.c` 编进来做双向交叉，这条才算跨侧证据）。**TC275 侧 TASKING IDE 构建链接闭合也已达成**（2026-09-26，Debug 0 错误，QSPI+DMA 链接证实闭合；顺带修复 `rt/encoder.c` 的 `int32` 类型错——该文件此前从未被 TriCore 编译过）。**剩余门禁全部未执行**：G1 波形兼容是下一步唯一入口。G4 的注入手段在软件侧不再欠账。
 
 | 门禁 | 内容 | 通过判据 | 失败动作 |
 |---|---|---|---|
@@ -337,7 +337,7 @@ loop:
 | R9 | 寄存器读非原子（E5） | 主机误判待发长度 | 连读两次相同 + 重试 3 次 + 不可信即判失联（§4.3/§5.4） |
 | R10 | C6 自身 OTA 写 flash 期间 SPI 从机是否掉事务 | OTA 过程链路抖动 | 台架实测项；必要时 OTA 写块间隙插入 HBT 保活，或 OTA 期间限速/限动（对齐 SDD R3 的"OTA 中限速 50%"） |
 | R11 | IRQ 开漏上拉缺失/杜邦线长 → **电平读错**（握手是轮询不是中断，E11） | 偶发空读事务（只耗轮询带宽）、命令下行时延退化 | 2 ms 保活轮询 + 寄存器连读校验兜底；量产线束定长屏蔽，产测勾选该脚静态电平 |
-| R12 | **两侧常量表各自漂移**（E13 已实测发生三次：FLAGS bit1、OTA CID、ERRSTAT 位图）。协议改动后只改一侧、或文档与代码不同步，都会在台架上表现为"莫名 CRC/格式错"或"错误位读反" | 联调期定位成本，且可能只在提速档出现 | ① `sf_frame.h` 与从机 `c6_sf/sf_frame.h` 的常量必须**整表覆盖式**比对，不抽查；② 38 B 载荷由 `test_sf_telemetry.c` 编译对方源码来锁死，**改过 `Middleware/sf/` 或 `c6_car/components/c6_sf` 必须重跑**；③ 本轮起该测试与门禁 G2 绑定（§8） |
+| R12 | **两侧常量表各自漂移**（E13 已实测发生三次：FLAGS bit1、OTA CID、ERRSTAT 位图）。协议改动后只改一侧、或文档与代码不同步，都会在台架上表现为"莫名 CRC/格式错"或"错误位读反" | 联调期定位成本，且可能只在提速档出现 | ① `sf_frame.h` 与从机 `c6_sf/sf_frame.h` 的常量必须**整表覆盖式**比对，不抽查；② 38 B 载荷由 `test_sf_telemetry.c` 编译对方源码来锁死，**改过 `mw/sf/` 或 `c6_car/components/c6_sf` 必须重跑**；③ 本轮起该测试与门禁 G2 绑定（§8） |
 | Q3 | 20 MHz 是否值得（收益 vs 线束成本） | 量产成本 | 5 MHz 已满足全部指标；20 MHz 仅作探索档，不承诺 |
 | Q4 | 是否要第二根握手线 `TX_RDY` | 时延微优化 | 本版不接，留焊位；G3 数据不支持再评估 |
 
@@ -371,7 +371,7 @@ loop:
 
 ## 11. 评审需要你拍板的三件事
 
-> **状态更新（2026-09-26，V1.1）**：实物接线已按 §9.1 完成（23-wiring.md V1.5），**两侧固件代码也已落地**（§7.1/§7.2）。三问仍然开放；第 1 问缺的只剩**逻辑分析仪**——两侧验证代码不再缺，但 TC275 侧还需要一次 TASKING IDE 构建确认 QSPI+DMA 链接闭合（本机无 TriCore 工具链，这一条我无法自证）。
+> **状态更新（2026-09-26，V1.3）**：实物接线已按 §9.1 完成（23-wiring.md V1.5），**两侧固件代码也已落地**（§7.1/§7.2），**TC275 侧 TASKING IDE 构建链接闭合已达成**（原第 1 问的软件侧前置，2026-09-26 销项）。三问仍然开放；第 1 问缺的只剩**逻辑分析仪**与台架动作。
 
 1. **G1 前置验证的投入**：需要一个"两台 ESP32 抓参考波形 + 逻辑分析仪"的台架动作。若手边没有逻辑分析仪，G1 可退化为"TC275 发、C6 只看事件/计数"的黑盒判定，但失败时定位成本高得多。
 2. **量产基线时钟档**：建议 **5 MHz**（保守、杜邦线可跑、指标全部达标）。若确定量产用定长屏蔽线束，可直接以 10 MHz 为基线目标，省一轮返工。
