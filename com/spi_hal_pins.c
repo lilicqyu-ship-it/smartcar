@@ -87,10 +87,13 @@ static void spiHal_configureChannel(void)
     chConfig.ch.baudrate = (float32)SPIHAL_clockHz(g_tier);
 
     /* P23.4 is SLSO5, the only chip select that is not taken by another
-     * function on this kit (SDD C7). */
+     * function on this kit (SDD C7). Speed1 (the iLLD example value and what
+     * the bench bring-up ran with) keeps the CS edge slow on the jumper wire;
+     * a fast CS edge plus a single thin ground return showed up as the slave
+     * counting phantom bits. */
     chConfig.sls.output.pin    = &IfxQspi3_SLSO5_P23_4_OUT;
     chConfig.sls.output.mode   = IfxPort_OutputMode_pushPull;
-    chConfig.sls.output.driver = IfxPort_PadDriver_cmosAutomotiveSpeed4;
+    chConfig.sls.output.driver = IfxPort_PadDriver_cmosAutomotiveSpeed1;
 
     /* CS low for the complete exchange: with channelBasedCs disabled iLLD
      * writes a "begin stream" BACON before the first word and sets LAST=1 only
@@ -100,9 +103,17 @@ static void spiHal_configureChannel(void)
     chConfig.channelBasedCs = IfxQspi_SpiMaster_ChannelBasedCs_disabled;
     chConfig.mode           = IfxQspi_SpiMaster_Mode_short;
 
-    /* iLLD defaults are already SPI mode 0 (clock idle low, sample on the
-     * trailing edge), 8-bit words, MSB first, CS active low - what Espressif's
-     * seg_master runs with (dev_cfg->mode = 0). Left untouched on purpose. */
+    /* Phase (bench-proven on this wiring, SPI_CPU_1 <-> c6_test bring-up): the
+     * ESP32 GPSPI2 slave in mode 0 samples on the leading (rising) SCLK edge,
+     * so this master must launch each bit on the TRAILING edge. The iLLD
+     * default shiftTransmitDataOnLeadingEdge maps to ECON.CPH=1 (IfxQspi.c:
+     * "econ.B.CPH = (shiftClock == leading) ? 1 : 0"), which is slave-side
+     * mode 1 - the old comment here claimed that equalled "SPI mode 0", which
+     * is wrong. With the default the slave samples half a cycle early and
+     * every frame arrives as the whole stream shifted by one bit (measured),
+     * so the SF CRC rejected everything and the link never came up. */
+    chConfig.ch.mode.shiftClock = IfxQspi_ShiftClock_shiftTransmitDataOnTrailingEdge;
+
     (void)IfxQspi_SpiMaster_initChannel(&g_spiChannel, &chConfig);
 }
 
@@ -131,7 +142,7 @@ static void spiHal_setup(SpiHal_ClockTier tier)
         &IfxQspi3_SCLK_P33_11_OUT, IfxPort_OutputMode_pushPull,
         &IfxQspi3_MTSR_P33_12_OUT, IfxPort_OutputMode_pushPull,
         &IfxQspi3_MRSTD_P33_13_IN, IfxPort_InputMode_pullUp,
-        IfxPort_PadDriver_cmosAutomotiveSpeed4
+        IfxPort_PadDriver_cmosAutomotiveSpeed3
     };
     config.pins = &pins;
 
