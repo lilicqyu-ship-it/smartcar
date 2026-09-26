@@ -52,4 +52,12 @@ void XCORE_log(const char *s);            /* append without newline */
 void XCORE_logln(const char *s);          /* append one line */
 void XCORE_logService(void);              /* CPU0 only: print pending lines */
 
+/* Formatted diagnostic line for cores with no printf (CPU1/CPU2): emits
+ * "label=v0 v1 v2 ..." as one line, each value in unsigned decimal. Meant for
+ * low-rate bench observation (e.g. the SPI link state), so the value count is
+ * capped and a line that would not fit the ring is dropped whole, exactly like
+ * XCORE_log(). Pass n = 0 to print the label alone. */
+#define XCORE_LOG_MAX_VALS   16u
+void XCORE_logu(const char *label, const uint32 *vals, uint8 n);
+
 #endif

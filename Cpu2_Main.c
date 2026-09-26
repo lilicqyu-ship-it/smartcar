@@ -50,6 +50,11 @@
 /* 22 SS6: telemetry is aggregated at 20 ms. */
 #define LINK_TELEMETRY_PERIOD_MS  20u
 
+/* Bench diagnostic line rate. Slow on purpose: it is for a human watching the
+ * serial console, not for the control path, and one line per 500 ms keeps the
+ * shared log ring and ASCLIN0 well clear of the 20 ms telemetry traffic. */
+#define LINK_DIAG_PERIOD_MS       500u
+
 /* SDD SS10: fwVer is 0x00MMmmpp. This is the SDD V1.2 baseline build; the
  * buildhash half of the §10 version string has no slot in a u32 and is not
  * carried. */
@@ -131,6 +136,7 @@ void core2_main(void)
 {
 #ifdef USE_SPI_LINK
     uint32 nextTelMs;
+    uint32 nextDiagMs;
 #endif
 
     IfxCpu_enableInterrupts();
@@ -151,7 +157,8 @@ void core2_main(void)
     /* First rung of the clock ladder: gate G1 is a waveform compatibility test,
      * so it starts at 1 MHz and only climbs on measured error rates (22 SS8). */
     LINK_init(SPIHAL_CLK_1M);
-    nextTelMs = STIME_nowMs() + LINK_TELEMETRY_PERIOD_MS;
+    nextTelMs  = STIME_nowMs() + LINK_TELEMETRY_PERIOD_MS;
+    nextDiagMs = STIME_nowMs() + LINK_DIAG_PERIOD_MS;
 
     while (1)
     {
@@ -161,6 +168,12 @@ void core2_main(void)
         {
             nextTelMs += LINK_TELEMETRY_PERIOD_MS;
             link_sendTelemetry();          /* keeps WRDMA traffic flowing for G5 */
+        }
+
+        if ((sint32)(STIME_nowMs() - nextDiagMs) >= 0)
+        {
+            nextDiagMs += LINK_DIAG_PERIOD_MS;
+            LINK_diagPrint();              /* bench: dump SPI link state to UART  */
         }
     }
 

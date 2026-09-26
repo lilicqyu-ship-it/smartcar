@@ -750,3 +750,48 @@ void LINK_getHealth(Link_Health *health)
     }
 }
 
+/* Bench observability: CPU2 has no printf and no UART of its own, so one
+ * diagnostic line is pushed through the xcore log bridge (CPU0 drains it to
+ * ASCLIN0). It only reads the health snapshot LINK_main() already maintains
+ * plus the live IRQ level, so it perturbs neither the pump timing nor the wire
+ * - safe to call from the CPU2 superloop at a low rate. The fields, in order:
+ *
+ *   LINKDBG=<state> <irq> <clkHz> <ready> <txPend> <rxRoom> <sinceAlive>
+ *           <errStat> <tx> <timeout> <hwErr> <spiErr> <crc> <seq>
+ *
+ *   state       0 DOWN / 1 READY / 2 LOST (Link_State)
+ *   irq         P23.0 level now: 1 = slave asserting IRQ
+ *   clkHz       wire clock after divider quantisation
+ *   ready       LINK_REG_READY, expect 0x5F534601 ("_SF1") when the slave is up
+ *   txPend      slave's queued-bytes claim (LINK_REG_TX_PENDING)
+ *   rxRoom      slave RX room (LINK_REG_RX_ROOM)
+ *   sinceAlive  ms since LINK_REG_ALIVE last advanced (0 = never seen)
+ *   errStat     slave LINK_REG_ERRSTAT bitfield
+ *   tx          SPIHAL transactions issued
+ *   timeout     SPIHAL transaction timeouts (bus stalled, driver re-armed)
+ *   hwErr       QSPI error-interrupt latches
+ *   spiErr      link-level transactions that did not complete cleanly
+ *   crc/seq     SF frames the codec rejected on CRC / sequence
+ */
+void LINK_diagPrint(void)
+{
+    uint32 vals[14];
+
+    vals[0]  = (uint32)g_health.state;
+    vals[1]  = (SPIHAL_irqAsserted() != FALSE) ? 1u : 0u;
+    vals[2]  = g_health.clockHz;
+    vals[3]  = link_reg(g_reg, LINK_REG_READY);
+    vals[4]  = g_health.txPending;
+    vals[5]  = g_health.rxRoom;
+    vals[6]  = g_health.sinceAliveMs;
+    vals[7]  = g_health.slaveErrStat;
+    vals[8]  = g_health.spi.transactions;
+    vals[9]  = g_health.spi.timeouts;
+    vals[10] = g_health.spi.hwErrors;
+    vals[11] = g_health.stats.spiErrors;
+    vals[12] = g_health.stats.crcErrors;
+    vals[13] = g_health.stats.seqErrors;
+
+    XCORE_logu("LINKDBG=", vals, 14u);
+}
+

@@ -222,6 +222,14 @@ SpiHal_Status LINK_setClock(SpiHal_ClockTier tier);
 
 void LINK_getHealth(Link_Health *health);
 
+/* Emit one bench diagnostic line describing the current SPI link state through
+ * the xcore log bridge (CPU0 prints it on ASCLIN0). Reads only the health
+ * snapshot LINK_main() maintains plus the live IRQ level, so it touches neither
+ * the wire nor the pump timing. Call from the CPU2 superloop at a low rate
+ * (a few times a second is plenty); never from an ISR. See LINK_diagPrint() in
+ * link.c for the field order. */
+void LINK_diagPrint(void);
+
 #ifdef __cplusplus
 }
 #endif

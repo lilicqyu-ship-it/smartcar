@@ -249,6 +249,66 @@ void XCORE_logln(const char *s)
     XCORE_log(s);
 }
 
+/* uint32 -> decimal, right-aligned into the tail of buf. Returns a pointer to
+ * the first digit; never writes a terminator, the caller owns buf. A u32 is at
+ * most 10 digits, so a 10 byte scratch is always enough. */
+static char *XCORE_u32ToDec(uint32 v, char *end)
+{
+    char *p = end;
+
+    do
+    {
+        *(--p) = (char)('0' + (v % 10u));
+        v /= 10u;
+    } while (v != 0u);
+
+    return p;
+}
+
+void XCORE_logu(const char *label, const uint32 *vals, uint8 n)
+{
+    char   line[XCORE_LOG_LINE_MAX + 1];
+    char   dec[10];
+    uint32 idx = 0u;
+    uint8  v;
+
+    if (n > XCORE_LOG_MAX_VALS)
+    {
+        n = XCORE_LOG_MAX_VALS;
+    }
+
+    /* Copy the label, leaving room for at least one full value group and the
+     * terminator so a long label cannot push a digit past the buffer. */
+    if (label != NULL_PTR)
+    {
+        while ((label[idx] != '\0') && (idx < (uint32)(XCORE_LOG_LINE_MAX - 12)))
+        {
+            line[idx] = label[idx];
+            idx++;
+        }
+    }
+
+    for (v = 0u; v < n; v++)
+    {
+        const char *digits = XCORE_u32ToDec((vals != NULL_PTR) ? vals[v] : 0u,
+                                            &dec[sizeof(dec)]);
+        const char *d;
+
+        if (idx >= (uint32)(XCORE_LOG_LINE_MAX - 11))
+        {
+            break;      /* no room for another " <=10 digits" group */
+        }
+        line[idx++] = ' ';
+        for (d = digits; d != &dec[sizeof(dec)]; d++)
+        {
+            line[idx++] = *d;
+        }
+    }
+
+    line[idx] = '\0';
+    XCORE_log(line);
+}
+
 void XCORE_logService(void)
 {
     char line[XCORE_LOG_LINE_MAX + 1];
