@@ -2,7 +2,7 @@
 
 以 **Infineon TC275**（KIT-AURIX-TC275-LITE）为实时运动控制核心、**ESP32-C6**（DevKitC-1 V1.2）为 Wi-Fi 通信模块、**TB6612 四路驱动板（轮趣 D24A）**驱动 4 个 MG310 直流减速电机的智能双轮差速小车。手机通过 Wi-Fi 连接小车的 AP，用网页或自定义二进制协议下发运动指令。
 
-> **两条线并存，别混淆**：本仓库**当前代码**是 demo 现状（C6 跑官方 esp-at、板间走 UART 115200、开环 PWM）；**量产设计基准**是 [doc/production-software-design.md](doc/production-software-design.md)（SDD V1.2：C6 自研固件、板间 SPI + SF 帧、编码器闭环、OTA/产测/安全）。工程与文档改动以 SDD 为准，本文其余章节描述的是现状。
+> **两条线并存，别混淆**：本仓库**当前代码**是 demo 现状（C6 跑官方 esp-at、板间走 UART 115200、开环 PWM）；**量产设计基准**是 [doc/20-design/21-software-design.md](doc/20-design/21-software-design.md)（SDD V1.2：C6 自研固件、板间 SPI + SF 帧、编码器闭环、OTA/产测/安全）。工程与文档改动以 SDD 为准，本文其余章节描述的是现状。
 
 核心设计原则：**通信与控制解耦、按实时特性分核、安全逻辑只在一侧** —— ESP32-C6 只做通信（不碰电机，挂死最多导致停车）；TC275 内部三核分区：CPU0（FreeRTOS）跑控制任务与安全状态机、CPU1（裸机 1 kHz）跑电机算法、CPU2（裸机）跑板间链路，核间通过 `Middleware/xcore` 共享内存交换命令、目标与状态。
 
@@ -11,8 +11,9 @@
 ```
  手机/PC ── Wi-Fi(AP: AURIX-SmartDrive) ──► ESP32-C6-DevKitC-1 (esp-at, 透明TCP)
                                               │ UART1 115200 (AT + 透传, P15.0/P15.1)
-                                              │   量产主链路改 SPI：QSPI3 主 ↔ C6 SPI2 从
-                                              │   P33.11/12/13 + P23.4 CS + P23.0 IRQ（wiring.md §9）
+                                              │   量产主链路 = SPI（实物已接线）：QSPI3 主 ↔ C6 SPI2 从
+                                              │   P33.11/12/13 + P23.4 CS + P23.0 IRQ（23-wiring.md §9.1）
+                                              │   当前固件仍走下面这条 UART，SPI 启用待 G1 门禁
                                               ▼
  ┌───────────────────────── TC275 三核分区 ─────────────────────────┐
  │ CPU2 (裸机)        Middleware/wifi_at.c                          │
@@ -31,22 +32,20 @@
                                     │ PWM/DIR
                                     ▼
                     D24A 四路驱动板 (J4=电机A/B · J6=电机C/D) ── 4×MG310
-                                    │ 编码器 E1~E4（§接线图）── 规划接入 GTM TIM，见 wiring.md §8
+                                    │ 编码器 E1~E4（§接线图）── 规划接入 GTM TIM，见 23-wiring.md §8
 ```
 
 ## 文档导航
 
-**基准 = SDD**：其余文档与它冲突时以 SDD 为准。
+完整文档地图（含阅读顺序、谁是真源、缺口清单）见 **[doc/00-index.md](doc/00-index.md)**。命名规则：`编号-域名`，十位段 = 归属域（10 产品 / 20 设计与硬件 / 30 TC275 / 40 ESP32-C6），**基准 = 21-software-design.md（SDD）**，其余与它冲突时以 SDD 为准。
 
-| 文档 | 定位 | 内容 |
+| 域 | 文档 | 定位 |
 |---|---|---|
-| [doc/production-software-design.md](doc/production-software-design.md) | **设计基准 V1.2** | 量产版软件设计文档：三核分区/闭环控制/OTA/安全/信息安全/产测/质量工程/里程碑/风险，§18 是工程级实现约束（向量表、ISR 优先级等铁律） |
-| [doc/spi-link-design.md](doc/spi-link-design.md) | SDD 的展开 | 板间链路换向 UART→SPI 详细设计：接线表、`spi_slave_hd` 事务模型、SF 帧、两固件改动清单、台架门禁 G1–G6 |
-| [doc/wiring.md](doc/wiring.md) | **接线真源 V1.3** | TC275 ↔ ESP32-C6 ↔ D24A 四路驱动板 ↔ 电机/编码器 ↔ 电源 完整引脚表（§2 UART 调试/回退、§8 编码器、§9 SPI 主链路） |
-| [doc/requirement.md](doc/requirement.md) | 需求层 V1.2 | 产品定义、功能列表、版本路线 |
-| [doc/architecture.md](doc/architecture.md) | **现状参考（demo）** | 当前代码的软件分层、任务/中断、协议、HTTP API、引脚映射 |
-| [doc/evaluation-report.md](doc/evaluation-report.md) | 问题基线 | demo 的架构/安全/健壮性/工程化评估（P0~P3 已作为约束吸收进 SDD） |
-| [doc/getting-started.md](doc/getting-started.md) | 教程 | 环境搭建 → 编译烧录 → 接线 → 手机遥控全流程（esp-at + UART 通路） |
+| 入口 | [doc/00-index.md](doc/00-index.md) · [doc/01-getting-started.md](doc/01-getting-started.md) | 文档地图 · 整机 bring-up 教程（两板烧录 → 接线 → 手机遥控） |
+| 10 产品 | [11-requirements.md](doc/10-product/11-requirements.md) · [12-demo-evaluation.md](doc/10-product/12-demo-evaluation.md) | 需求说明书 V1.2 · demo 评估报告（问题基线，冻结快照） |
+| 20 设计/硬件 | [21-software-design.md](doc/20-design/21-software-design.md) · [22-link-spi-design.md](doc/20-design/22-link-spi-design.md) · [23-wiring.md](doc/20-design/23-wiring.md) | **★量产 SDD V1.2（基准）** · 板间 SPI/SF 链路详细设计 · **接线真源 V1.4** |
+| 30 TC275 | [31-firmware-architecture.md](doc/30-tc275/31-firmware-architecture.md) · [32-tc275-dev-guide.md](doc/30-tc275/32-tc275-dev-guide.md) | 当前代码（demo）架构参考 · **TC275 开发指南**（新增中断/跨核消息/构建烧录/排障） |
+| 40 ESP32-C6 | [41-c6-docs-map.md](doc/40-esp32c6/41-c6-docs-map.md) | C6 侧文档地图：本仓库负责的接口真源 + 指向 `c6_car/doc/` 的 14 篇 LLDD |
 
 已删除的历史文档：`ux-performance-plan.md`（卡顿根因与 Track B 方案，结论全部并入 SDD §3.5/§11/§14）、`esp32c6-fw-design.md` 与 `esp32c6-fw-coding-plan.md`（C6 固件 LLDD，已由同级工程 `c6_car/doc/` 承载）。
 
@@ -82,12 +81,12 @@ myCar/
 # 1. AURIX Development Studio 导入本工程，构建 "TriCore Debug (TASKING)"
 # 2. USB 连接 TC275 kit，启动调试器烧录
 # 3. ESP32-C6 刷入 esp-at 固件（esp-at 工程目录，target=esp32c6）
-# 4. 按 doc/wiring.md 接线并上电
+# 4. 按 doc/20-design/23-wiring.md 接线并上电
 # 5. 手机连 Wi-Fi "AURIX-SmartDrive"（密码 12345678），
 #    浏览器打开 http://192.168.4.1:8080 即可遥控
 ```
 
-详细步骤、验证方法与故障排查见 [doc/getting-started.md](doc/getting-started.md)。
+详细步骤、验证方法与故障排查见 [doc/01-getting-started.md](doc/01-getting-started.md)。
 
 ## 通信协议一览（当前代码：demo 自定义二进制帧）
 
@@ -95,7 +94,7 @@ myCar/
 | AA | 55 | CMD | LEN | DATA[LEN] | CRC |     CRC = CMD^LEN^DATA 逐字节异或
 ```
 
-命令：`0x01` STOP、`0x02` FORWARD、`0x03` BACKWARD、`0x04/0x05` LEFT/RIGHT、`0x06/0x07` 弧线、`0x08/0x09` 原地旋、`0x10` SET_SPEED、`0x20` GET_STATUS、`0x21` HEARTBEAT（50 ms 周期、100 ms 超时自动停车）、`0x32` 急停。完整定义见 [doc/architecture.md](doc/architecture.md)。
+命令：`0x01` STOP、`0x02` FORWARD、`0x03` BACKWARD、`0x04/0x05` LEFT/RIGHT、`0x06/0x07` 弧线、`0x08/0x09` 原地旋、`0x10` SET_SPEED、`0x20` GET_STATUS、`0x21` HEARTBEAT（50 ms 周期、100 ms 超时自动停车）、`0x32` 急停。完整定义见 [doc/30-tc275/31-firmware-architecture.md](doc/30-tc275/31-firmware-architecture.md)。
 
 > 量产协议为**两段两帧**（SDD §6）：手机 WS 段 = v2 帧（`AA 55 VER CMD SEQ LEN DATA CRC16`），板间 LINK 段 = **SF 帧**（SPI 专用，CRC16 + SEQ 分片）；命令语义集合与上表兼容，帧编码不再继承 demo。
 
@@ -103,12 +102,12 @@ myCar/
 
 - ✅ 三核分区（CPU0 控制 / CPU1 电机算法 / CPU2 WiFi）、双轮 4 电机驱动、FreeRTOS、UART 调试输出、AP + HTTP 控制页、心跳超时与急停保护
 - ✅ Wi-Fi 模块已从 ESP8266 更换为 **ESP32-C6 esp-at**：驱动为 `Middleware/wifi_at.c`（CPU2 裸机超循环），AT 串口 P15.0/P15.1；跨核通信见 `Middleware/xcore`
-- ⚠️ 迁移遗留项：esp-at 的 UART1 默认开启 RTS 流控，建议在 AT 初始化序列开头补发 `AT+UART_CUR=115200,8,1,0,0`（见 doc/wiring.md §2）
+- ⚠️ 迁移遗留项：esp-at 的 UART1 默认开启 RTS 流控，建议在 AT 初始化序列开头补发 `AT+UART_CUR=115200,8,1,0,0`（见 [23-wiring.md](doc/20-design/23-wiring.md) §2）
 - ⚠️ `Middleware/wifi_at.c` 的 HTTP keep-alive 修复（控制页按键不灵敏根因）**待烧录验证**，未提交
-- 📋 **板间链路 UART → SPI 已定案**（SDD V1.2 §3.7，接线表 wiring.md V1.3 §9，详细设计 spi-link-design.md）：TC275 QSPI3 主机 ↔ C6 SPI2 从机 + IRQ 握手，LINK 段换新 SF 帧；UART 保留为调试控制台与回退。**实施入口 = G1 台架门禁**（验证 AURIX QSPI 无 CMD/ADDR 前导相位能否被 Espressif HD 从机解析，风险 R7）
+- 📋 **板间链路 UART → SPI 已定案**（SDD V1.2 §3.7，接线表 23-wiring.md V1.4 §9.1，详细设计 22-link-spi-design.md）：TC275 QSPI3 主机 ↔ C6 SPI2 从机 + IRQ 握手，LINK 段换新 SF 帧；UART 保留为调试控制台与回退。**实物接线已按 §9.1 完成（2026-09-26，五行 + 共地）**，当前固件两侧仍走 UART；**启用入口 = G1 台架门禁**（验证 AURIX QSPI 无 CMD/ADDR 前导相位能否被 Espressif HD 从机解析，风险 R7），需先补 IRQ 10 kΩ 上拉确认与两侧最小验证代码
 - 📋 C6 侧自研固件在同级工程 `c6_car/`（审查修复未提交）
-- 📋 编码器接线方案已定稿**待确认实施**：MG310 内置 AB 编码器 → GTM0 TIM UDC 硬件正交计数，四对引脚集中在 X2-28~35（详见 wiring.md §8、SDD §5.1）
-- 📋 版本路线与量产里程碑：requirement.md 路线图（编码器闭环 → IMU → 毫米波雷达）对应 SDD §15 M0–M4
+- 📋 编码器接线方案已定稿**待确认实施**：MG310 内置 AB 编码器 → GTM0 TIM UDC 硬件正交计数，四对引脚集中在 X2-28~35（详见 23-wiring.md §8、SDD §5.1）
+- 📋 版本路线与量产里程碑：11-requirements.md 路线图（编码器闭环 → IMU → 毫米波雷达）对应 SDD §15 M0–M4
 
 ## 构建
 

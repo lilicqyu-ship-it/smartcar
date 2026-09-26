@@ -1,8 +1,10 @@
 # 快速上手教程：从零到手机遥控
 
+> 文档编号 **01** · 域 入口 · 状态：描述**当前代码（demo）**可跑通路 · 上级索引 [00-index.md](00-index.md)
+
 本教程带你完成 AURIX SmartDrive 的完整搭建：编译烧录 TC275 固件 → 刷写 ESP32-C6 AT 固件 → 接线 → 手机网页遥控。预计 1~2 小时（不含采购）。
 
-> **适用口径**：本文走的是**当前代码（demo，esp-at + UART）** 的最小可跑通路，用于把板子点亮、验证电机与安全逻辑。量产目标态（C6 自研固件 + SPI + SF 帧、闭环伺服、OTA/产测）的构建与验证流程按 [production-software-design.md](production-software-design.md) §15 里程碑落地，其中 SPI 链路需先通过 [spi-link-design.md](spi-link-design.md) §8 的 G1 台架门禁，**本文不提前描述未实现的流程**。UART 接线（第 4 步）在量产后仍是调试控制台与回退链路，需要保留。
+> **适用口径**：本文走的是**当前代码（demo，esp-at + UART）** 的最小可跑通路，用于把板子点亮、验证电机与安全逻辑。量产目标态（C6 自研固件 + SPI + SF 帧、闭环伺服、OTA/产测）的构建与验证流程按 [21-software-design.md](20-design/21-software-design.md) §15 里程碑落地，其中 SPI 链路需先通过 [22-link-spi-design.md](20-design/22-link-spi-design.md) §8 的 G1 台架门禁，**本文不提前描述未实现的流程**。UART 接线（第 4 步）在量产后仍是调试控制台与回退链路，需要保留。
 
 ## 你需要的东西
 
@@ -46,13 +48,13 @@
 
 ## 第 4 步：按接线图接线
 
-对照 [wiring.md](wiring.md) 完成三类接线，重点核对：
+对照 [23-wiring.md](20-design/23-wiring.md) 完成三类接线，重点核对：
 
-1. **TC275 ↔ ESP32-C6（UART，本教程用）**：`P15.0(TX) → GPIO6`、`P15.1(RX) ← GPIO7`、**必须共地**；TC275 侧物理位置在板载 **mikroBUS 插座 pin13(TX)/pin14(RX)**；DevKitC-1 侧 GPIO6/7 = J1-5/6，5V 接 J1-14（车载 DC-DC ≥2A）。量产主链路改走 SPI（wiring.md §9），**这组 UART 线保留不拆**（调试控制台 + 回退）。
-2. **TC275 ↔ D24A**：8 根 PWM/方向线接 **J4（电机 A/B）/ J6（电机 C/D）**，见 wiring.md §3/§4 表格；STBY 直接短接同座 J4-1 的板载 3V3。
+1. **TC275 ↔ ESP32-C6（UART，本教程用）**：`P15.0(TX) → GPIO6`、`P15.1(RX) ← GPIO7`、**必须共地**；TC275 侧物理位置在板载 **mikroBUS 插座 pin13(TX)/pin14(RX)**；DevKitC-1 侧 GPIO6/7 = J1-5/6，5V 接 J1-14（车载 DC-DC ≥2A）。量产主链路 SPI（QSPI3 ↔ C6 SPI2，**已按 23-wiring.md §9.1 实物接线**）目前固件未启用，所以本教程仍走 UART；**这组 UART 线保留不拆**（调试控制台 + 回退）。
+2. **TC275 ↔ D24A**：8 根 PWM/方向线接 **J4（电机 A/B）/ J6（电机 C/D）**，见 23-wiring.md §3/§4 表格；STBY 直接短接同座 J4-1 的板载 3V3。
 3. **电源**：电池 → D24A VIN（逻辑电源 D24A 板载稳压自产，无需外接 VCC）；DC-DC 5V → TC275 与 C6；全系统共地。
 
-> 接线时先断电。所有信号线两端均为 3.3V 电平（D24A 逻辑输入 3.3V 已由实车验证）；**勿向 D24A 的 3V3/5V 输出脚反向灌电**。注意 P00.0（电机 C PWM）与板载 CAN 收发器输入并联，运行期间不要外接 CAN 总线（见 wiring.md §4 警示）。
+> 接线时先断电。所有信号线两端均为 3.3V 电平（D24A 逻辑输入 3.3V 已由实车验证）；**勿向 D24A 的 3V3/5V 输出脚反向灌电**。注意 P00.0（电机 C PWM）与板载 CAN 收发器输入并联，运行期间不要外接 CAN 总线（见 23-wiring.md §4 警示）。
 
 ## 第 5 步：上电，手机遥控
 
@@ -76,17 +78,17 @@
 
 | 现象 | 大概率原因 | 处理 |
 |---|---|---|
-| 发 AT 无 OK | esp-at 默认开 RTS 流控，PC/TC275 未接该线 | 见 wiring.md §2：发 `AT+UART_CUR=115200,8,1,0,0` 或重编 esp-at 关闭 |
+| 发 AT 无 OK | esp-at 默认开 RTS 流控，PC/TC275 未接该线 | 见 23-wiring.md §2：发 `AT+UART_CUR=115200,8,1,0,0` 或重编 esp-at 关闭 |
 | TC275 日志 `WIFI: AT failed: AT+...` 或发 AT 无回包 | TX/RX 没交叉 / 没共地 | 核对 P15.0→GPIO6、P15.1←GPIO7、GND（TC275 侧在 mikroBUS pin13/14）|
 | C6 反复重启（boot: 0x3 / brownout） | 5V/3.3V 供电不足 | 电机没转时正常、一加速就重启 → 电源裕量问题，加 ≥470 µF 电容、换 ≥1A 轨 |
 | AP 搜不到 | AT 初始化失败 / C6 停在下载模式 | 复位 C6（RST 键），看 TC275 串口侧 AT 日志 |
 | 网页能开但电机不动 | 机器人状态机在 FAULT 或心跳未刷新 | 查 10 ms robot 任务日志；发 STOP 后重试 |
-| 一侧轮反转 | D24A 电机线序或 `g_dirInvert` | 按 wiring.md §4 注释处理，不要交叉猜测 |
+| 一侧轮反转 | D24A 电机线序或 `g_dirInvert` | 按 23-wiring.md §4 注释处理，不要交叉猜测 |
 
 ## 下一步
 
-- 想看量产目标态怎么设计（闭环/OTA/安全/产测）→ [production-software-design.md](production-software-design.md)（设计基准）
-- 想看板间 SPI 链路与 SF 帧 → [spi-link-design.md](spi-link-design.md)；接线与引脚真源 → [wiring.md](wiring.md)
-- 想理解**当前代码**怎么组织的 → [architecture.md](architecture.md)
-- 想直接用二进制协议做 PC 上位机 → architecture.md 的协议参考表（demo 帧；量产为 v2 + SF 两段，见 SDD §6）
-- 想知道产品往哪走（编码器/PID/IMU） → [requirement.md](requirement.md)
+- 想看量产目标态怎么设计（闭环/OTA/安全/产测）→ [21-software-design.md](20-design/21-software-design.md)（设计基准）
+- 想看板间 SPI 链路与 SF 帧 → [22-link-spi-design.md](20-design/22-link-spi-design.md)；接线与引脚真源 → [23-wiring.md](20-design/23-wiring.md)
+- 想理解**当前代码**怎么组织的 → [31-firmware-architecture.md](30-tc275/31-firmware-architecture.md)
+- 想直接用二进制协议做 PC 上位机 → 31-firmware-architecture.md 的协议参考表（demo 帧；量产为 v2 + SF 两段，见 SDD §6）
+- 想知道产品往哪走（编码器/PID/IMU） → [11-requirements.md](10-product/11-requirements.md)

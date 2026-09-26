@@ -4,11 +4,13 @@ AURIX SmartDrive V1.0 产品需求与功能设计
 平台： KIT-AURIX-TC275-LITE + D24A 四路驱动板（双 TB6612 通道 A/B/C/D）+ ESP32-C6（自研固件，esp-at 仅作回退）+ 4×MG310 编码器减速电机（双轮差速布局）
 产品定位： Wi-Fi 双轮智能运动控制平台
 
-> 文档定位：本文件是**产品需求层**（做什么、验收标准）。软件设计基准是 [production-software-design.md](production-software-design.md)（SDD，当前 V1.2）——两者冲突时以 SDD 为准，本文件只描述需求与范围。
+> 文档编号 **11** · 域 产品 · 状态：需求层（当前 V1.2） · 上级索引 [00-index.md](../00-index.md)
+
+> 文档定位：本文件是**产品需求层**（做什么、验收标准）。软件设计基准是 [21-software-design.md](../20-design/21-software-design.md)（SDD，当前 V1.2）——两者冲突时以 SDD 为准，本文件只描述需求与范围。
 
 变更记录：
-V1.1 — Wi-Fi 模块由 ESP8266 更换为 ESP32-C6（运行 Espressif 官方 esp-at AT 固件，AT 指令集向下兼容 ESP8266），接线详见 wiring.md
-V1.2 — **板间主链路 UART → SPI**（TC275 QSPI3 主机 ↔ C6 SPI2 从机，1 MHz 起 / 5 MHz 量产基线），UART 降级为调试控制台与回退通道；C6 固件改为自研（`c6_car` 工程），esp-at 退居回退；链路帧分为两段：板间 SF 帧 + 手机 v2 帧。详见 SDD §3.7/§6 与 [spi-link-design.md](spi-link-design.md)。文中 esp-at / UART 相关段落（§2 目标、§3 架构图、§5）描述的是 **V1.1 demo 现状**，保留作为回退通道与产线返工依据。
+V1.1 — Wi-Fi 模块由 ESP8266 更换为 ESP32-C6（运行 Espressif 官方 esp-at AT 固件，AT 指令集向下兼容 ESP8266），接线详见 23-wiring.md
+V1.2 — **板间主链路 UART → SPI**（TC275 QSPI3 主机 ↔ C6 SPI2 从机，1 MHz 起 / 5 MHz 量产基线），UART 降级为调试控制台与回退通道；C6 固件改为自研（`c6_car` 工程），esp-at 退居回退；链路帧分为两段：板间 SF 帧 + 手机 v2 帧。详见 SDD §3.7/§6 与 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。文中 esp-at / UART 相关段落（§2 目标、§3 架构图、§5）描述的是 **V1.1 demo 现状**，保留作为回退通道与产线返工依据。
 
 1. 产品概述
 
@@ -109,7 +111,7 @@ V1.0 推荐使用 AP 模式。
 
 以下为 V1.0 demo 现状（esp-at 通道，保留作 R7 回退与产线返工）：
 
-ESP32-C6 模组运行 Espressif 官方 esp-at AT 固件（本工程对应 `C:\Code\TC275\AURIX-v1.10.36-workspace\esp-at`，target=esp32c6，module_esp32c6_default）。硬件使用 **ESP32-C6-DevKitC-1 V1.2** 开发板（ESP32-C6-WROOM-1 模组，8 MB flash，板载 USB-UART 桥 + 原生 USB 双 Type-C、5V→3.3V LDO）。ESP32-C6 为 2.4 GHz Wi-Fi 6 芯片（支持 BLE 5 / 802.15.4），其 AT 固件兼容 ESP8266 AT 指令集，原有初始化流程可直接复用。AT 口引脚、板载资源占用与接线详见 wiring.md。
+ESP32-C6 模组运行 Espressif 官方 esp-at AT 固件（本工程对应 `C:\Code\TC275\AURIX-v1.10.36-workspace\esp-at`，target=esp32c6，module_esp32c6_default）。硬件使用 **ESP32-C6-DevKitC-1 V1.2** 开发板（ESP32-C6-WROOM-1 模组，8 MB flash，板载 USB-UART 桥 + 原生 USB 双 Type-C、5V→3.3V LDO）。ESP32-C6 为 2.4 GHz Wi-Fi 6 芯片（支持 BLE 5 / 802.15.4），其 AT 固件兼容 ESP8266 AT 指令集，原有初始化流程可直接复用。AT 口引脚、板载资源占用与接线详见 23-wiring.md。
 
 SSID:
 AURIX-SmartDrive
@@ -152,7 +154,7 @@ Internet
 
 注意（与 ESP8266 的差异）：
 
-- 串口参数：esp-at 的 AT 端口为 UART1，默认 115200 8N1，引脚接线见 wiring.md；ESP8266 使用 UART0。
+- 串口参数：esp-at 的 AT 端口为 UART1，默认 115200 8N1，引脚接线见 23-wiring.md；ESP8266 使用 UART0。
 - esp-at 固件 UART1 默认开启 RTS 流控（`CONFIG_AT_UART_DEFAULT_FLOW_CONTROL=1`），若不接线流控，需在下发初始化前执行 AT+UART_CUR=115200,8,1,0,0 关闭流控，或在 esp-at 编译时将其配置为 0。
 - AT+CIPSEND 提示符、+IPD 帧格式与 ESP8266 一致，TC275 侧解析逻辑不变。
 - 若启用 AT+SYSSTORE=1，AP 配置会保存到 NVS，重启后仍生效。

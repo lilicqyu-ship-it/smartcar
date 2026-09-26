@@ -2,11 +2,12 @@
 
 | 项 | 内容 |
 |---|---|
+| 文档编号 | **22**（域：设计·硬件）· 定位：21（SDD）§3.7/§6 的 LINK 段展开 · 上级索引 [00-index.md](../00-index.md) |
 | 文档版本 | V1.0（SDD V1.2 的 LINK 段展开，结论**已回写基准**；实施仍待 G1 台架门禁通过，未拍板项见 §11） |
 | 日期 | 2026-09-26 |
-| 参考体例 | [production-software-design.md](production-software-design.md) §3.7（板间通信选型）、§6（协议）、§16（风险） |
+| 参考体例 | [21-software-design.md](../20-design/21-software-design.md) §3.7（板间通信选型）、§6（协议）、§16（风险） |
 | 决策范围 | C6↔TC275 主链路物理层 = **SPI**；帧协议 = **新定 SPI 专用 SF 帧**；拓扑 = **TC275 QSPI3 主机 ↔ ESP32-C6 SPI2 从机（`spi_slave_hd`）+ 1 根握手线** |
-| 本轮交付 | 方案 + 接线表 + 改动清单 + 验证门禁；量产文档已同步回写（SDD **V1.2**、wiring.md **V1.3**）。**不改固件代码、不改接线、不提交** |
+| 本轮交付 | 方案 + 接线表 + 改动清单 + 验证门禁；量产文档已同步回写（SDD **V1.2**、23-wiring.md **V1.3**）。**不改固件代码、不改接线、不提交** |
 | 前提变化 | ① C6 改为自研固件（`c6_car` 工程），不再受 esp-at 约束；② `c6_car` 的 proto v2 与 myCar 的 demo 异或 CRC 帧**本来就不兼容**，链路换向时一并按 SPI 特性重定帧，成本最低 |
 
 ---
@@ -34,7 +35,7 @@
 | E4 | 官方给的数据通路模型 = **共享寄存器握手**：从机用 `spi_slave_hd_write_buffer()` 发布 5 个 4 字节寄存器（READY_FLAG / MAX_TX_BUF_LEN / MAX_RX_BUF_LEN / TX_READY_BUF_SIZE / RX_READY_BUF_NUM），主机轮询后决定读多少、写多少 | `examples/peripherals/spi_slave_hd/segment_mode/seg_slave/main/app_main.c:36-49,83,98,292-301`；主机侧 `seg_master/main/app_main.c:37-49,140-200` |
 | E5 | **寄存器读值非原子**：SPI 逐字节搬运，从机可能在读的过程中改值 → 官方做法是"连读两次直到相同" | `seg_master/main/app_main.c:146-159` 注释原文："if the value is changed by Slave at this time, Master may get wrong data" |
 | E6 | 从机硬件按命令字节识别 4 类事件（CMD7/CMD8/CMD9/CMDA）并产生中断 | `esp_hal_gpspi/.../spi_slave_hd_hal.c:43-151`（`SPI_LL_INTR_CMD7/8/9/A`） |
-| E7 | TC275 侧 QSPI3 四线可全部落在 LITE kit X1 空闲脚，且与编码器 8 线（P33.0~7 = X2-28~35）**零交集** | `myCar/Libraries/iLLD/TC27D/Tricore/_PinMap/IfxQspi_PinMap.h:160,194,226,287`：`IfxQspi3_SCLK_P33_11_OUT` / `_MTSR_P33_12_OUT` / `_MRST_P33_13_OUT` / `_SLSO5_P23_4_OUT`；空闲清单见 wiring.md §9 与记忆脚位表 |
+| E7 | TC275 侧 QSPI3 四线可全部落在 LITE kit X1 空闲脚，且与编码器 8 线（P33.0~7 = X2-28~35）**零交集** | `myCar/Libraries/iLLD/TC27D/Tricore/_PinMap/IfxQspi_PinMap.h:160,194,226,287`：`IfxQspi3_SCLK_P33_11_OUT` / `_MTSR_P33_12_OUT` / `_MRST_P33_13_OUT` / `_SLSO5_P23_4_OUT`；空闲清单见 23-wiring.md §9 与记忆脚位表 |
 | E8 | **AURIX TC275 QSPI 没有"命令/地址相位"硬件概念，iLLD 主驱动也没有对应封装**（只有数据相位 + CS/时钟参数） | 全量 grep `Libraries/iLLD/TC27D/Tricore/Qspi` 无 `command_bits/address_bits/IfxQspi_AddrMode` 任何符号 |
 | E9 | myCar 工程当前**没有任何** `IfxQspi` 使用点：量产链路的 SPI 侧在 TC275 上是全新代码 | `App/`、`Bsp/`、`Middleware/` 内 grep `IfxQspi` 无命中；现有 WIFI 链路 = `Middleware/wifi_at.c`（ASCLIN1，P15.0/P15.1）上的 AT 文本 + `Middleware/protocol.c` 的 `AA 55 CMD LEN DATA XOR-CRC` 帧（`PROTO_MAX_PAYLOAD 16`，无 VER/SEQ） |
 | E10 | c6_car 现链路层是纯 UART 实现，且含 UART 专有的波特率协商状态机 | `c6_car/components/c6_link/link.c`（`LINK_UART_NUM UART_NUM_1`、`uart_set_baudrate`、0x44 BAUD REQ/ACK/NAK）；`c6_car/components/c6_link/Kconfig`（`C6_LINK_TX_GPIO default 10` / `RX_GPIO default 11`） |
@@ -44,6 +45,8 @@
 ---
 
 ## 3. 物理层与接线表
+
+> **接线状态（2026-09-26）：本节五行 + 共地已按下方表完成实物接线**（DevKitC-1 走 J3 长排针，TC275 走 X1）。G1 的硬件前置条件已满足，剩余工作是两固件改动清单（§7）与台架验证（§8）。**两项需确认**：① GPIO21 IRQ 的 10 kΩ 上拉是否已接（未接则握手失效，链路退化为纯轮询）；② 本表 X1/J3 孔位号是按手册推得的文档标注，若实物丝印编号不同请回报修正（脚位本身零冲突）。
 
 ### 3.1 拓扑
 
@@ -56,7 +59,7 @@ TC275 LITE kit (QSPI3 主机, X1 侧)              ESP32-C6-DevKitC-1 (SPI2 从�
  X1-8   P23.0  IOM中断 ◄────────────────────     GPIO21  IRQ(OD)   J3-7
  GND     X1-40/X2-40 ──────────────────────────  GND               J3-1/12/15
  （可选预留，本版不接）TX_RDY：TC275→C6 流控线，落 P23.5 ↔ C6 空闲 GPIO
- 电源：C6 仍按 wiring.md §5 由车载 DC-DC 5V 供电（J1-14），禁止从 J1-1 反灌 3V3
+ 电源：C6 仍按 23-wiring.md §5 由车载 DC-DC 5V 供电（J1-14），禁止从 J1-1 反灌 3V3
 ```
 
 | 信号 | TC275 | X1 孔位 | 方向 | C6 | J3 孔位 | 依据 |
@@ -66,7 +69,7 @@ TC275 LITE kit (QSPI3 主机, X1 侧)              ESP32-C6-DevKitC-1 (SPI2 从�
 | MISO（MRST 主收） | P33.13 | X1-5 | 从→主 | GPIO20 | J3-8 | E7 |
 | CS | P23.4（SLSO5） | X1-12 | 主→从 | GPIO23 | J3-5 | E7 |
 | IRQ（数据就绪，开漏 + 上拉） | P23.0 | X1-8 | 从→主 | GPIO21 | J3-7 | C6 侧 esp-at SPI Kconfig 的 handshake 默认脚；TC275 侧配 IOM 上升沿中断 |
-| GND | X1-40/X2-40 | — | — | GND | J3-1/12/15 | 必须共地（wiring.md §5.4） |
+| GND | X1-40/X2-40 | — | — | GND | J3-1/12/15 | 必须共地（23-wiring.md §5.4） |
 
 > 复核项（落地前 1 分钟动作，不阻塞评审）：X1 的 P23.0/P23.4 **孔位号**以官方手册 Figure 4 再对一次丝印；P23.x 组已在"X1 空闲"清单内，脚位本身无板载复用冲突。
 
@@ -75,7 +78,7 @@ TC275 LITE kit (QSPI3 主机, X1 侧)              ESP32-C6-DevKitC-1 (SPI2 从�
 - 两端 3.3 V 逻辑，直连，无分压。
 - 线长 ≤ 20 cm，SCLK 与三线同束、就近共地回流；IRQ 为开漏 + 10 kΩ 上拉到 C6 的 3V3。
 - 时钟档位：**1 MHz（G1 波形兼容）→ 2 → 5（量产基线）→ 10 → 20（探索）**，每档 30 min CRC 误码率门槛（§8）。杜邦线下 5 MHz 是保守工程值；换定长扁平线束后再谈 10/20 MHz。
-- UART 通道（wiring.md §2 的 P15.0/P15.1 ↔ C6）**保留接线不删**：C6 自研固件里作 115200 控制台/日志，G1 失败时的回退链路。
+- UART 通道（23-wiring.md §2 的 P15.0/P15.1 ↔ C6）**保留接线不删**：C6 自研固件里作 115200 控制台/日志，G1 失败时的回退链路。
 
 ---
 
@@ -215,7 +218,7 @@ loop:
 | 文件 | 动作 |
 |---|---|
 | `components/c6_link/link.c` | 传输层 UART → `spi_slave_hd`：删 `uart_*`、波特率协商状态机（0x44）、`LINK_UART_NUM`；新增 SPI2 从机初始化（`command/address/dummy=8`、`queue_size`、DMA 通道）、§4.3 寄存器发布、IRQ 脚驱动 |
-| `components/c6_link/Kconfig` | 删 `C6_LINK_TX/RX_GPIO`（顺带消除与 wiring.md §2 GPIO6/7 的既有不一致），增 `C6_LINK_SPI_*_GPIO`（默认 19/18/20/23/21）、`C6_LINK_SPI_CLOCK_HZ`、`C6_LINK_UART_DEBUG`（控制台） |
+| `components/c6_link/Kconfig` | 删 `C6_LINK_TX/RX_GPIO`（顺带消除与 23-wiring.md §2 GPIO6/7 的既有不一致），增 `C6_LINK_SPI_*_GPIO`（默认 19/18/20/23/21）、`C6_LINK_SPI_CLOCK_HZ`、`C6_LINK_UART_DEBUG`（控制台） |
 | `components/c6_link/link.h` | 对外 API（`LINK_send/recv/health`）**签名不变** → `bridge`/`ota_relay` 不感知物理层 |
 | `components/c6_proto/` → 新增 `components/c6_sf/` | SF 帧编解码（纯 C，主机端可测）；`c6_bridge` 里做 v2↔SF 映射（§5.5） |
 | `components/c6_ota/ota_relay.c` | CHUNK 上限 62 B → 240 B（同步 §5.5）；分片计数逻辑随之简化 |
@@ -231,7 +234,7 @@ loop:
 | `Middleware/wifi_at.c` | 量产构建默认关闭（`USE_WIFI_AT`），保留为 G1 失败回退与产线返工通道 |
 | `Middleware/protocol.c` | 不再是 LINK 帧真源；命令语义迁移进 `mw/sf` |
 | `Cpu2_Main.c` | 初始化与主循环挂载 `LINK_init/LINK_pump` |
-| `doc/wiring.md` §9、§2 | §9 标题从"预研方案，待拍板"改"V1.0 选定"；§2 标注 UART 降级为调试/回退通道 |
+| [23-wiring.md](../20-design/23-wiring.md) §9、§2 | §9 标题从"预研方案，待拍板"改"V1.0 选定"；§2 标注 UART 降级为调试/回退通道 |
 
 ### 7.3 不在本轮范围
 
@@ -272,7 +275,7 @@ loop:
 
 | 文档 | 位置 | 改法 |
 |---|---|---|
-| SDD | 头部表 | 版本升 **V1.2**；修订记录追加本决策；上游文档加 [spi-link-design.md](spi-link-design.md) |
+| SDD | 头部表 | 版本升 **V1.2**；修订记录追加本决策；上游文档加 [22-link-spi-design.md](22-link-spi-design.md) |
 | SDD §1.1 | 不变量第 3 行 | `AA 55 CMD LEN DATA CRC` 从"继承不变量"降级为"**命令语义集合继承，帧编码另起 SF 帧**"（三不变量变两条半，须诚实标注） |
 | SDD §1.3 | 术语 LINK | 改为 SPI（QSPI3 ↔ C6 SPI2，P33.11/12/13 + P23.4 CS + P23.0 IRQ）；新增 **SF 帧** 术语行 |
 | SDD §2.2 | OTA 行 | `1 MB ≤30 s（2 Mbps≈6 s）` → `≤10 s（SPI 5 MHz，传输 ≈2 s）` |
@@ -287,14 +290,16 @@ loop:
 | SDD §15 | M1 | `LINK 2 Mbps 打通` → `SPI 链路打通（G1 波形兼容为 M1 入口门禁）` |
 | SDD §16 | R4 | 2 Mbps SI 风险作废，替换为本文 R7–R11（R4 保留为 UART 回退通道项） |
 | SDD §17 | 映射表 | `Middleware/wifi_at.c` → `USE_WIFI_AT 回退通道（非量产链路）`；新增行：`Middleware/protocol.c → mw/sf`（SF 编解码）；`（无）→ com/spi_hal_pins.c`（QSPI3 主机引脚/时钟档） |
-| wiring.md | §9 | 标题"（C6 自研固件预研方案，待拍板）"→"（V1.0 选定链路）"；§9.2 实施要点按本文 §4/§5 重写，删"备忘，未开工" |
-| wiring.md | §2 | 标注"UART 降级为调试控制台/回退通道"；并修正既有不一致：c6_car `Kconfig` 的 `C6_LINK_TX/RX_GPIO` 默认 10/11 与本文 GPIO6/7 记录冲突，自研固件里统一为调试用途并显式写入 Kconfig help |
-| SDD §18 | 新增 | 收入 demo 实测出的工程级铁律（0 号向量表、ISR 优先级全局分配、串口属主、裸机时基、SLSO5 唯一可用片选等），使 architecture.md 不再是这些约束的唯一出处 |
-| doc 基线 | 全文档 | 确立 SDD 为唯一设计基准：`ux-performance-plan.md`（结论已并入 SDD §3.5/§11/§14）与 `esp32c6-fw-design.md`/`esp32c6-fw-coding-plan.md`（C6 侧 LLDD 已落在 `c6_car/doc/`）三份文档删除；`requirement.md`/`architecture.md`/`getting-started.md`/`README.md` 口径对齐（esp-at/UART 降级为 demo 现状与回退通道） |
+| 23-wiring.md | §9 | 标题"（C6 自研固件预研方案，待拍板）"→"（V1.0 选定链路）"；§9.2 实施要点按本文 §4/§5 重写，删"备忘，未开工" |
+| 23-wiring.md | §2 | 标注"UART 降级为调试控制台/回退通道"；并修正既有不一致：c6_car `Kconfig` 的 `C6_LINK_TX/RX_GPIO` 默认 10/11 与本文 GPIO6/7 记录冲突，自研固件里统一为调试用途并显式写入 Kconfig help |
+| SDD §18 | 新增 | 收入 demo 实测出的工程级铁律（0 号向量表、ISR 优先级全局分配、串口属主、裸机时基、SLSO5 唯一可用片选等），使 31-firmware-architecture.md 不再是这些约束的唯一出处 |
+| doc 基线 | 全文档 | 确立 SDD 为唯一设计基准：`ux-performance-plan.md`（结论已并入 SDD §3.5/§11/§14）与 `esp32c6-fw-design.md`/`esp32c6-fw-coding-plan.md`（C6 侧 LLDD 已落在 `c6_car/doc/`）三份文档删除；`11-requirements.md`/`31-firmware-architecture.md`/`01-getting-started.md`/`README.md` 口径对齐（esp-at/UART 降级为 demo 现状与回退通道） |
 
 ---
 
 ## 11. 评审需要你拍板的三件事
+
+> **状态更新（2026-09-26）**：实物接线已按 §9.1 完成（23-wiring.md V1.4），三问仍然开放——其中第 1 问的"台架"硬件部分已就绪，缺的是逻辑分析仪与 TC275/C6 两侧最小验证代码。
 
 1. **G1 前置验证的投入**：需要一个"两台 ESP32 抓参考波形 + 逻辑分析仪"的台架动作。若手边没有逻辑分析仪，G1 可退化为"TC275 发、C6 只看事件/计数"的黑盒判定，但失败时定位成本高得多。
 2. **量产基线时钟档**：建议 **5 MHz**（保守、杜邦线可跑、指标全部达标）。若确定量产用定长屏蔽线束，可直接以 10 MHz 为基线目标，省一轮返工。

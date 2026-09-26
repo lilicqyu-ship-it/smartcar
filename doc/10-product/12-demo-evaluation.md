@@ -2,11 +2,13 @@
 
 | 项 | 内容 |
 |---|---|
+| 文档编号 | **12**（域：产品/历史快照；**冻结不更新**，结论已被 `21-software-design.md` 吸收为架构约束） |
 | 评估日期 | 2026-09-26 |
 | 评估对象 | `myCar` 工程（KIT-AURIX-TC275-LITE + ESP32-C6 esp-at + 2×TB6612 四电机差速小车） |
 | 基线版本 | `acce1f8`（fix(wifi): 冒号仅在 +IPD 帧头作为分隔符），另含工作区未提交改动（keep-alive / g_activeLink） |
 | 评估范围 | 全部自研代码（三核入口 + App/Middleware/Bsp 共约 2400 行）、FreeRTOS 配置、链接脚本、`.cproject`、仓库内容、doc/ 四篇文档 |
 | 评估方式 | 人工逐行通读全部自研源码 + 构建配置/链接脚本/仓库内容核查 + 文档-代码一致性比对 |
+| 旧路径说明 | 本文按**冻结快照**保留原措辞；其中引用的 `doc/architecture.md` 现为 [31-firmware-architecture.md](../30-tc275/31-firmware-architecture.md)，`doc/production-software-design.md` 现为 [21-software-design.md](../20-design/21-software-design.md)。编号规则见 [00-index.md](../00-index.md) |
 
 ---
 
@@ -62,7 +64,7 @@
 4. **跨核日志桥设计 thoughtful**：整行拷贝入环、写索引后移，读侧免锁；环将满时整行丢弃而非写半行（`xcore.c:197-213`）。
 5. **+IPD 二进制安全解析**：仅在 `+IPD,` 前缀下把冒号当帧头分隔符，修复了 esp-at v3 事件行（如 `+STA_CONNECTED:"..."`）被截断的问题，且有注释解释缘由（`wifi_at.c:437-453`）。
 6. **方向反接集中处理**：`g_dirInvert` 查表（`motor.c:36-41`），接线保持对称，排障不动线。
-7. **文档体系完整**：README（架构图/快速上手）+ getting-started（新手全流程）+ architecture（协议/引脚/API）+ wiring（接线表）+ requirement（需求与路线图），且需求文档诚实地把硬件看门狗标记为 🔶（requirement.md F09 注）。
+7. **文档体系完整**：README（架构图/快速上手）+ getting-started（新手全流程）+ architecture（协议/引脚/API）+ wiring（接线表）+ requirement（需求与路线图），且需求文档诚实地把硬件看门狗标记为 🔶（11-requirements.md F09 注）。
 8. **提交纪律好**：约定式提交 + 中文说明，每个 fix 都能在 doc 中找到对应记录（如 CPU2 中断向量表 0 的坑，`wifi_at.c:25-31`）。
 
 ---
@@ -93,7 +95,7 @@
 - **建议**（任选其一，推荐 1+3 组合）：
   1. 把 HTTP 响应改为**分段发送**：先拼 200 字节级响应头直接发送，再原样发送页面（页面本就是 `static const`，在 rodata 不占栈）与 JSON body，使单帧栈占用 < 512 B；
   2. 或将 `LCF_USTACK2_SIZE` 提到 4 KB（DSPR2 120 KB 空间充裕），并静态断言最坏路径栈深；
-  3. 长效机制：用 TASKING `-csa-refill`/栈水印或链接期 stack usage 分析，把三核 ustack 余量写进 architecture.md。
+  3. 长效机制：用 TASKING `-csa-refill`/栈水印或链接期 stack usage 分析，把三核 ustack 余量写进 31-firmware-architecture.md。
 
 #### P0-3 心跳超时不锁存故障，超时后运动命令仍可重新驱动车辆
 
@@ -105,7 +107,7 @@
 #### P0-4 硬件看门狗（三核 CPU 看门狗 + 安全看门狗）全部禁用，且无喂狗代码
 
 - **位置**：`Cpu0_Main.c:121-125`、`Cpu1_Main.c:43-46`、`Cpu2_Main.c:43-46`。
-- **机理**：三核上电即关狗，全工程无任何 `IfxScuWdt_service` 调用。软件保护链再完整也覆盖不了"单核跑飞/死循环但仍处在线状态"的场景：例如 CPU1 的 1 kHz 循环若在 `MOTOR_setDuty` 之后挂死且 PWM 保持非零占空比，TB6612 STBY 又是硬件常拉高（未受 GPIO 控制），电机会**带着最后一次占空比一直转**——没有任何机制能切断。requirement.md F09 已自我声明"量产前必须重新启用"，本报告将其升级为 P0 以免被长期搁置。
+- **机理**：三核上电即关狗，全工程无任何 `IfxScuWdt_service` 调用。软件保护链再完整也覆盖不了"单核跑飞/死循环但仍处在线状态"的场景：例如 CPU1 的 1 kHz 循环若在 `MOTOR_setDuty` 之后挂死且 PWM 保持非零占空比，TB6612 STBY 又是硬件常拉高（未受 GPIO 控制），电机会**带着最后一次占空比一直转**——没有任何机制能切断。11-requirements.md F09 已自我声明"量产前必须重新启用"，本报告将其升级为 P0 以免被长期搁置。
 - **建议**：
   1. 三核 CPU 看门狗按核使能并在各自超循环/任务喂狗（CPU0 可在 robot 任务喂，CPU1 在 `MOTOR_ALGO_run` 喂，CPU2 在 `WIFI_main` 喂）；安全看门狗一并启用；
   2. 硬件兜底：把 TB6612 STBY 引脚改接 GPIO，故障/看门狗超时时拉低断开电机供级（一阶故障容错）；
@@ -117,7 +119,7 @@
 
 - **位置**：`robot.c:79-84`（`LEFT: (-S, S)` 与 `ROTATE_LEFT: (-S, S)` 逐参数相同；RIGHT 同理）vs `doc/architecture.md:122-124`（0x04/0x05 LEFT/RIGHT＝"差速转"，0x08/0x09＝"原地旋"）。
 - **影响**：8 条运动命令实际只有 6 种行为，手机端"左转/右转"变成原地自旋，文档承诺的功能缺失。
-- **建议**：LEFT/RIGHT 改为差速弧线，如 `LEFT: (0, S)`、`RIGHT: (S, 0)`（FORWARD_LEFT/RIGHT 已是半速弧线，层次正好拉开：直行→弧线→差速转→原地旋）；改后同步 architecture.md 的状态表。
+- **建议**：LEFT/RIGHT 改为差速弧线，如 `LEFT: (0, S)`、`RIGHT: (S, 0)`（FORWARD_LEFT/RIGHT 已是半速弧线，层次正好拉开：直行→弧线→差速转→原地旋）；改后同步 31-firmware-architecture.md 的状态表。
 
 #### P1-2 +IPD 背靠背帧会被"尾部 drain"吞掉（字节流无回推机制）
 
@@ -127,7 +129,7 @@
 
 #### P1-3 SET_SPEED 双字节形式未钳位，状态上报越界
 
-- **位置**：`robot.c:106-129`（`ROBOT_cmdSetSpeeds` 无 ±100 钳位，`sint8` 原始值 -128..127 直接进 targets）→ `Cpu0_Main.c:102`（×10 后 -1280..1270）→ 幸有 `motor.c:115-122` BSP 钳位兜底；但 `XCORE_statusPublish`/`PROTO_sendStatus` 把 ±127 原样上报，超出协议文档承诺的 "-100..+100"（`architecture.md:137-138`）。
+- **位置**：`robot.c:106-129`（`ROBOT_cmdSetSpeeds` 无 ±100 钳位，`sint8` 原始值 -128..127 直接进 targets）→ `Cpu0_Main.c:102`（×10 后 -1280..1270）→ 幸有 `motor.c:115-122` BSP 钳位兜底；但 `XCORE_statusPublish`/`PROTO_sendStatus` 把 ±127 原样上报，超出协议文档承诺的 "-100..+100"（`31-firmware-architecture.md:137-138`）。
 - **影响**：弧线比例语义（S/2）失真、状态字段越文档范围；BSP 钳位属于"下游兜底上游"，防御层次倒挂。
 - **建议**：在 `ROBOT_cmdSetSpeeds` 入口钳位 ±100，使"协议承诺-robot 层-BSP 层"三层一致。
 
@@ -160,7 +162,7 @@
 | P3-1 | **仓库体积失控**：FreeRTOS 官方整仓克隆 113 MB / 7975 个文件 + `FreeRtos/aws` 18 MB 六个 AWS SDK（coreMQTT/corePKCS11/FreeRTOS-Plus-TCP 等），而 `.cproject` 实际只引用 Kernel 公共源 + `portable/Tasking/AURIX_TC27x`；克隆/切换分支/备份代价全部翻倍 | `FreeRtos/`（113 MB）、`.cproject` include/exclude 表 | 精简为实际编译所需的十几个文件目录；或改 git submodule 指向 FreeRTOS-Kernel 上游；aws/ 六个 SDK 直接删除（无任何代码引用，已核实） |
 | P3-2 | **零自动化测试**：协议解析器、robot 状态机、motor_algo 限幅逻辑都是无硬件依赖的纯 C，却没有任何主机端单测；解析器这类输入面靠人工回归 | 全工程 | 用 Unity/Ceedling 把 `PROTO_feedByte`、`ROBOT_cmd*`、`MOTOR_ALGO_stepToward` 在主机端测起来（目标：协议 fuzz + 状态机全迁移覆盖）；再挂 GitHub Actions/本地脚本跑 |
 | P3-3 | 无命令行构建：仅 ADS IDE 构建，CI 与可重复构建无从谈起 | README.md:98 | ADS 支持 headless 构建（ads.exe -data workspace -import … -build），落一个 build.bat 即可支撑 CI |
-| P3-4 | 文档-代码漂移：architecture.md:155 仍写 `Connection: close` + `AT+CIPCLOSE`，与工作区 keep-alive 改动相悖；LEFT/RIGHT 语义相悖（见 P1-1）；心跳一节未写明"超时后命令仍可执行"（P0-3 修复后需同步） | `doc/architecture.md:122-124,155` | 随 P0/P1 修复一并更新；建议在 AGENTS.md 约定"改协议/行为必须同步 architecture.md" |
+| P3-4 | 文档-代码漂移：31-firmware-architecture.md:155 仍写 `Connection: close` + `AT+CIPCLOSE`，与工作区 keep-alive 改动相悖；LEFT/RIGHT 语义相悖（见 P1-1）；心跳一节未写明"超时后命令仍可执行"（P0-3 修复后需同步） | `doc/architecture.md:122-124,155` | 随 P0/P1 修复一并更新；建议在 AGENTS.md 约定"改协议/行为必须同步 31-firmware-architecture.md" |
 | P3-5 | 安全属性未声明：softAP 固定弱密码 `12345678`、TCP/HTTP 无任何鉴权，任意连入 AP 的客户端可完全控车（包括绕过网页层 0..100 钳位的二进制协议） | `wifi_at.h:16-18` | 玩具定位可接受，但应在 README/architecture 明示威胁模型；路线图加：强密码 + 简单 token 校验（协议保留字段或 HTTP header） |
 | P3-6 | `GEMINI.md` 与 `AGENTS.md` 内容完全重复；`.codegraph/.gitignore` 入库无碍但属工具产物 | 根目录 | GEMINI.md 改为一行 include 指向 AGENTS.md 或删除 |
 | P3-7 | 死代码/死 API：`ROBOT_FAULT_COMM_TIMEOUT` 未使用（随 P0-3 复活）；`PROTO_process()` 只返回上次结果、无调用方价值 | `robot.c:10-12`、`protocol.c:213-216` | 随修复清理或删除 |
@@ -174,7 +176,7 @@
 分核方案（CPU0=OS/状态机 10 ms、CPU1=电机 1 kHz、CPU2=WiFi 阻塞会话）与"通信/控制解耦"原则执行得干净利落，核间接口收敛在 xcore 一个文件里，是同类学生/ hobby 项目中少见的好结构。两个结构性瑕疵：一是 P2-4 的默认宿主核选错导致 OS 数据跨核访问；二是 CPU2 超循环内阻塞式 AT 会话（最长 ~4 s）与实时收包天然冲突（P0-2/P1-2/P2-1 同源），V1.1 若上编码器高频上报，建议 CPU2 引入小型命令/数据双缓冲或把 +IPD 收包挪进 RX 环 + 主循环只做无阻塞消费。
 
 ### 5.2 安全（Safety）与可靠（Reliability）
-软件保护链（心跳超时→目标清零；CPU1 seq 失联→斜坡停车；急停旁路→立即刹车；BSP 钳位）层次分明，方向正确。但 P0-1 的竞态说明**安全机制的"清除路径"没有像"触发路径"那样被认真设计**——电平式每拍清除是最容易出事的模式。修复后建议补一张"故障矩阵"（故障源 × 触发 × 锁存 × 解除条件 × 上报码）进 architecture.md，作为回归测试依据。硬件层（看门狗 + STBY 断电）是当前最大空白（P0-4）。
+软件保护链（心跳超时→目标清零；CPU1 seq 失联→斜坡停车；急停旁路→立即刹车；BSP 钳位）层次分明，方向正确。但 P0-1 的竞态说明**安全机制的"清除路径"没有像"触发路径"那样被认真设计**——电平式每拍清除是最容易出事的模式。修复后建议补一张"故障矩阵"（故障源 × 触发 × 锁存 × 解除条件 × 上报码）进 31-firmware-architecture.md，作为回归测试依据。硬件层（看门狗 + STBY 断电）是当前最大空白（P0-4）。
 
 ### 5.3 通信链路
 +IPD 冒号修复、keep-alive 改造、link 管理都体现真实调试功力；但读取层缺 pushback 是全局性缺陷（P1-2），RX/TX 缓冲的容量论证缺失（P2-1）。协议本身（XOR CRC、无序号、无鉴权）满足玩具定位，建议至少给帧加 1 字节序号以检测整帧丢失（尤其心跳），配合 P0-3 的锁存可显著提高失控检测率。
@@ -186,7 +188,7 @@
 IDE 工程本身可构建可调试，但 131 MB 的第三方目录入库（P3-1）是本工程最不划算的负债；无命令行构建与 CI（P3-3）使所有回归依赖人肉。建议尽早做一次"仓库瘦身 + build.bat + 主机端单测"的组合拳，一次性把工程化地基打好。
 
 ### 5.6 文档
-覆盖度与诚实度（已知问题明示）都好于平均水平；主要风险是**漂移无守门**（P3-4）。建议每次改协议/安全行为时把 architecture.md 列入同一提交。
+覆盖度与诚实度（已知问题明示）都好于平均水平；主要风险是**漂移无守门**（P3-4）。建议每次改协议/安全行为时把 31-firmware-architecture.md 列入同一提交。
 
 ---
 
@@ -197,7 +199,7 @@ IDE 工程本身可构建可调试，但 131 MB 的第三方目录入库（P3-1�
 2. P0-3：心跳超时锁存 `ROBOT_FAULT_COMM_TIMEOUT`，运动命令门控在 `heartbeatOk` 上。
 3. P0-2：CPU2 栈——HTTP 响应分段发送（页面上行走 rodata），栈占用压到 <512 B；顺手把 `LCF_USTACK2_SIZE` 提到 4 KB。
 4. P1-3/P1-4：`ROBOT_cmdSetSpeeds` 钳位 ±100；`wifiHttpSpeed` 解析加位数上限。
-5. P1-1：LEFT/RIGHT 改真差速 `(0,S)/(S,0)`，同步 architecture.md 状态表。
+5. P1-1：LEFT/RIGHT 改真差速 `(0,S)/(S,0)`，同步 31-firmware-architecture.md 状态表。
 
 ### 第二批（短期，1–2 周）
 1. P0-4：三核看门狗 + 安全看门狗使能与喂狗；TB6612 STBY 改 GPIO 受控；调试/量产开关宏。
@@ -205,7 +207,7 @@ IDE 工程本身可构建可调试，但 131 MB 的第三方目录入库（P3-1�
 3. P2-5/P2-7：任务创建检查 + 故障钩子进"急停安全态"；Release configASSERT 保留最小行为。
 4. P2-4：`LCF_DEFAULT_HOST` 改回 CPU0（构建后回归一次三核功能）。
 5. P2-3/P2-6/P2-8/P2-9/P2-10：volatile 修复、echo 任务加延时、heap 策略收敛、命令对原子性、`AT+UART_CUR` 补发。
-6. P3-4：文档与代码同步（keep-alive、故障矩阵、栈预算写进 architecture.md §10）。
+6. P3-4：文档与代码同步（keep-alive、故障矩阵、栈预算写进 31-firmware-architecture.md §10）。
 
 ### 第三批（中期，随 V1.1 编码器闭环一起）
 1. P3-1：仓库瘦身（FreeRTOS 精简为必需目录或 submodule；删除 aws/ 六 SDK）。
@@ -231,6 +233,6 @@ IDE 工程本身可构建可调试，但 131 MB 的第三方目录入库（P3-1�
 | Configurations/FreeRTOSConfig.h | 73 | 栈 256 字、Release 断言为空、vTaskDelete×heap_1 陷阱（P2-7/P2-8） |
 | Lcf_Tasking_Tricore_Tc.lsl | ~460 行 | LCF_DEFAULT_HOST=CPU1（P2-4）、USTACK2=2k（P0-2） |
 | .cproject / 仓库 | — | 仅 Kernel+Tasking port 被引用；113 MB+18 MB 第三方入库（P3-1）、heap_2..5 被排除 |
-| doc/*.md ×4 | — | 覆盖完整；architecture.md 与代码两处漂移（P3-4、P1-1） |
+| doc/*.md ×4 | — | 覆盖完整；31-firmware-architecture.md 与代码两处漂移（P3-4、P1-1） |
 
 > 本报告基于静态通读与配置核查，未做硬件在环验证；标注"静默溢出/竞态"的结论均给出了可复现的触发路径，修复后建议按 §6 顺序回归。
