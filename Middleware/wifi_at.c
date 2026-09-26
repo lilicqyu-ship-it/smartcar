@@ -41,6 +41,9 @@ static uint8 g_wifiTxBuffer[WIFI_TX_BUFFER_SIZE + sizeof(Ifx_Fifo) + 8];
 static uint8 g_wifiRxBuffer[WIFI_RX_BUFFER_SIZE + sizeof(Ifx_Fifo) + 8];
 
 static boolean g_clientConnected = FALSE;
+/* esp-at link id that last sent us a +IPD; replies go back on the same link.
+ * 0xFFFFFFFF = no active link. */
+static uint32  g_activeLink = 0xFFFFFFFFU;
 
 IFX_INTERRUPT(wifiTxISR, WIFI_VECTAB, WIFI_TX_PRIO);
 
@@ -186,10 +189,11 @@ static void wifiHttpSend(const char *contentType, const char *body)
     strcat(response, contentType);
     strcat(response, "\r\nContent-Length: ");
     wifiAppendUint(response, (uint32)strlen(body));
-    strcat(response, "\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n");
+    /* keep-alive: the phone polls heartbeats every 50 ms; closing the socket
+     * per response would reconnect (and re-emit CONNECT/CLOSED events) per request */
+    strcat(response, "\r\nConnection: keep-alive\r\nCache-Control: no-store\r\n\r\n");
     strcat(response, body);
     WIFI_sendRaw((const uint8 *)response, (uint32)strlen(response));
-    WIFI_sendAtCommand("AT+CIPCLOSE=0", "OK", 1000);
 }
 
 static void wifiHttpHandleRequest(const char *request)
@@ -292,9 +296,6 @@ boolean WIFI_sendAtCommand(const char *cmd, const char *okToken, uint32 timeoutM
     char line[WIFI_LINE_MAX];
     uint32 start = STIME_nowMs();
 
-    XCORE_log("ESP-C6<- ");
-    XCORE_logln(cmd);
-
     wifiSendString(cmd);
     wifiSendString("\r\n");
 
@@ -306,6 +307,11 @@ boolean WIFI_sendAtCommand(const char *cmd, const char *okToken, uint32 timeoutM
         }
         if (strstr(line, "ERROR") || strstr(line, "FAIL"))
         {
+            char msg[WIFI_LINE_MAX];
+
+            strcpy(msg, "WIFI: AT failed: ");   /* silent on success; failures only */
+            strcat(msg, cmd);
+            XCORE_logln(msg);
             return FALSE;
         }
         if (strstr(line, okToken))
@@ -341,13 +347,15 @@ boolean WIFI_sendRaw(const uint8 *data, uint32 len)
     char line[WIFI_LINE_MAX];
     boolean ok = FALSE;
 
-    if (!g_clientConnected)
+    if (!g_clientConnected || g_activeLink == 0xFFFFFFFFU)
     {
         return FALSE;
     }
 
-    /* Build: AT+CIPSEND=0,<len> */
-    strcpy(cmd, "AT+CIPSEND=0,");
+    /* Build: AT+CIPSEND=<link>,<len> (reply on the link that sent the request) */
+    strcpy(cmd, "AT+CIPSEND=");
+    wifiAppendUint(cmd, g_activeLink);
+    strcat(cmd, ",");
     wifiAppendUint(cmd, len);
 
     wifiSendString(cmd);
@@ -427,7 +435,7 @@ typedef enum
 } WifiMsgType;
 
 static WifiMsgType wifiReadMessage(uint8 *payload, uint32 maxPayload, uint32 *payloadLen,
-                                   char *line, uint32 lineSize)
+                                   char *line, uint32 lineSize, uint32 *linkIdOut)
 {
     /* Byte-level reader. A line is accumulated up to '\n' and returned as
      * WIFI_MSG_LINE. Only lines starting with "+IPD," are treated as data
@@ -540,8 +548,28 @@ static WifiMsgType wifiReadMessage(uint8 *payload, uint32 maxPayload, uint32 *pa
     }
 
     *payloadLen = len;
-    (void)linkId;
+    *linkIdOut = linkId;
     return WIFI_MSG_IPD;
+}
+
+/* Link id at the start of an esp-at event line ("0,CLOSED"); 0xFFFFFFFF when
+ * the line has no numeric id prefix. */
+static uint32 wifiEventLinkId(const char *s)
+{
+    uint32  v   = 0;
+    boolean any = FALSE;
+
+    while (*s >= '0' && *s <= '9')
+    {
+        v = v * 10 + (uint32)(*s - '0');
+        s++;
+        any = TRUE;
+    }
+    if (any && *s == ',')
+    {
+        return v;
+    }
+    return 0xFFFFFFFFU;
 }
 
 void WIFI_main(void)
@@ -604,22 +632,39 @@ void WIFI_main(void)
         uint8 frame[WIFI_IPD_BUFFER_SIZE];
         uint32 frameLen;
         char statusLine[WIFI_LINE_MAX];
+        uint32 ipdLink = 0xFFFFFFFFU;
         WifiMsgType msg;
 
-        msg = wifiReadMessage(frame, sizeof(frame), &frameLen, statusLine, sizeof(statusLine));
+        msg = wifiReadMessage(frame, sizeof(frame), &frameLen, statusLine, sizeof(statusLine),
+                              &ipdLink);
 
         if (msg == WIFI_MSG_IPD)
         {
+            if (ipdLink != g_activeLink)
+            {
+                uint32 old = g_activeLink;
+
+                g_activeLink = ipdLink;
+                if (old != 0xFFFFFFFFU)
+                {
+                    char cmd[WIFI_LINE_MAX];
+
+                    /* browser opened a fresh socket (e.g. page refresh): drop the
+                     * previous one so links do not pile up */
+                    strcpy(cmd, "AT+CIPCLOSE=");
+                    wifiAppendUint(cmd, old);
+                    WIFI_sendAtCommand(cmd, "OK", 1000);
+                }
+            }
             g_clientConnected = TRUE;
             if (frameLen >= 5 && memcmp(frame, "GET ", 4) == 0)
             {
                 frame[frameLen < sizeof(frame) ? frameLen : sizeof(frame) - 1] = '\0';
-                XCORE_logln("WIFI: HTTP request");
-                wifiHttpHandleRequest((const char *)frame);
+                wifiHttpHandleRequest((const char *)frame);   /* no per-request log */
             }
             else
             {
-                XCORE_log("WIFI: RX frame, ");
+                strcpy(statusLine, "WIFI: RX frame, ");
                 wifiAppendUint(statusLine, frameLen);
                 XCORE_logln(statusLine);
                 {
@@ -634,25 +679,34 @@ void WIFI_main(void)
         }
         else if (msg == WIFI_MSG_LINE)
         {
-            if (statusLine[0] != '\0')   /* skip empty CR LF keep-alive lines */
-            {
-                XCORE_log("ESP-C6<- ");
-                XCORE_logln(statusLine);
-            }
             if (strstr(statusLine, "CONNECT FAIL"))
             {
                 g_clientConnected = FALSE;
+                g_activeLink  = 0xFFFFFFFFU;
                 XCORE_logln("WIFI: TCP connect failed");
             }
             else if (strstr(statusLine, "CONNECT"))
             {
+                if (!g_clientConnected)
+                {
+                    XCORE_logln("WIFI: phone connected");
+                }
                 g_clientConnected = TRUE;
-                XCORE_logln("WIFI: phone connected");
             }
             else if (strstr(statusLine, "CLOSED"))
             {
-                g_clientConnected = FALSE;
-                XCORE_logln("WIFI: phone disconnected");
+                uint32 id = wifiEventLinkId(statusLine);
+
+                /* a CLOSED for a link we replaced ourselves is expected: ignore */
+                if (id == g_activeLink || id == 0xFFFFFFFFU)
+                {
+                    if (g_clientConnected)
+                    {
+                        XCORE_logln("WIFI: phone disconnected");
+                    }
+                    g_clientConnected = FALSE;
+                    g_activeLink      = 0xFFFFFFFFU;
+                }
             }
         }
         else
