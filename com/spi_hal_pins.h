@@ -10,7 +10,8 @@
  *   P33.12  QSPI3_MTSR -> ESP32-C6 GPIO18   (MOSI, master transmit)
  *   P33.13  QSPI3_MRSTD<- ESP32-C6 GPIO20   (MISO, master receive)
  *   P23.4   QSPI3_SLSO5-> ESP32-C6 GPIO23   (CS, active low)
- *   P23.0   general purpose input <- ESP32-C6 GPIO21 (IRQ, open drain + pull-up)
+ *   P23.0   general purpose input <- ESP32-C6 GPIO21 (IRQ, open drain; the
+ *           boards are jumper wires only, so the pull-up is this pin's own)
  * P33.0..7 stay free for the encoders and P23.4 is the only usable chip select
  * (SDD SS18 C7).
  *

@@ -26,10 +26,14 @@
  *********************************************************************************************************************/
 /* CPU2 - bare-metal core: the board link to the ESP32-C6.
  * Two builds share this file:
- *   default      : demo path, AT firmware on ASCLIN1 (P15.0/P15.1) + the AA 55
- *                  byte protocol. Kept until gate G1 passes on the bench.
  *   USE_SPI_LINK : production path, SF frames over QSPI3 half duplex
- *                  transactions (doc/20-design/22-link-spi-design.md).
+ *                  transactions (doc/20-design/22-link-spi-design.md). Both
+ *                  TASKING configurations define it, so this is the only path
+ *                  a normal build produces.
+ *   default      : demo path, AT firmware on ASCLIN1 (P15.0/P15.1) + the AA 55
+ *                  byte protocol. The UART board link is deprecated (doc 21
+ *                  SS5.6); this branch stays reachable only by deleting the
+ *                  symbol, which is what a G1 failure or a factory rework does.
  * ASCLIN1 and its interrupts belong to this core; no FreeRTOS API may be used
  * here - the kernel runs on CPU0. */
 #include "Ifx_Types.h"

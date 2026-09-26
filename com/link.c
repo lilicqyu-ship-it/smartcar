@@ -510,7 +510,10 @@ static void link_cycle(void)
     /* The slave signals queued data on P23.0, but that pin can only be sampled,
      * not made to interrupt (22 SS4.1 write back). Either way the poll runs at
      * least every LINK_KEEPALIVE_MS, which bounds the command latency at the
-     * 2.3 ms figure of 22 SS6 even if the IRQ line or its pull-up is missing. */
+     * 2.3 ms figure of 22 SS6 even when the IRQ line carries nothing useful -
+     * with jumper wires and only P23.0's weak internal pull-up there is no
+     * external resistor to rely on, so a stuck or floating level is a normal
+     * state to design for, not a fault case (doc 23 SS9.3, SDD SS18 C14). */
     if ((SPIHAL_irqAsserted() == FALSE) && ((sint32)(nowMs - g_nextPollMs) < 0))
     {
         return;

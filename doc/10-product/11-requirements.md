@@ -1,16 +1,17 @@
 AURIX SmartDrive V1.0 产品需求与功能设计
 
-版本： V1.2
-平台： KIT-AURIX-TC275-LITE + D24A 四路驱动板（双 TB6612 通道 A/B/C/D）+ ESP32-C6（自研固件，esp-at 仅作回退）+ 4×MG310 编码器减速电机（双轮差速布局）
+版本： V1.3
+平台： KIT-AURIX-TC275-LITE + D24A 四路驱动板（双 TB6612 通道 A/B/C/D）+ ESP32-C6（自研固件，**板间链路唯一为 SPI**；esp-at 仅作 UART 应急返修镜像）+ 4×MG310 编码器减速电机（双轮差速布局）
 产品定位： Wi-Fi 双轮智能运动控制平台
 
-> 文档编号 **11** · 域 产品 · 状态：需求层（当前 V1.2） · 上级索引 [00-index.md](../00-index.md)
+> 文档编号 **11** · 域 产品 · 状态：需求层（当前 V1.3） · 上级索引 [00-index.md](../00-index.md)
 
-> 文档定位：本文件是**产品需求层**（做什么、验收标准）。软件设计基准是 [21-software-design.md](../20-design/21-software-design.md)（SDD，当前 V1.2）——两者冲突时以 SDD 为准，本文件只描述需求与范围。
+> 文档定位：本文件是**产品需求层**（做什么、验收标准）。软件设计基准是 [21-software-design.md](../20-design/21-software-design.md)（SDD，当前 V1.5）——两者冲突时以 SDD 为准，本文件只描述需求与范围。
 
 变更记录：
 V1.1 — Wi-Fi 模块由 ESP8266 更换为 ESP32-C6（运行 Espressif 官方 esp-at AT 固件，AT 指令集向下兼容 ESP8266），接线详见 23-wiring.md
 V1.2 — **板间主链路 UART → SPI**（TC275 QSPI3 主机 ↔ C6 SPI2 从机，1 MHz 起 / 5 MHz 量产基线），UART 降级为调试控制台与回退通道；C6 固件改为自研（`c6_car` 工程），esp-at 退居回退；链路帧分为两段：板间 SF 帧 + 手机 v2 帧。详见 SDD §3.7/§6 与 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。文中 esp-at / UART 相关段落（§2 目标、§3 架构图、§5）描述的是 **V1.1 demo 现状**，保留作为回退通道与产线返工依据。
+V1.3 — **UART 作为板间链路弃用（2026-09-26 用户决策）**：SPI 是**唯一**板间链路，TC275 的两个 TASKING 构建配置都只编 SPI 路径；UART/esp-at 只保留为 C6 调试控制台与 G1 失败时的**应急返修**（恢复要删 `USE_SPI_LINK` 重编 + C6 重刷 esp-at，双侧动作）。本文上述"回退通道"字样按此理解，验收与排障不再假设 UART 可用；决策依据见 SDD §5.6 末条与 §18 C15。
 
 1. 产品概述
 
@@ -36,7 +37,7 @@ Watchdog
 V1.0 实现以下核心能力：
 
 手机/PC 通过 Wi-Fi 控制机器人
-ESP32-C6 与 TC275 通过板间链路通信（V1.1 demo = UART 115200；V1.2 起量产主链路 = SPI，UART 降级为调试/回退，见 SDD §3.7）
+ESP32-C6 与 TC275 通过板间链路通信（V1.1 demo = UART 115200；V1.2 起量产主链路 = SPI；**V1.3 起 UART 作为板间链路弃用，只剩 C6 调试控制台**，见 SDD §3.7/§5.6、§18 C15）
 TC275 独立控制左右两个电机
 支持前进、后退、左右转向
 支持原地旋转

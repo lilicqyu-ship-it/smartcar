@@ -30,7 +30,8 @@
  * never re-initialises the module and never interrupts the link. */
 #define SPIHAL_MODULE_CLK      20000000.0f
 
-/* P23.0: slave IRQ, open drain with an external pull-up -> plain input. */
+/* P23.0: slave IRQ, open drain with no external pull-up (the boards are jumper
+ * wires only, doc 23 SS9.3) -> input with this pin's internal pull-up. */
 #define SPIHAL_IRQ_PORT        (&MODULE_P23)
 #define SPIHAL_IRQ_PIN         0u
 
@@ -136,9 +137,13 @@ static void spiHal_setup(SpiHal_ClockTier tier)
 
     IfxQspi_SpiMaster_initModule(&g_spi, &config);
 
-    /* P23.0 pull-up input: the slave drives it open drain, the board supplies
-     * the pull-up, the pump samples the level. P23.x is not an IOM monitor
-     * input on this package, so no edge interrupt exists for this pin. */
+    /* P23.0: the slave drives it open drain and there is no external pull-up -
+     * the two boards are jumper wires only, so the high level comes from this
+     * pin's own internal pull-up (doc 23 SS9.3, SDD SS18 C14). The line is
+     * therefore slow-riding and noisy: sample the level, never count edges, and
+     * never read "high" as "slave present" - liveness is SF_ALIVE alone.
+     * P23.x is not an IOM monitor input on this package anyway, so no edge
+     * interrupt exists for this pin. */
     IfxPort_setPinModeInput(SPIHAL_IRQ_PORT, SPIHAL_IRQ_PIN, IfxPort_InputMode_pullUp);
 
     g_tier = tier;

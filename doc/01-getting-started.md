@@ -1,10 +1,10 @@
 # 快速上手教程：从零到手机遥控
 
-> 文档编号 **01** · 域 入口 · 状态：描述**当前代码（demo）**可跑通路 · 上级索引 [00-index.md](00-index.md)
+> 文档编号 **01** · 域 入口 · 状态：描述**demo（UART/AT 通路）**的可跑通路 · 版本 **V2.1**（2026-09-26：UART 作为板间链路已弃用，做本教程须临时删除 `USE_SPI_LINK`，见第 1 步；V2.0 = esp-at + C6 的 UART 通路全流程） · 上级索引 [00-index.md](00-index.md)
 
 本教程带你完成 AURIX SmartDrive 的完整搭建：编译烧录 TC275 固件 → 刷写 ESP32-C6 AT 固件 → 接线 → 手机网页遥控。预计 1~2 小时（不含采购）。
 
-> **适用口径**：本文走的是**当前代码（demo，esp-at + UART）** 的最小可跑通路，用于把板子点亮、验证电机与安全逻辑。量产目标态（C6 自研固件 + SPI + SF 帧、闭环伺服、OTA/产测）的构建与验证流程按 [21-software-design.md](20-design/21-software-design.md) §15 里程碑落地，其中 SPI 链路需先通过 [22-link-spi-design.md](20-design/22-link-spi-design.md) §8 的 G1 台架门禁，**本文不提前描述未实现的流程**。UART 接线（第 4 步）在量产后仍是调试控制台与回退链路，需要保留。
+> **适用口径**：本文走的是**demo（esp-at + UART）** 的最小可跑通路，用于把板子点亮、验证电机与安全逻辑。**注意 2026-09-26 起的口径变化**：UART 作为板间链路已弃用，`TriCore Debug/Release (TASKING)` 两个配置都定义了 `USE_SPI_LINK`，**默认构建出来的镜像里根本没有 AT/UART 通路**——要做本教程必须先按第 1 步临时删掉该符号（量产链路与 G1 门禁见 [22-link-spi-design.md](20-design/22-link-spi-design.md) §8，本文不提前描述未验证的流程；决策记录见 [21-software-design.md](20-design/21-software-design.md) §5.6 末条与 §18 C15）。删掉的符号教程结束后请恢复，否则量产构建会退回到已弃用的通路。UART 接线（第 4 步）在量产态仍是 C6 的调试控制台，**线要保留**。
 
 ## 你需要的东西
 
@@ -19,7 +19,8 @@
 ## 第 1 步：导入并编译 TC275 工程
 
 1. 打开 AURIX Development Studio → `File > Import > General > Existing Projects into Workspace`，选择本仓库根目录（`myCar`）。
-2. 选中工程 → `Project > Build Project`，等待输出 `Build finished`。
+2. **本教程必需的一步**：`myCar > Properties > C/C++ Build > Settings > TASKING C/C++ Compiler > Preprocessor > Defined symbols (-D)`，**临时删除 `USE_SPI_LINK` 这一行**（Debug 与 Release 各一处）。原因：2026-09-26 起该符号是两个 TASKING 配置的默认值，带着它编出来的镜像走 SPI/QSPI3，**里面没有 AT/UART 通路**，第 5 步的手机遥控不会有任何响应。教程做完请把符号加回去（`21 §18 C15`）。
+3. 选中工程 → `Project > Build Project`，等待输出 `Build finished`。
 
 > 编译错误 `FreeRTOS.h not found` 时，检查 `FreeRtos/` 与 `Configurations/` 是否完整检出——它们是工程的一部分，不需要另外安装。
 
@@ -35,7 +36,7 @@
 
 **看到什么算成功：** 灯闪 + `UART initialized` + 回显，三者齐全。
 
-## 第 3 步：给 ESP32-C6 刷 esp-at 固件（demo / 回退通道）
+## 第 3 步：给 ESP32-C6 刷 esp-at 固件（仅 demo 教程用；量产为自研 `c6_car` 固件）
 
 使用同机的 esp-at 工程（`C:\Code\TC275\AURIX-v1.10.36-workspace\esp-at`，已配置 target=esp32c6、module_esp32c6_default）：
 
@@ -48,11 +49,12 @@
 
 ## 第 4 步：按接线图接线
 
-对照 [23-wiring.md](20-design/23-wiring.md) 完成三类接线，重点核对：
+对照 [23-wiring.md](20-design/23-wiring.md) 完成四类接线，重点核对：
 
-1. **TC275 ↔ ESP32-C6（UART，本教程用）**：`P15.0(TX) → GPIO6`、`P15.1(RX) ← GPIO7`、**必须共地**；TC275 侧物理位置在板载 **mikroBUS 插座 pin13(TX)/pin14(RX)**；DevKitC-1 侧 GPIO6/7 = J1-5/6，5V 接 J1-14（车载 DC-DC ≥2A）。量产主链路 SPI（QSPI3 ↔ C6 SPI2，**已按 23-wiring.md §9.1 实物接线**）两侧代码已实现但**默认未启用、也未通电联调**（TC275 侧要 `-D USE_SPI_LINK`，见 `32 §1`；门禁 `22 §8` G1），所以本教程仍走 UART；**这组 UART 线保留不拆**（调试控制台 + 回退）。
-2. **TC275 ↔ D24A**：8 根 PWM/方向线接 **J4（电机 A/B）/ J6（电机 C/D）**，见 23-wiring.md §3/§4 表格；STBY 直接短接同座 J4-1 的板载 3V3。
-3. **电源**：电池 → D24A VIN（逻辑电源 D24A 板载稳压自产，无需外接 VCC）；DC-DC 5V → TC275 与 C6；全系统共地。
+1. **TC275 ↔ ESP32-C6（UART，本教程用）**：`P15.0(TX) → GPIO6`、`P15.1(RX) ← GPIO7`、**必须共地**；TC275 侧物理位置在板载 **mikroBUS 插座 pin13(TX)/pin14(RX)**；DevKitC-1 侧 GPIO6/7 = J1-5/6，5V 接 J1-14（车载 DC-DC ≥2A）。量产主链路 SPI（QSPI3 ↔ C6 SPI2，**已按 23-wiring.md §9.1 实物接线**）两侧代码已实现，且 `USE_SPI_LINK` 已定义进两个 TASKING 配置——**默认构建走的是 SPI，不是本教程的 UART**（口径见 `32 §1`；SPI 的门禁 `22 §8` G1 尚未过、也未通电联调）。因此本教程要求先按第 1 步删符号；**这组 UART 线保留不拆**（C6 调试控制台）。
+2. **TC275 ↔ ESP32-C6（SPI，量产唯一板间链路）**：§9.1 五线（SCLK/MTSR/MRST/CS/IRQ）+ 共地**已接好**，杜邦线直连、无外部元件（`23 §9.3`）；本教程不涉及它的验证。
+3. **TC275 ↔ D24A**：8 根 PWM/方向线接 **J4（电机 A/B）/ J6（电机 C/D）**，见 23-wiring.md §3/§4 表格；STBY 直接短接同座 J4-1 的板载 3V3。
+4. **电源**：电池 → D24A VIN（逻辑电源 D24A 板载稳压自产，无需外接 VCC）；DC-DC 5V → TC275 与 C6；全系统共地。
 
 > 接线时先断电。所有信号线两端均为 3.3V 电平（D24A 逻辑输入 3.3V 已由实车验证）；**勿向 D24A 的 3V3/5V 输出脚反向灌电**。注意 P00.0（电机 C PWM）与板载 CAN 收发器输入并联，运行期间不要外接 CAN 总线（见 23-wiring.md §4 警示）。
 
