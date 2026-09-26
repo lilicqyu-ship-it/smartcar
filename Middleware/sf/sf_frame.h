@@ -48,12 +48,13 @@ extern "C" {
 #define SF_MAX_PADDED         (SF_MAX_FRAME + 3u)  /* 261, worst case aligned size */
 #define SF_SEG_ALIGN          4u                   /* spi_slave_hd RX: mult. of 4  */
 
-/* FLAGS (doc 22 SS5.1 reserves bit0-2 for segmentation; SDD SS6.1a names them.
+/* FLAGS (doc 22 SS5.1; values match the slave's c6_sf/sf_frame.h exactly).
  * There is no ACK flag: an acknowledgement is a frame of SF_TYPE_ACK, so bit1
- * belongs to the segmentation group. V1.0 sends unfragmented. */
+ * belongs to the segmentation group. V1.0 sends unfragmented, and bit2..7 are
+ * reserved and must go out as 0 - the slave copies FLAGS verbatim into the CRC,
+ * so a locally invented bit would only ever cost us a CRC/format mismatch. */
 #define SF_FLAG_FRAG          0x01u                /* continuation follows     */
 #define SF_FLAG_FRAG_END      0x02u                /* last fragment of a frame */
-#define SF_FLAG_RESYNC        0x04u                /* sender lost sync         */
 
 /* TYPE channels (doc 22 SS5.2) */
 #define SF_TYPE_CMD           0x01u                /* C6 -> TC275 command          */

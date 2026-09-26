@@ -18,6 +18,7 @@
 #include "protocol.h"
 #include "com/spi_hal_pins.h"
 #include "sf/sf_frame.h"
+#include "sf/sf_telemetry.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -56,6 +57,12 @@ extern "C" {
 
 #define LINK_GEN_RESULT_OK       0u
 #define LINK_GEN_RESULT_UNKNOWN  1u
+
+/* How long a GEN receipt is waited for before the slave is assumed not to have
+ * acted. Its link task wakes on the SPI buffer-written event, so the normal
+ * figure is well under a millisecond; 20 ms also covers the 10 ms ALIVE timer
+ * period it can be interleaved with. */
+#define LINK_GEN_TIMEOUT_MS      20u
 
 /* Slave heartbeat stalls for longer than this = the slave is gone (22 SS5.4).
  * The alarm has to fire before the 520 ms link-loss gate G4 allows. */
@@ -120,6 +127,8 @@ typedef struct
     uint32 cmdUnsupportedCid; /* TYPE_CMD of a CID this build has no consumer for;
                                * executing it would run configuration or pairing
                                * bytes as if they were a command */
+    uint32 cmdUnsupportedOp;  /* a known channel whose command this build cannot
+                               * execute (0x50 DRIVE until the speed loop exists) */
     uint32 unhandledType;     /* RX frame of a type this build does not consume */
     uint32 genWrites;         /* GEN transactions issued to the slave */
     uint32 genNoAck;          /* GEN write whose receipt did not come back as
@@ -158,6 +167,23 @@ void LINK_main(void);
  * (22 SS5.2 "commands are not dropped: queue full means backpressure + alarm"). */
 boolean LINK_send(uint8 type, uint8 cid, const uint8 *payload, uint8 len);
 
+/* Queue one telemetry frame (SF_TYPE_TEL / SF_CID_TELEMETRY).
+ *
+ * The payload is the fixed 38 byte proto v2 0x41 layout from
+ * Middleware/sf/sf_telemetry.h, and the length is not negotiable: the slave
+ * drops every TEL frame that is not exactly that CID with at least
+ * SF_TELEMETRY_LEN bytes (c6_car components/c6_link/link.c:sf_to_v2), so a short
+ * telemetry payload is not "less information", it is no information.
+ *
+ * This call owns the E2E sequence field, so a producer that hands over a filled
+ * SF_Telemetry gets a consistent seq stream even if it forgets to count. Every
+ * field with no measured source in this build must be written as zero by the
+ * caller rather than filled with a value in another unit - the C6 forwards these
+ * bytes to the phone, which labels them mm/s, mV and mm.
+ *
+ * Returns FALSE with stats.txQueueFull when the TX queue has no room. */
+boolean LINK_sendTelemetry(const SF_Telemetry *tel);
+
 /* TRUE while the link can carry commands (22 SS5.4: the caller decides whether
  * a frame is worth queueing at all). */
 boolean LINK_isUp(void);
@@ -179,7 +205,10 @@ typedef enum
     LINK_GEN_OK = 0,
     LINK_GEN_ERR_SPI,     /* the write or a read-back transaction failed */
     LINK_GEN_ERR_NOACK,   /* CMDRSP never came back carrying this command */
-    LINK_GEN_ERR_REJECT   /* the slave answered LINK_GEN_RESULT_UNKNOWN */
+    LINK_GEN_ERR_REJECT,  /* the slave answered LINK_GEN_RESULT_UNKNOWN */
+    LINK_GEN_ERR_RANGE    /* caller passed a payload wider than the 24-bit slot;
+                           * nothing went on the wire - a programming error, not
+                           * a link fault, so it must not read as ERR_SPI */
 } Link_GenResult;
 
 Link_GenResult LINK_gen(uint8 cmd, uint32 payload, uint32 timeoutMs);

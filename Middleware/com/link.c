@@ -49,6 +49,7 @@ static uint32       g_aliveSeen;
 static uint8        g_aliveValid;
 static uint32       g_aliveMs;
 static uint32       g_nextPollMs;
+static uint32       g_telSeq;            /* E2E counter of the telemetry stream */
 static Link_Stats   g_stats;
 static Link_Health  g_health;           /* bench watch expression, see link_updateHealth */
 
@@ -123,22 +124,63 @@ static boolean link_snapshot(void)
 
 /* ---- receive path ---------------------------------------------------------- */
 
-static void link_dispatch(const SF_Frame *frame)
+/* CID first, payload byte second.
+ *
+ * c6_link puts the v2 command byte in payload[0] for the DRV/DIAG/DPT families,
+ * but for CFG and PAIR it copies the v2 payload verbatim and lets the CID carry
+ * the identity of the message (c6_car components/c6_link/link.c:v2_to_sf). A
+ * dispatch that assumed "payload[0] is always a command" would therefore execute
+ * a configuration key or the first byte of a pairing token as if it were a drive
+ * command - the one mistake on this link that can move the car.
+ *
+ * Of the three command-bearing channels, this build consumes one:
+ *   SF_CID_DRIVE  {u8 op, i16 v, i16 w}      op is a v2 code, and doc 21 SS6.2
+ *                                            keeps 0x01..0x32 identical to the
+ *                                            demo command set, so op crosses
+ *                                            over unchanged. v/w are only filled
+ *                                            for 0x10 SET_SPEED (two +-100
+ *                                            targets, doc 11 SS7: +100 is full
+ *                                            speed, so the i16 narrows to the
+ *                                            demo's sint8 with nothing lost) and
+ *                                            for 0x50 DRIVE (v mm/s, omega per
+ *                                            second). 0x50 needs the §11
+ *                                            kinematics plus the closed speed
+ *                                            loop to become wheel targets; with
+ *                                            no decoder channel in this build it
+ *                                            is refused rather than guessed at.
+ *   SF_CID_DIAG   {u8 op, ...}               op 0x53 / 0x42, no consumer yet
+ *   SF_CID_DPT    {u8 op, ...}               op 0x70..0x79,产测 not implemented
+ * The last two go to CPU0 as op + remaining bytes, which is what the demo path
+ * did over UART; CPU0's switch ignores codes it does not know, and the counters
+ * here say what was seen.
+ */
+#define LINK_DRV_PAYLOAD_LEN  5u   /* {u8 op, i16 v, i16 w}, 22 SS5.5 */
+
+/* v2 code for the joystick stream (doc 21 SS6.2). It is not in protocol.h,
+ * which is the demo's UART command table and stops at 0x32. */
+#define LINK_OP_DRIVE           0x50u
+
+static sint8 link_narrowPercent(uint16 raw)
+{
+    sint16 value = (sint16)raw;
+
+    if (value > 100)
+    {
+        value = 100;
+    }
+    else if (value < -100)
+    {
+        value = -100;
+    }
+    return (sint8)value;
+}
+
+/* Queue one command for CPU0, with the e-stop bypassed ahead of the queue. */
+static void link_forward(uint8 cmd, const uint8 *data, uint8 len)
 {
     XcoreCmdMsg msg;
 
-    if (frame->type != SF_TYPE_CMD)
-    {
-        /* ACK / HBT / OTA / DBG have no consumer in this build yet. Counted, not
-         * silently dropped, so a C6 that starts sending them shows up in health. */
-        g_stats.unhandledType++;
-        return;
-    }
-
-    /* 22 SS5.5 as implemented: payload[0] is the command byte of the existing
-     * demo command set, payload[1..] are its data bytes unchanged. That keeps the
-     * command semantics inherited from the UART era byte for byte. */
-    if ((frame->len < 1u) || (frame->len > LINK_CMD_DATA_MAX))
+    if (len > LINK_CMD_DATA_MAX)
     {
         /* No truncation: a command wider than the CPU0 mailbox is a protocol
          * mismatch and must be visible, not quietly shortened. */
@@ -146,18 +188,18 @@ static void link_dispatch(const SF_Frame *frame)
         return;
     }
 
-    if (frame->payload[0] == PROTO_CMD_EMERGENCY_STOP)
+    if (cmd == PROTO_CMD_EMERGENCY_STOP)
     {
         /* Bypass the queue depth and the CPU0 control period: the e-stop is
          * latched by CPU0 on the next read of the shared block either way. */
         XCORE_estopRequest();
     }
 
-    msg.cmd = frame->payload[0];
-    msg.len = (uint8)(frame->len - 1u);
-    if (msg.len > 0u)
+    msg.cmd = cmd;
+    msg.len = len;
+    if (len > 0u)
     {
-        memcpy(msg.data, &frame->payload[1], msg.len);
+        memcpy(msg.data, data, len);
     }
 
     if (XCORE_cmdPush(&msg) == FALSE)
@@ -167,6 +209,74 @@ static void link_dispatch(const SF_Frame *frame)
         return;
     }
     g_stats.cmdForwarded++;
+}
+
+static void link_dispatch(const SF_Frame *frame)
+{
+    uint8 op;
+    uint8 speed[2];
+
+    if (frame->type != SF_TYPE_CMD)
+    {
+        /* ACK / HBT / OTA / DBG have no consumer in this build yet. Counted, not
+         * silently dropped, so a C6 that starts sending them shows up in health. */
+        g_stats.unhandledType++;
+        return;
+    }
+
+    if ((frame->cid != SF_CID_DRIVE) && (frame->cid != SF_CID_DIAG) &&
+        (frame->cid != SF_CID_DPT))
+    {
+        g_stats.cmdUnsupportedCid++;
+        return;
+    }
+
+    if (frame->len < 1u)
+    {
+        g_stats.cmdBadLen++;
+        return;
+    }
+
+    op = frame->payload[0];
+
+    if (frame->cid == SF_CID_DRIVE)
+    {
+        if (frame->len != LINK_DRV_PAYLOAD_LEN)
+        {
+            /* The shape is fixed by the sender; anything else is a version skew
+             * and must not be decoded by offset. */
+            g_stats.cmdBadLen++;
+            return;
+        }
+
+        if (op == PROTO_CMD_GET_STATUS)
+        {
+            /* Answered out of the published status block by the next telemetry
+             * frame, at most one period away; CPU0 has no use for it. */
+            return;
+        }
+
+        if (op == LINK_OP_DRIVE)
+        {
+            g_stats.cmdUnsupportedOp++;
+            return;
+        }
+
+        if (op == PROTO_CMD_SET_SPEED)
+        {
+            speed[0] = (uint8)link_narrowPercent(SF_getU16(&frame->payload[1]));
+            speed[1] = (uint8)link_narrowPercent(SF_getU16(&frame->payload[3]));
+            link_forward(op, speed, 2u);
+            return;
+        }
+
+        /* Discrete command: v/w are zero for every other op, so there is nothing
+         * to carry across the cores. */
+        link_forward(op, NULL_PTR, 0u);
+        return;
+    }
+
+    link_forward(op, &frame->payload[1], (uint8)(frame->len - 1u));
 }
 
 static void link_feedSegment(const uint8 *data, uint16 len, uint32 nowMs)
@@ -252,6 +362,7 @@ static void link_drainRx(uint32 pending)
 static void link_pumpTx(uint32 room)
 {
     uint16 used = 0u;
+    uint16 frames = 0u;
     int16_t size;
 
     if ((g_txHead == g_txTail) || (room < SF_OVERHEAD))
@@ -281,6 +392,7 @@ static void link_pumpTx(uint32 room)
         }
 
         used = (uint16)(used + (uint16)size);
+        frames++;
         g_txSeq = (uint8)(g_txSeq + 1u);
         g_txHead = link_txNext(g_txHead);
 
@@ -300,8 +412,11 @@ static void link_pumpTx(uint32 room)
         g_stats.spiErrors++;
         return;
     }
+    /* Counted once the segment is on the wire, and per frame rather than per
+     * segment: several frames share one transaction, so counting segments would
+     * understate the traffic and hide a queue that never drains. */
     g_stats.wrSegments++;
-    g_stats.txFrames++;
+    g_stats.txFrames += frames;
 
     /* Closing transaction of a WRDMA burst (essl_spi.c:essl_spi_wrdma_done()):
      * without WR_END the slave never marks the segment as delivered. */
@@ -470,6 +585,134 @@ boolean LINK_send(uint8 type, uint8 cid, const uint8 *payload, uint8 len)
 boolean LINK_isUp(void)
 {
     return (boolean)(g_state == LINK_READY);
+}
+
+/* ---- telemetry producer ---------------------------------------------------- */
+
+boolean LINK_sendTelemetry(const SF_Telemetry *tel)
+{
+    SF_Telemetry timed;
+    uint8        buf[SF_TELEMETRY_LEN];
+
+    if (tel == NULL_PTR)
+    {
+        return FALSE;
+    }
+
+    /* The link owns the E2E counter: it is the sequence of what actually went on
+     * the wire, so it advances once per accepted frame rather than once per call
+     * that tried. Everything else belongs to the producer. */
+    timed = *tel;
+    g_telSeq++;
+    timed.seq = g_telSeq;
+
+    if (SF_telemetryEncode(&timed, buf, (uint16)sizeof(buf)) < 0)
+    {
+        return FALSE;
+    }
+
+    return LINK_send(SF_TYPE_TEL, SF_CID_TELEMETRY, buf, (uint8)SF_TELEMETRY_LEN);
+}
+
+/* ---- GEN register: register level control of the slave --------------------- */
+
+/* Write the GEN slot and wait for the receipt of this command byte. *receipt
+ * receives LINK_REG_CMDRSP whenever the slave answered; FALSE means it never
+ * did, which on a healthy slave means the SPI path itself is at fault. */
+static boolean link_genWriteAndWait(uint8 cmd, uint32 payload, uint32 timeoutMs,
+                                    uint32 *receipt)
+{
+    uint8  word[4];
+    uint32 deadline;
+    uint32 rsp;
+
+    word[0] = cmd;
+    word[1] = (uint8)(payload & 0xFFu);
+    word[2] = (uint8)((payload >> 8) & 0xFFu);
+    word[3] = (uint8)((payload >> 16) & 0xFFu);
+
+    g_stats.genWrites++;
+    if (SPIHAL_transaction(SPIHD_CMD_WRBUF, LINK_REG_GEN, word, NULL_PTR, 4u, FALSE) != SPIHAL_OK)
+    {
+        g_stats.spiErrors++;
+        return FALSE;
+    }
+
+    deadline = STIME_nowMs() + timeoutMs;
+    for (;;)
+    {
+        if (!link_snapshot())
+        {
+            return FALSE;              /* counted inside link_snapshot */
+        }
+        rsp = link_reg(g_reg, LINK_REG_CMDRSP);
+        if ((uint8)rsp == cmd)
+        {
+            *receipt = rsp;
+            return TRUE;
+        }
+        if ((sint32)(STIME_nowMs() - deadline) >= 0)
+        {
+            g_stats.genNoAck++;
+            return FALSE;
+        }
+    }
+}
+
+/* The slave's receipt is sticky, so sending the same command twice would be
+ * answered with the previous receipt and look like an instant success. A NOP
+ * first clears the slot: the slave has no NOP case, so it answers
+ * {0, UNKNOWN}, which no real command can be confused with. */
+Link_GenResult LINK_gen(uint8 cmd, uint32 payload, uint32 timeoutMs)
+{
+    uint32 receipt;
+
+    if (payload > 0x00FFFFFFu)
+    {
+        /* The slot carries 24 payload bits (link_handle_gen reads four bytes:
+         * one command plus three). Refuse instead of silently masking. */
+        return LINK_GEN_ERR_RANGE;
+    }
+
+    if ((cmd != LINK_GEN_NOP) &&
+        (link_genWriteAndWait(LINK_GEN_NOP, 0u, timeoutMs, &receipt) == FALSE))
+    {
+        return LINK_GEN_ERR_NOACK;
+    }
+
+    if (link_genWriteAndWait(cmd, payload, timeoutMs, &receipt) == FALSE)
+    {
+        return LINK_GEN_ERR_NOACK;
+    }
+
+    if (((receipt >> 8) & 0xFFu) != LINK_GEN_RESULT_OK)
+    {
+        return LINK_GEN_ERR_REJECT;
+    }
+    return LINK_GEN_OK;
+}
+
+SpiHal_Status LINK_setClock(SpiHal_ClockTier tier)
+{
+    SpiHal_Status status;
+    uint32        hz;
+
+    status = SPIHAL_setClock(tier);
+    if (status != SPIHAL_OK)
+    {
+        return status;
+    }
+
+    /* The slave stores the figure for its own diagnostics only (link_handle_gen
+     * multiplies it back into health.clock_hz); the wire clock is the master's
+     * property. So a refused mirror is reported through stats.genNoAck and does
+     * not undo the local switch. */
+    if (LINK_isUp())
+    {
+        hz = SPIHAL_clockHz(tier);
+        (void)LINK_gen(LINK_GEN_CLOCK_SET, hz / 1000000u, LINK_GEN_TIMEOUT_MS);
+    }
+    return status;
 }
 
 /* Gates G1/G5 are read on the bench, and CPU2 owns no printable channel in this

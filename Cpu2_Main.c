@@ -41,30 +41,81 @@
 #ifdef USE_SPI_LINK
 #include "com/link.h"
 #include "xcore.h"
+#include <string.h>
 
 /* 22 SS6: telemetry is aggregated at 20 ms. */
 #define LINK_TELEMETRY_PERIOD_MS  20u
 
+/* SDD SS10: fwVer is 0x00MMmmpp. This is the SDD V1.2 baseline build; the
+ * buildhash half of the §10 version string has no slot in a u32 and is not
+ * carried. */
+#define LINK_FW_VERSION           0x00010200u
+
+/* Telemetry fields with a measured source in this build are filled, the rest are
+ * zero. The zeros are not placeholders: each one names what has to exist first.
+ * Filling a field with a number from another unit would be worse than a zero,
+ * because the C6 forwards these bytes to the phone, which prints mm/s, mV and mm.
+ *   vTargetL/R, vMeasL/R - mm/s. The speed figures this build has are the demo's
+ *                  +-100 percent in ProtocolStatus and CPU1's target in
+ *                  0.1 percent units; the mm/s domain needs the encoder channel
+ *                  of SDD SS5.4 (doc 23 SS6 also lacks the wheel circumference
+ *                  that would make the conversion definable).
+ *   batteryMv/Pct- no ADC channel is wired up in this build.
+ *   odo*         - same reason as vMeas: needs the encoder counts.
+ *   linkRttMs    - needs the HBT transaction the RTT measurement rides on.
+ *   hwRev        - no board id source yet; the DPT flow of SDD SS10 reads it
+ *                  before it reads anything else, so it is the first field to
+ *                  fill once the hardware revision has a home.
+ * linkErrRate is computed from the link's own counters below. */
 static void link_sendTelemetry(void)
 {
+    Link_Health    health;
     ProtocolStatus status;
-    uint8          tel[6];
+    SF_Telemetry   tel;
+    uint32         total;
+    uint32         err;
+    uint32         rate;
+    uint32         perTenth;
 
     XCORE_statusGet(&status);
 
-    /* Same six fields in the same order as the demo's 0x40 status reply, so the
-     * C6 bridge maps this 1:1 onto the phone facing v2 frame (22 SS5.5). Built
-     * byte by byte instead of casting the struct: wire order must not depend on
-     * a compiler's padding decisions. */
-    tel[0] = status.state;
-    tel[1] = (uint8)status.leftSpeed;
-    tel[2] = (uint8)status.rightSpeed;
-    tel[3] = status.heartbeatOk;
-    tel[4] = status.faultCode;
-    tel[5] = status.emergencyStop;
+    memset(&tel, 0, sizeof(tel));
+    tel.uptimeMs  = STIME_nowMs();
+    tel.state     = status.state;
+    tel.faultCode = status.faultCode;   /* demo code set is 8 bit, widened as-is */
+    tel.fwVer     = LINK_FW_VERSION;
 
-    /* A refused send is counted in Link_Health.stats.txQueueFull, not lost. */
-    (void)LINK_send(SF_TYPE_TEL, SF_CID_TELEMETRY, tel, (uint8)sizeof(tel));
+    /* SDD SS6.1c / 22 SS5.5: linkErrRate keeps its meaning but changes source -
+     * frames this core's codec rejected, over frames it saw, in units of 0.1%
+     * (c6_proto/proto_frames.h declares that unit, so a plain percentage would
+     * understate the link by a factor of ten). A frame that failed the CRC is in
+     * the denominator only. The scaling divides first because err * 1000 overflows
+     * uint32 on a noisy long-running link; 255 saturates at 25.5%, which already
+     * means "the link is down" and is reported as ERR_LINK_LOST separately. */
+    LINK_getHealth(&health);
+    err   = health.stats.crcErrors + health.stats.seqErrors;
+    total = health.stats.rxFrames + err;
+    rate  = 0u;
+    if ((err > 0u) && (total > 0u))
+    {
+        if (total < 1000u)
+        {
+            rate = (err * 1000u) / total;   /* provably within range */
+        }
+        else
+        {
+            perTenth = total / 1000u;   /* frames per 0.1%, >= 1 here */
+            rate = err / perTenth;
+        }
+        if (rate > 255u)
+        {
+            rate = 255u;
+        }
+    }
+    tel.linkErrRate = (uint8)rate;
+
+    /* seq is stamped by the link, which owns the order frames actually go out in. */
+    (void)LINK_sendTelemetry(&tel);
 }
 #else
 #include "wifi_at.h"
