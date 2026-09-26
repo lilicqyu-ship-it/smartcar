@@ -102,6 +102,14 @@ extern "C" {
 
 /* E2E / failure handling (doc 22 SS5.3, SS5.4) */
 #define SF_SEQ_WINDOW         32u                  /* accept 1 <= seq-last <= 32   */
+#define SF_SEQ_RELOCK_RUN     8u                   /* this many consecutive out-of-
+                                                    * window rejects drop the window:
+                                                    * the sender restarted and its
+                                                    * counter will not come back into
+                                                    * 1..32 on its own (up to 224
+                                                    * frames would be rejected until
+                                                    * the u8 wraps) - the next frame
+                                                    * re-locks instead            */
 #define SF_RESIDUAL_TIMEOUT_MS 4u                  /* partial frame older than this
                                                     * is dropped; the owner feeds
                                                     * SF_parserTick() with its ms
@@ -151,6 +159,8 @@ typedef struct
     uint16_t  need;             /* payload bytes still expected                */
     uint8_t   lastSeq;
     uint8_t   haveLastSeq;      /* 0 until the first frame of this direction   */
+    uint8_t   seqRejRun;        /* consecutive out-of-window rejects; at
+                                 * SF_SEQ_RELOCK_RUN the window is dropped    */
     uint32_t  lastByteMs;       /* only meaningful while a frame is in progress*/
     SF_Stats  stats;
 } SF_Parser;

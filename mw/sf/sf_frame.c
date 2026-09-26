@@ -112,9 +112,10 @@ void SF_parserInit(SF_Parser *p)
         p->state       = SF_ST_MAGIC;
         p->idx         = 0u;
         p->need        = 0u;
-        p->lastSeq     = 0u;
-        p->haveLastSeq = 0u;
-        p->lastByteMs  = 0u;
+        p->lastSeq      = 0u;
+        p->haveLastSeq  = 0u;
+        p->seqRejRun    = 0u;
+        p->lastByteMs   = 0u;
         p->stats.frames    = 0u;
         p->stats.crcErr    = 0u;
         p->stats.fmtErr    = 0u;
@@ -234,13 +235,23 @@ SF_Event SF_parserFeed(SF_Parser *p, uint8_t byte, uint32_t nowMs, SF_Frame *fra
             if ((p->haveLastSeq != 0u) &&
                 (SF_seqOk(p->buf[3], p->lastSeq) == 0u))
             {
-                /* Replay / stale / out-of-window: drop without advancing. */
+                /* Replay / stale / out-of-window: drop without advancing. A run
+                 * of rejects means the sender restarted and its counter left
+                 * our window for good - drop the window (SF_SEQ_RELOCK_RUN)
+                 * instead of rejecting until the u8 counters wrap back in. */
                 p->stats.seqErr++;
+                p->seqRejRun++;
+                if (p->seqRejRun >= SF_SEQ_RELOCK_RUN)
+                {
+                    p->haveLastSeq = 0u;
+                    p->seqRejRun   = 0u;
+                }
                 return SF_EV_SEQ_ERR;
             }
 
             p->lastSeq      = p->buf[3];
             p->haveLastSeq  = 1u;
+            p->seqRejRun    = 0u;
             p->stats.frames++;
 
             frame->type    = p->buf[2];

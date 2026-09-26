@@ -380,6 +380,57 @@ static void test_seq_window(void)
     CHECK_EQ(SF_seqOk(33, 0), 0);
 }
 
+/* ---------------- SEQ re-lock after a sender restart ----------------
+ * A restarted sender's counter sits outside the window for good: without the
+ * re-lock every frame is rejected until the u8 wraps (up to 224 frames). After
+ * SF_SEQ_RELOCK_RUN rejects the window is dropped and the next frame is
+ * accepted, whatever its seq. */
+static void test_seq_relock(void)
+{
+    SF_Parser p;
+    SF_Frame f;
+    int16_t n;
+    uint8_t k;
+    uint16_t rejected = 0;
+
+    memset(payload, 0x33, 2);
+
+    SF_parserInit(&p);
+    n = SF_build(SF_TYPE_CMD, 200, 0, SF_CID_DRIVE, payload, 2, frame,
+                 sizeof(frame));
+    CHECK(n > 0);
+    feed_all(&p, frame, (uint16_t)n, 0);
+    CHECK_EQ(p.stats.frames, 1);
+    CHECK_EQ(p.lastSeq, 200);
+
+    /* sender restarts at seq 0: 0,1,2,... are all outside the window
+     * (200 -> delta 56). The first SF_SEQ_RELOCK_RUN frames must reject,
+     * then the next one is accepted wherever the counter stands. */
+    for (k = 0u; k < (uint8_t)(SF_SEQ_RELOCK_RUN + 1u); k++)
+    {
+        n = SF_build(SF_TYPE_CMD, k, 0, SF_CID_DRIVE, payload, 2, frame,
+                     sizeof(frame));
+        CHECK(n > 0);
+        feed_all(&p, frame, (uint16_t)n, (uint32_t)(10u * k) + 100u);
+        if (p.stats.frames == 2u)
+        {
+            break;             /* re-locked on this frame */
+        }
+        rejected++;
+    }
+    CHECK_EQ(rejected, SF_SEQ_RELOCK_RUN);
+    CHECK_EQ(p.stats.frames, 2);
+    CHECK_EQ(p.lastSeq, (uint8_t)SF_SEQ_RELOCK_RUN);
+    CHECK_EQ(p.haveLastSeq, 1);
+
+    /* and the stream continues normally from there */
+    n = SF_build(SF_TYPE_CMD, (uint8_t)(SF_SEQ_RELOCK_RUN + 1u), 0,
+                 SF_CID_DRIVE, payload, 2, frame, sizeof(frame));
+    CHECK(n > 0);
+    feed_all(&p, frame, (uint16_t)n, 300);
+    CHECK_EQ(p.stats.frames, 3);
+}
+
 /* ---------------- residual frame timeout (cut FRAG segment) ---------------- */
 static void test_residual_timeout(void)
 {
@@ -536,6 +587,7 @@ int main(void)
     test_crc_corruption();
     test_bad_version_len();
     test_seq_window();
+    test_seq_relock();
     test_residual_timeout();
     storm(2000000u, 0u);
     storm(2000000u, 1u);

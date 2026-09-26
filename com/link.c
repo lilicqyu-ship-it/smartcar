@@ -12,13 +12,6 @@
 
 #include <string.h>
 
-/* A snapshot whose ALIVE / CMDRSP fields differ between the two passes is not
- * an error: the slave is allowed to advance those at any time. The four fields
- * below are the ones a decision is taken from, so they must be stable. */
-static const uint8 g_stableRegOfs[4] = {
-    LINK_REG_READY, LINK_REG_TX_PENDING, LINK_REG_RX_ROOM, LINK_REG_ERRSTAT
-};
-
 /* TX_PENDING above this cannot be a real buffer claim (the slave's whole buffer
  * is smaller), so it is treated as a bad register read and the drain loop is
  * shortened. 640 B is two and a half maximum segments. */
@@ -40,8 +33,6 @@ static uint8        g_txSeq;
 static SF_Parser    g_rxParser;
 
 static uint8        g_reg[LINK_REG_BYTES];
-static uint8        g_regA[LINK_REG_BYTES];
-static uint8        g_regB[LINK_REG_BYTES];
 static uint8        g_seg[SPIHAL_MAX_DATA];
 
 static Link_State   g_state = LINK_DOWN;
@@ -50,8 +41,6 @@ static uint8        g_aliveValid;
 static uint32       g_aliveMs;
 static uint32       g_nextPollMs;
 static uint32       g_telSeq;            /* E2E counter of the telemetry stream */
-static uint8        g_resyncPending;     /* a fresh READY edge needs a SEQ resync
-                                          * handshake with the slave before TX   */
 static Link_Stats   g_stats;
 static Link_Health  g_health;           /* bench watch expression, see link_updateHealth */
 
@@ -77,51 +66,31 @@ static boolean link_readRegs(uint8 *snap)
                                         snap, LINK_REG_BYTES, TRUE) == SPIHAL_OK);
 }
 
-static boolean link_regsStable(const uint8 *a, const uint8 *b)
-{
-    uint8 i;
-
-    for (i = 0u; i < (sizeof(g_stableRegOfs) / sizeof(g_stableRegOfs[0])); i++)
-    {
-        if (memcmp(&a[g_stableRegOfs[i]], &b[g_stableRegOfs[i]], 4u) != 0)
-        {
-            return FALSE;
-        }
-    }
-    return TRUE;
-}
-
-/* Double read until the decision fields agree, because the slave may rewrite a
- * register while SPI is clocking it out (22 SS2 E5). The second pass is the one
- * that is used: it is the fresher of the two. */
+/* One RDBUF read per cycle, used defensively instead of being trusted blindly.
+ *
+ * The slave rewrites its register file whenever a segment completes or its
+ * 10 ms ALIVE tick fires, so a value read here can legitimately be torn or a
+ * few hundred microseconds stale. The previous double-read-and-compare turned
+ * exactly that into regUnstable, and regUnstable into LINK_LOST + e-stop -
+ * with a busy link the compared fields (TX_PENDING, RX_ROOM) change all the
+ * time, so the faster the link ran, the more often the master declared it
+ * lost: the "works idle, dies under load" field failure. The consumers now
+ * tolerate what a single read can produce:
+ *   READY      static while the slave is up; a wrong value reads as LINK_DOWN
+ *              and the next good read recovers through the READY edge
+ *   TX_PENDING clamped to LINK_RX_BURST_MAX in link_drainRx (pre-existing)
+ *   RX_ROOM    clamped to LINK_RX_ROOM_MAX in link_cycle
+ *   ALIVE      meaningful even when torn - and it is the only truth source
+ *              for liveness (LINK_ALIVE_TIMEOUT_MS), never the snapshot */
 static boolean link_snapshot(void)
 {
-    uint8 attempt;
-
-    for (attempt = 0u; attempt < LINK_REG_RETRY_MAX; attempt++)
+    g_stats.polls++;
+    if (!link_readRegs(g_reg))
     {
-        if (attempt > 0u)
-        {
-            g_stats.regRetries++;
-        }
-        if (!link_readRegs(g_regA))
-        {
-            g_stats.spiErrors++;
-            continue;
-        }
-        if (!link_readRegs(g_regB))
-        {
-            g_stats.spiErrors++;
-            continue;
-        }
-        if (link_regsStable(g_regA, g_regB))
-        {
-            memcpy(g_reg, g_regB, sizeof(g_reg));
-            return TRUE;
-        }
+        g_stats.spiErrors++;
+        return FALSE;
     }
-    g_stats.regUnstable++;
-    return FALSE;
+    return TRUE;
 }
 
 /* ---- receive path ---------------------------------------------------------- */
@@ -498,17 +467,17 @@ static void link_setState(Link_State state)
     }
     else if (state == LINK_READY)
     {
-        /* Fresh READY edge (boot, or recovery from LOST). The two boards power
-         * up independently, so this master's TX SEQ counter and the slave's RX
-         * window are almost never aligned across a restart - the slave would
-         * reject a burst of frames until the numbers happen to fall inside the
-         * 32-frame window again (observed as the slave's seq= counter jumping).
-         * Ask the slave to drop its SEQ window (GEN RESET_LINK clears its
-         * seq_synced), then this side restarts its own SEQ from 0, so the very
-         * next frame re-locks the window cleanly. The GEN transaction is issued
-         * from link_cycle()'s safe point, not here, to avoid re-entering the
-         * pump from inside a state change. */
-        g_resyncPending = 1u;
+        /* Fresh READY edge (boot, or recovery from DOWN/LOST): the slave's TX
+         * SEQ restarted with it, so drop our RX window and re-lock on its next
+         * frame. Our own TX SEQ deliberately keeps running - the slave re-locks
+         * onto the first frame it sees after a restart (both codecs drop their
+         * window after SF_SEQ_RELOCK_RUN consecutive rejects). The former GEN
+         * RESET_LINK handshake did not survive contact with that reality: its
+         * no-reply retry path could hold the pump hostage forever (resync
+         * livelock: state LINK_READY, but no RDDMA/WRDMA and a telemetry queue
+         * that overflows silently - the other half of the "cannot connect"
+         * field failures). It survives as a bench/diag entry point (LINK_gen). */
+        SF_parserInit(&g_rxParser);
         XCORE_logln("LINK up");
     }
     else
@@ -555,7 +524,6 @@ void LINK_init(SpiHal_ClockTier tier)
     g_aliveSeen     = 0u;
     g_aliveMs       = 0u;
     g_state         = LINK_DOWN;
-    g_resyncPending = 0u;    /* the first LINK_READY edge arms the resync */
 
     SPIHAL_init(tier);
     g_nextPollMs = STIME_nowMs();
@@ -585,13 +553,10 @@ static void link_cycle(void)
 
     if (!link_snapshot())
     {
-        /* Registers are not trustworthy: treat as no link. LOST is only reported
-         * from a link that was READY, so booting without a flashed slave stays a
-         * quiet LINK_DOWN instead of a stop request. */
-        if (g_state == LINK_READY)
-        {
-            link_setState(LINK_LOST);
-        }
+        /* A transaction that did not complete cleanly says nothing about the
+         * slave: the wire glitched or the driver re-armed itself. Skip the
+         * data movement this cycle; only LINK_ALIVE_TIMEOUT_MS declares the
+         * slave gone (and that check runs below, from a good snapshot). */
         return;
     }
 
@@ -603,28 +568,16 @@ static void link_cycle(void)
         return;
     }
 
-    /* A fresh READY edge asked for a SEQ resync (link_setState). Do it before
-     * any data moves this cycle: tell the slave to drop its RX SEQ window
-     * (RESET_LINK clears its seq_synced), and only once that receipt is in do
-     * we restart our own TX SEQ from 0 - so the first frame after this re-locks
-     * the slave's window instead of landing outside it. If the handshake does
-     * not complete (slave busy / not answering yet), leave the counters alone
-     * and retry next cycle; never restart TX SEQ without the slave having
-     * cleared, or the two ends desynchronise the other way. */
-    if (g_resyncPending != 0u)
-    {
-        if (LINK_gen(LINK_GEN_RESET_LINK, 0u, LINK_GEN_TIMEOUT_MS) == LINK_GEN_OK)
-        {
-            g_txSeq = 0u;
-            g_telSeq = 0u;
-            SF_parserInit(&g_rxParser);
-            g_resyncPending = 0u;
-        }
-        return;      /* resume normal traffic next cycle on clean counters */
-    }
-
     pending = link_reg(g_reg, LINK_REG_TX_PENDING);
     room    = link_reg(g_reg, LINK_REG_RX_ROOM);
+    if (room > LINK_RX_ROOM_MAX)
+    {
+        /* Torn or stale read: the slave owns two 512 B RX DMA buffers and can
+         * never honestly advertise more room than that. Clamping turns a
+         * garbage register into one slowed-down cycle instead of an oversized
+         * write burst into a slave that is not expecting it. */
+        room = LINK_RX_ROOM_MAX;
+    }
 
     if (pending > 0u)
     {

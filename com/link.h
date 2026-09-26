@@ -48,7 +48,10 @@ extern "C" {
  * without a frame - which is why gates G3 (drop the IRQ) and G4 (silence it)
  * are injected through it rather than through a scripted C6 build. */
 #define LINK_GEN_NOP             0u
-#define LINK_GEN_RESET_LINK      1u   /* reset the slave's link state machines */
+#define LINK_GEN_RESET_LINK      1u   /* reset the slave's link state machines
+                                       * (bench/diag only: the pump no longer
+                                       * depends on it - the SEQ windows
+                                       * self-heal on both ends)              */
 #define LINK_GEN_SILENCE_ON      2u   /* stop asserting IRQ (bench injection)  */
 #define LINK_GEN_SILENCE_OFF     3u
 #define LINK_GEN_CLOCK_SET       4u   /* payload = clock in MHz: the slave
@@ -73,9 +76,10 @@ extern "C" {
  * package. */
 #define LINK_KEEPALIVE_MS     2u
 
-/* Consecutive unstable register snapshots before the slave's state is declared
- * untrustworthy (the non atomic read rule, 22 SS4.3 / E5). */
-#define LINK_REG_RETRY_MAX    3u
+/* RX_ROOM above this is a torn or stale read: the slave owns two 512 B RX DMA
+ * buffers, so it can never honestly advertise more room. Clamping (link_cycle)
+ * keeps a garbage register from turning into an oversized write burst. */
+#define LINK_RX_ROOM_MAX      1024u
 
 /* TX queue capacity: frames are packed one after another into a segment, so
  * this is the number of frames that may wait for bus room. */
@@ -106,8 +110,6 @@ typedef enum
 typedef struct
 {
     uint32 polls;             /* register snapshot transactions */
-    uint32 regRetries;        /* snapshot needed another pass (E5) */
-    uint32 regUnstable;       /* snapshot still unstable after LINK_REG_RETRY_MAX */
     uint32 rdSegments;        /* RDDMA segments taken from the slave */
     uint32 rdBurstClamped;    /* TX_PENDING above LINK_RX_BURST_MAX: register
                                * value distrusted, burst shortened */
