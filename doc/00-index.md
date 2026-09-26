@@ -33,11 +33,11 @@ NN-名称.md
 | 01 | [01-getting-started.md](01-getting-started.md) | 入口 | V2.0 | **当前代码（demo）能跑通的 bring-up 全流程**：编译烧录 → 刷 esp-at → 接线 → 手机遥控 → 排障 |
 | 11 | [10-product/11-requirements.md](10-product/11-requirements.md) | 产品 | V1.2 | 产品定义、功能编号 F01~F14、验收标准、版本路线 |
 | 12 | [10-product/12-demo-evaluation.md](10-product/12-demo-evaluation.md) | 产品 | 冻结快照 | demo 的问题清单 P0~P3（**历史快照**，结论已被 21 号吸收为架构约束，不再更新） |
-| 21 | [20-design/21-software-design.md](20-design/21-software-design.md) | 设计 | **V1.2 ★基准** | 量产软件设计基准：三核分区、模块详设、两段协议、安全/信息安全、OTA、产测、质量工程、里程碑、风险、**§18 工程级实现约束** |
-| 22 | [20-design/22-link-spi-design.md](20-design/22-link-spi-design.md) | 设计 | V1.0 | 板间 SPI 链路的详细设计：事实基线 E1~E10、事务模型、SF 帧、两固件改动清单、门禁 G1~G6 |
-| 23 | [20-design/23-wiring.md](20-design/23-wiring.md) | 硬件 | V1.4 | **引脚与接线唯一真源**（TC275 ↔ C6 ↔ D24A ↔ 电机/编码器 ↔ 电源）+ 接线状态一览 |
+| 21 | [20-design/21-software-design.md](20-design/21-software-design.md) | 设计 | **V1.2b ★基准** | 量产软件设计基准：三核分区、模块详设、两段协议、安全/信息安全、OTA、产测、质量工程、里程碑、风险、**§18 工程级实现约束 C1~C13** |
+| 22 | [20-design/22-link-spi-design.md](20-design/22-link-spi-design.md) | 设计 | V1.2 | 板间 SPI 链路的详细设计：事实基线 **E1~E14**、事务模型、SF 帧（含 FLAGS/CID 载荷形状两张契约表）、两固件改动清单、门禁 G1~G6 |
+| 23 | [20-design/23-wiring.md](20-design/23-wiring.md) | 硬件 | V1.6 | **引脚与接线唯一真源**（TC275 ↔ C6 ↔ D24A ↔ 电机/编码器 ↔ 电源）+ 接线状态一览 |
 | 31 | [30-tc275/31-firmware-architecture.md](30-tc275/31-firmware-architecture.md) | TC275 | V2.0（现状） | **当前代码**的分层/任务/中断/xcore 通道/HTTP API/电机映射（描述现状，不是目标态） |
-| 32 | [30-tc275/32-tc275-dev-guide.md](30-tc275/32-tc275-dev-guide.md) | TC275 | V1.0 | TC275 侧**怎么做**：环境、构建、烧录调试、新增中断/跨核消息/外设引脚的操作步骤、排障手册 |
+| 32 | [30-tc275/32-tc275-dev-guide.md](30-tc275/32-tc275-dev-guide.md) | TC275 | V1.1 | TC275 侧**怎么做**：环境、构建、烧录调试、**两份主机单测的可粘贴命令**、新增中断/跨核消息/外设引脚的操作步骤、排障手册 |
 | 41 | [40-esp32c6/41-c6-docs-map.md](40-esp32c6/41-c6-docs-map.md) | C6 | V1.0 | C6 侧文档边界与索引：本仓库负责哪几条接口、`c6_car/doc/` 各篇对应关系、跨仓库待办 |
 | — | `c6_car/doc/00~13` | C6 | 外部 | C6 固件模块级设计（LLDD）**不在本仓库**，见 41 号索引 |
 

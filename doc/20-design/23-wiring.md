@@ -2,9 +2,9 @@
 
 > 文档编号 **23** · 域 设计·硬件 · 定位：**引脚与接线真源**（脚位/孔位冲突以本文为准） · 上级索引 [00-index.md](../00-index.md)
 
-版本：V1.5（2026-09-26：**TC275 侧 SPI 链路代码落地**（`Middleware/com/`、`Middleware/sf/`），P23.0 握手改为**电平轮询**（P23.x 无法产生边沿中断，见 22 号文档 E11），构建默认仍是 UART、SPI 用 `-D USE_SPI_LINK` 开启；V1.4 已按 §9.1 完成 SPI 实物接线；V1.3 已把 §9 定为主链路、§2 UART 降级为调试控制台/回退链路；驱动板为轮趣 D24A 四路稳压模块，按原理图 REV1.0 核对）
+版本：V1.7（2026-09-26：**编码器固件已实现**——`Bsp/encoder.c` GTM TIM0 八通道 TIEM 双边沿中断 + 软件 ×4 正交（§8.3 有 UDC 不可用的重要纠错），P33.0~7 待接线后按 §8.4 台架判向；V1.6 是 **C6 已烧录 SPI 固件后，TC275 侧按契约完善并回写**——握手寄存器补 `SF_GEN(24)` 与"主机只读 24 B 前缀"口径、`FLAGS` 更正为 `FRAG/FRAG_END`（ACK 不是 flag）、遥测定为**固定 38 B 且短帧=整帧丢弃**、两侧常量核对结论改记三处不一致（22 号文档 E13/E14）；V1.5 已落地 TC275 侧 SPI 链路代码（`Middleware/com/`、`Middleware/sf/`），P23.0 握手改为**电平轮询**（P23.x 无法产生边沿中断，见 22 号文档 E11），构建默认仍是 UART、SPI 用 `-D USE_SPI_LINK` 开启；V1.4 已按 §9.1 完成 SPI 实物接线；V1.3 已把 §9 定为主链路、§2 UART 降级为调试控制台/回退链路；驱动板为轮趣 D24A 四路稳压模块，按原理图 REV1.0 核对）
 
-配套文档：11-requirements.md（产品需求 V1.2）、[21-software-design.md](../20-design/21-software-design.md)（量产 SDD V1.2，**设计基准**）、[22-link-spi-design.md](../20-design/22-link-spi-design.md)（SPI 链路详细设计）
+配套文档：11-requirements.md（产品需求 V1.2）、[21-software-design.md](../20-design/21-software-design.md)（量产 SDD V1.2b，**设计基准**）、[22-link-spi-design.md](../20-design/22-link-spi-design.md)（SPI 链路详细设计）
 
 ESP32-C6 固件工程：**自研** `C:\Code\TC275\AURIX-v1.10.36-workspace\c6_car`（ESP-IDF）；`esp-at` 工程仅作 UART 回退参考
 
@@ -23,7 +23,7 @@ ESP32-C6 硬件板卡：**ESP32-C6-DevKitC-1 V1.2**（ESP32-C6-WROOM-1/-1U 模�
 | **板间主链路 SPI**（QSPI3 主 ↔ C6 SPI2 从 + IRQ，5 线 + 共地） | §9.1 | ✅ **已按 §9.1 完成接线**。**两侧固件均已实现**：C6 侧 = `c6_car` `22e15f2`（`spi_slave_hd` 从机，已提交）；TC275 侧 = `Middleware/com/` + `Middleware/sf/`（默认关闭，`-D USE_SPI_LINK` 开启）。下一步：一次 IDE 构建确认链接闭合 + G1 波形门禁 |
 | 板间调试/回退 UART（ASCLIN1 ↔ GPIO6/7） | §2 | ✅ 已接，保留（C6 控制台 + 回退通道） |
 | 电机 PWM/方向 8 线 + STBY | §3 / §4 | ✅ 已接，实车验证 |
-| 编码器 8 线（P33.0~7 / X2-28~35） | §8.2 | ⏳ 方案定稿，**待确认后再接线** |
+| 编码器 8 线（P33.0~7 / X2-28~35） | §8.2 | 🔌 **固件已实现**（`Bsp/encoder.c`，GTM TIM0 TIEM ×4 软件正交，优先级 16~23）；待按本表接线 + §8.4 台架判向 |
 | 电源与共地 | §5 | ✅ 已接 |
 
 ```
@@ -259,7 +259,7 @@ kit 板载 **FT2232HL**，X4 micro-USB 一根线三件事：供电（桌面）�
 | 特有功能 | — | BLE 5 / 802.15.4 / Wi-Fi 6 TWT，为 V2.0 后扩展留余地 |
 | TC275 侧引脚 | P15.0/P15.1（旧） | P15.0（TX）/ P15.1（RX），不变（V1.1 曾迁到 P11.12/P11.10 后又改回） |
 
-## 8. 编码器接线（MG310 ×4，V1.1 闭环测速方案 —— 待确认后实施）
+## 8. 编码器接线（MG310 ×4，V1.1 闭环测速方案 —— 固件已实现，待接线 + 台架判向）
 
 ### 8.1 信号源
 
@@ -267,15 +267,15 @@ kit 板载 **FT2232HL**，X4 micro-USB 一根线三件事：供电（桌面）�
 
 > ⚠️ 约束：编码器供电（D24A 电机 6pin 座的 5/6 脚）**不得改接 5V**，否则编码器输出摆幅抬到 5V，超出 TC275 IO 耐压（见 §5.2 板卡逻辑 3.3V 的警告）。
 
-刻度换算：轮轴每转脉冲 260 × 20.409 ≈ **5306**，×4 正交解码 ≈ **21225 计数/轮转**；电机 2000 rpm 时峰值 ≈ 43333 计数/s（约 43 计数/ms），1 kHz 软件采样会溢出，**必须用 GTM TIM 硬件正交（UDC 上下计数）**。换算式：`轮轴rpm ≈ Δ计数/ms × 2.827`。
+刻度换算：轮轴每转脉冲 260 × 20.409 ≈ **5306**，×4 正交解码 ≈ **21225 计数/轮转**；电机 2000 rpm 时峰值 ≈ 43333 计数/s（约 43 计数/ms），1 kHz 主循环轮询 GPIO 会丢计数。**解码方案**：GTM TIM0 八通道 TIEM（输入事件模式）双边沿中断 + 软件正交 ×4 解码（硬件计数边沿、软件判向）——**不能**用本芯片 GTM 做 "UDC 硬件正交"，原因见 §8.3。换算式（×4 解码下）：`轮轴rpm ≈ Δ计数/ms × 2.827`。
 
-### 8.2 TC275 ↔ 编码器（GTM0 TIM 组 0，四对 UDC，全部落在 X2 连续 8 脚）
+### 8.2 TC275 ↔ 编码器（GTM0 TIM 组 0，A 相进偶数通道 / B 相进奇数通道，全部落在 X2 连续 8 脚）
 
 D24A 板编码器引出（原理图已核对）：**J4**（电机 1/2）= E1A:J4-10、E1B:J4-12、E2A:J4-9、E2B:J4-11；**J6**（电机 3/4）= E3A:J6-10、E3B:J6-12、E4A:J6-9、E4B:J6-11。编码器 VCC 参考 = J4-1 的板载 3V3（禁 5V，见 §8.1）。
 
-| 电机 | 信号 | TC275 引脚 | X2 脚位 | GTM 通道（UDC 对）|
+| 电机 | 信号 | TC275 引脚 | X2 脚位 | GTM 通道（TIEM 中断）|
 |---|---|---|---|---|
-| 1（A）| E1A | P33.4 | X2-32 | TIM0_0（计数源）/ TIM0_1（方向）|
+| 1（A）| E1A | P33.4 | X2-32 | TIM0_0（A 相，边沿中断）/ TIM0_1（B 相）|
 | 1（A）| E1B | P33.5 | X2-33 | ↑ |
 | 2（B）| E2A | P33.6 | X2-34 | TIM0_2 / TIM0_3 |
 | 2（B）| E2B | P33.7 | X2-35 | ↑ |
@@ -286,13 +286,21 @@ D24A 板编码器引出（原理图已核对）：**J4**（电机 1/2）= E1A:J4
 
 依据：iLLD `IfxGtm_PinMap.h` 的 `IfxGtm_TIM0_{0..7}_TIN{22..29}_P33_{0..7}_IN` 符号；X2-27 为板载电位器 AN0、X2-36~38 为 P33.8/9/10（Shield2Go 共享），28~35 恰好完整空闲。共地按 §5.4。
 
-UDC 配对规则：偶数通道接 A 相（上下计数源）、奇数通道接 B 相（方向选择），四对同属 GTM0 TIM 组 0，配置一致。
+配对规则：偶数通道接 A 相、奇数通道接 B 相，四对同属 GTM0 TIM 组 0。八通道统一配置 **TIEM 输入事件模式 + 双边沿**（`CTRL.TIM_MODE=TIEM, DSL=0, ISL=1`，与 iLLD `IfxGtm_Tim_In` 驱动的 both-edge 配置一致），各通道 NEWVAL 中断优先级 **16~23**、`TOS=CPU1`，`IFX_INTERRUPT(fn, 0, prio)` 声明在 0 号向量表（SDD §18 C1）；2 µs 去毛刺滤波（开漏上拉边沿较缓）。ISR 内读本相 + 对相电平做 ×4 正交解码（对相电平直接读 P33 IN 寄存器，与 TIM 路由互不影响）。
 
-### 8.3 方案选型依据（为何不用 GPT12）
+### 8.3 方案选型依据（为何不用 GPT12、也不用 "TIM UDC"）
 
-`21-software-design.md` 早期设想 GPT12 增量编码块 ×4，但本工程只经 X1/X2 排针取信号，实测 pinmap：GPT12 各块 INA/INB/EUD 主要落在 **P02.x / P10.x**（如 T3INA=P02.6、T3INB=P10.4），LITE kit 未引出这两组口；T5INA=P21.7 与 /TRST 复用。故 V1.1 采用 **GTM TIM UDC** 方案。
+`21-software-design.md` 早期设想 GPT12 增量编码块 ×4，但本工程只经 X1/X2 排针取信号，实测 pinmap：GPT12 各块增量口的 INA/INB 落在 **P02.x / P10.x / P20.x**（T3INA=P02.6、T4INA=P02.8、T5INB=P10.3、T6INB=P10.2），LITE kit 未引出这几组口；T5INA=P21.7 与 /TRST 复用；T2 虽有 P00.7/P33.7 引脚但 T2 不支持增量接口模式。ERU 边沿中断同样不可用：TC275 **有** ERU（iLLD `IfxScuEru.c`），但其输入仅落在 P15/P10/P14/P02/P11/P20 等固定脚，**P33.x 无 ERU 通路**。故编码器信号只能走 GTM TIM。
 
-实现注记：本地 iLLD（含 AURIX-Studio 工具链）**无 IfxEncoder 封装模块**，工程内 `IfxGtm_Tim_In` 亦不含 UDC 支持，需在 TIM 初始化中直接配置 `TIMCH[i].UDCCTRL` / `CLS` / `DUTC` 寄存器（或自写等价封装）。
+**重要纠错（2026-09-26 实现时核实）**：早期方案写的 "GTM TIM UDC 硬件正交（`UDCCTRL/CLS/DUTC` 寄存器）" 是 **GTM gen2** 的寄存器组；本芯片 TC27D 的 GTM 是 **gen3**，`IfxGtm_regdef.h` 中 TIM 通道**没有 UDC 寄存器**，通道模式只有 TPWM/TPIM/TIEM/TIPM/TBCM/TGPS。GTM gen3 上正交解码没有硬件通路，故最终实现为 **TIEM 双边沿中断 + 软件 ×4 正交**（`Bsp/encoder.c`）：硬件只负责"每个边沿都进 ISR 不丢计数"（2000 rpm 峰值 139k 中断/s，约 5% CPU1），方向与 ×4 细分在 ISR 里按电平表完成。
+
+### 8.4 台架判向与验证（接线后一次做完）
+
+1. **静态**：不转轮子，控制台读 `ENCODER_getRawCounts`（经日志环加一条临时打印即可），四个计数 60 s 内应保持 0（2 µs 滤波应滤掉漂移）。
+2. **手转判向**：每个轮子沿"车头向前"方向手转 ≥1 圈，对应编码器计数应**增加**；若有减少，把 `encoder.c` 的 `g_encInvert[]` 对应项改 `-1`（这就是产测"自动判向"的手动版，`21 §15.3`）。
+3. **倍频验证**：手转一整圈，计数增量应 ≈ **21225**（±轮打滑误差）。若 ≈ 5306，说明某相没接上（×4 退化成 ×1）；若数值抖动大，查 3V3 供电与共地。
+4. **对侧一致性**：左侧 A/B 两编码器（E1/E2）同转同向时计数应同号同速；右侧（E3/E4）同理。电机算法把每侧两轮并成一路侧速（求和），符号不一致会在这一步暴露。
+5. 通电低速（SET_SPEED ±10）跑 5 s，遥测 `leftSpeed/rightSpeed` 应显示实测值（alive 后 CPU0 用编码器实测覆盖指令回显）。
 
 ## 9. SPI 链路接线（V1.0 选定主链路：TC275 QSPI3 主机 ↔ C6 SPI2 从机，**实物已接线**）
 
@@ -333,10 +341,10 @@ UDC 配对规则：偶数通道接 A 相（上下计数源）、奇数通道接 
 
 > **当前进度（V1.5）**：实物接线已完成（§9.1）；**两侧固件代码均已落地**——TC275 侧 `Middleware/com/` + `Middleware/sf/` + `Cpu2_Main.c`（22 号文档 §7.2），C6 侧 `c6_car` `spi_slave_hd` 从机（提交 `22e15f2`，22 号文档 §7.1）。但**从未通电联调过**：TC275 构建默认仍是 UART（SPI 需 `-D USE_SPI_LINK`），且缺一次 TASKING IDE 构建确认链接闭合 + G1 波形门禁。以下"事务模型/帧"两条是**两侧代码共同遵循的契约**，"验证"一项是**唯一未完成的主线**。
 
-- **事务模型**：半双工定长事务，前导相位 `CMD(8)+ADDR(8)+DUMMY(8)`，数据相位长度取 4 的倍数（从机硬约束）。C6 用 `spi_slave_hd_write_buffer()` 发布 6 个 u32 握手寄存器（`SF_READY/SF_TX_PENDING/SF_RX_ROOM/SF_ALIVE/SF_ERRSTAT/SF_CMDRSP`），主机轮询后决定读/写；**寄存器读非原子 → 连读两次取相同值**（Espressif 官方 `segment_mode` 例子的既有规范）。**线上命令字节以 `spi_ll.h` 的 `SPI_LL_BASE_CMD_HD_*` 为准**（`WRBUF 0x01 / RDBUF 0x02 / WRDMA 0x03 / RDDMA 0x04 / SEG_END 0x05 / WR_END 0x07 / INT0 0x08`）：一次 `RDDMA` 突发必须由**额外的 `INT0` 事务**收尾、`WRDMA` 突发由 `WR_END` 收尾，否则从机永不释放缓冲（22 号文档 E12；`spi_types.h` 里的 `BIT(n)` 是内部枚举，照抄到线上必错）。
+- **事务模型**：半双工定长事务，前导相位 `CMD(8)+ADDR(8)+DUMMY(8)`，数据相位长度取 4 的倍数（从机硬约束）。C6 用 `spi_slave_hd_write_buffer()` 发布 **6 个 u32 读寄存器**（`SF_READY/SF_TX_PENDING/SF_RX_ROOM/SF_ALIVE/SF_ERRSTAT/SF_CMDRSP` = 偏移 0/4/8/12/16/20），另有偏移 **24 的 `SF_GEN` 是唯一由主机写的寄存器**（`WRBUF` 写 4 B `{cmd,p0,p1,p2}`，用于 `RESET_LINK/SILENCE_ON·OFF/CLOCK_SET`，22 号文档 §4.3 + E14）；从机地址空间共 28 B，主机每次 `RDBUF` 只读前 24 B 前缀。主机轮询寄存器后决定读/写；**寄存器读非原子 → 连读两次取相同值**（Espressif 官方 `segment_mode` 例子的既有规范）。**线上命令字节以 `spi_ll.h` 的 `SPI_LL_BASE_CMD_HD_*` 为准**（`WRBUF 0x01 / RDBUF 0x02 / WRDMA 0x03 / RDDMA 0x04 / SEG_END 0x05 / WR_END 0x07 / INT0 0x08`）：一次 `RDDMA` 突发必须由**额外的 `INT0` 事务**收尾、`WRDMA` 突发由 `WR_END` 收尾，否则从机永不释放缓冲（22 号文档 E12；`spi_types.h` 里的 `BIT(n)` 是内部枚举，照抄到线上必错）。
 - **谁发起**：TC275 主机是唯一发起方。C6 有帧待出 → 更新寄存器并拉 IRQ → TC275 泵**每圈采样 P23.0 电平**，线为高即开读事务；线为低时 2 ms 保活轮询。注：**P23.0 做不出边沿中断**（TC275 无 ERU，P23.x 不在 IOM 监视输入内，见 22 号文档 E11），所以电平轮询是主路径而非兜底。遥测方向由 TC275 按 20 ms 周期主动写。代价：命令下行最坏时延 = 轮询周期 + 事务 ≈ 2.3 ms（50 ms 预算内）。
-- **帧**：LINK 段用新定 **SF 帧**（`0x5A | VER | TYPE | SEQ | FLAGS | LEN(u16LE) | CID | 载荷 | CRC16`，段末补 0 到 4 倍数，FLAGS.FRAG 表分片）；手机 WS 段仍是 v2 帧，C6 bridge 做字段级映射；OTA CHUNK 上限 62 B → 240 B。
-- **TC275 代码（V1.5 已落地）**：`Middleware/com/spi_hal_pins.c`（QSPI3 主机 + P23.0 电平采样 + 定长事务）、`Middleware/com/link.c`（握手寄存器 + 事务泵 + 命令下行/遥测上行分发）、`Middleware/sf/sf_frame.c`（SF 编解码，`test/host` 主机单测已跑通）；挂载在 `Cpu2_Main.c` 的 `#ifdef USE_SPI_LINK` 分支。**QSPI3 的 TX/RX/ER 三个 ISR 声明在 0 号向量表、优先级 6/9/10**（SDD §18 C1/C2）。`Middleware/wifi_at.c` 目前是**默认构建**，SPI 靠 `-D USE_SPI_LINK` 打开 —— 与 SDD §5.6 设想的"量产默认 SPI"相反，这是刻意的：G1 未过之前 UART 仍是唯一可用链路，门禁通过后再翻转默认值。
-- **C6 代码（已完成，`c6_car` `22e15f2`）**：`components/c6_link/link.c` 传输层 UART → `spi_slave_hd`，`components/c6_sf/` 承担 SF 编解码（v2↔SF 映射落在 c6_link 内部而非 bridge，差异记录见 `c6_car/doc/14-sf-link.md` D1）；0x44 波特率协商状态机与 `C6_LINK_TX/RX_GPIO` 已删除，`link.h` 对外 API 签名不变。两侧常量兼容性已做过源码级核对（寄存器偏移 / READY magic / 载荷上限 / 段长），结论与缺口见 22 号文档 §7.1。
+- **帧**：LINK 段用新定 **SF 帧**（`0x5A | VER | TYPE | SEQ | FLAGS | LEN(u16LE) | CID | 载荷 | CRC16`，段末补 0 到 4 倍数）；`FLAGS` 只有 `bit0=FRAG / bit1=FRAG_END`，**bit2..7 保留必须发 0**，且 **ACK 不是 flag**（它是 `TYPE=0x03`）。V1.0 因 `LEN≤248` → 整帧 padded **≤260 B = 单段上限刚好**（8 头 + 248 载荷 + 2 CRC = 258 → 补齐 260），一帧必然落在一个段内，**一定不分片**，两个位恒为 0；代价是最长帧独占一段（段内多帧只在短帧时才凑得下）。手机 WS 段仍是 v2 帧，C6 bridge 做字段级映射；OTA CHUNK 上限 62 B → 240 B。遥测方向 `TYPE=0x02/CID=0x10` 是**固定 38 B**、与 v2 `0x41` 逐字节相同（从机复用 v2 解码器）——**短一个字节就从机整帧丢弃，手机页面全无数据**。
+- **TC275 代码（V1.5 已落地，2026-09-26 第二轮按已烧录 C6 固件契约完善）**：`Middleware/com/spi_hal_pins.c`（QSPI3 主机 + P23.0 电平采样 + 定长事务）、`Middleware/com/link.c`（握手寄存器 + 事务泵 + **按 TYPE/CID 白名单的命令下行** + 38 B 遥测上行 + `LINK_gen/LINK_setClock` 控制面）、`Middleware/sf/sf_frame.c`（SF 编解码）、`Middleware/sf/sf_telemetry.c`（38 B 遥测 codec）；主机单测两份都在 `test/host/`（帧层 2855 断言、遥测层 154 断言且编译从机解码器交叉验证）。挂载在 `Cpu2_Main.c` 的 `#ifdef USE_SPI_LINK` 分支。**QSPI3 的 TX/RX/ER 三个 ISR 声明在 0 号向量表、优先级 6/9/10**（SDD §18 C1/C2）。`Middleware/wifi_at.c` 目前是**默认构建**，SPI 靠 `-D USE_SPI_LINK` 打开 —— 与 SDD §5.6 设想的"量产默认 SPI"相反，这是刻意的：G1 未过之前 UART 仍是唯一可用链路，门禁通过后再翻转默认值。
+- **C6 代码（已完成，`c6_car` `22e15f2`）**：`components/c6_link/link.c` 传输层 UART → `spi_slave_hd`，`components/c6_sf/` 承担 SF 编解码（v2↔SF 映射落在 c6_link 内部而非 bridge，差异记录见 `c6_car/doc/14-sf-link.md` D1）；0x44 波特率协商状态机与 `C6_LINK_TX/RX_GPIO` 已删除，`link.h` 对外 API 签名不变。**两侧常量核对结论（重要）**：偏移/magic/上限/段长一致，但主机侧初版有三处同名不同义（`FLAGS bit1`、OTA CID 缺 `0x35`、`ERRSTAT` 整张位表）+ 两处行为级缺陷（分派不看 CID、遥测只发 6 B），**已全部按从机更正**，证据与教训见 22 号文档 §2 E13/E14 与 SDD §18 C11~C13。
 - **唯一硬风险（R7）**：AURIX QSPI 没有命令/地址相位概念、iLLD 主驱动亦无封装，前导相位只能用数据字节模拟；Espressif HD 从机是否接受该波形**必须台架先验**（G1：两台 ESP32 跑官方例程抓参考波形逐位比对）。退路：① C6 自写寄存器级从机驱动（纯数据相位 + 固定段长）；② 回退 §2 的 UART 链路。
 - 若后续要双/四线提速，还需补 WP/HOLD 两脚（C6 GPIO14/15，TC275 需 QSPI3 备用数据线方案），本版不考虑。
