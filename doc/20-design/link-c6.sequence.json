@@ -1,0 +1,85 @@
+{
+  "schema_version": 1,
+  "diagram_type": "sequence",
+  "meta": {
+    "title": "TC275 ↔ ESP32-C6 板间 SPI 链路交互",
+    "subtitle": "SF 帧半双工事务：QSPI3 主机轮询拉取 + 共享寄存器握手（doc 22-link-spi-design V1.5）",
+    "locale": "zh-CN",
+    "output": "doc/20-design/22-link-sequence.html",
+    "viewBox": [1000, 740],
+    "column_fit": "spread",
+    "quality_profile": "showcase",
+    "views": [
+      { "id": "command-path", "label": "命令下行", "focus": ["phone", "c6", "cpu2", "cpu0"], "note": "手机命令如何在半个轮询周期内到达 CPU0 队列。" },
+      { "id": "telemetry", "label": "遥测上行", "focus": ["cpu2", "c6", "phone"], "note": "20 ms 聚合的 38 字节遥测如何原样到达手机页面。" },
+      { "id": "failure", "label": "失联保护", "focus": ["c6", "cpu2", "cpu0"], "note": "ALIVE 停更 500 ms 判失联，受控停车而不是失控。" }
+    ]
+  },
+  "participants": [
+    { "id": "phone", "type": "external", "label": "手机", "sublabel": "WS v2 客户端" },
+    { "id": "c6", "type": "frontend", "label": "ESP32-C6 从机", "sublabel": "spi_slave_hd + link_task" },
+    { "id": "cpu2", "type": "backend", "label": "TC275 CPU2", "sublabel": "QSPI3 主机链路泵" },
+    { "id": "cpu0", "type": "backend", "label": "TC275 CPU0", "sublabel": "控制命令队列" }
+  ],
+  "segments": [
+    { "from": 140, "to": 262, "label": "启动 / SEQ 重同步" },
+    { "from": 272, "to": 412, "label": "命令下行（手机 → 车轮）" },
+    { "from": 424, "to": 500, "label": "遥测上行（20 ms 聚合）" },
+    { "from": 540, "to": 652, "label": "GEN 命令 / 判活看门狗" }
+  ],
+  "messages": [
+    { "id": "reg-poll", "from": "cpu2", "to": "c6", "y": 170, "label": "RDBUF 0x02 读 24 B 寄存器", "variant": "default", "note": "连读两次取相同值才可信（E5），重试 3 次仍不稳判 LINK_LOST；IRQ 高或每 2 ms 保活触发一次循环" },
+    { "id": "reg-ready", "from": "c6", "to": "cpu2", "y": 198, "label": "READY=0x5F534601 + RX_ROOM", "variant": "return", "note": "从机 link_task 已布防 2×512 B RX DMA 缓冲并发布就绪魔数；魔数不合法则停在 LINK_DOWN，禁止数据事务" },
+    { "id": "gen-reset", "from": "cpu2", "to": "c6", "y": 226, "label": "WRBUF GEN{RESET_LINK}", "variant": "security", "note": "每个新 READY 沿（上电/恢复）先重同步：从机清 RX SEQ 窗口，回执可见后才把自身 TX SEQ 归零（E14：跨两次从机任务调度，超时 20 ms）" },
+    { "id": "gen-reset-ack", "from": "c6", "to": "cpu2", "y": 256, "label": "CMDRSP={1, OK}", "variant": "return" },
+
+    { "id": "ws-cmd", "from": "phone", "to": "c6", "y": 292, "label": "WS v2 帧 0x50 DRIVE {v, ω}", "variant": "emphasis", "note": "手机侧仍是 v2 帧，C6 bridge 做 v2↔SF 字段级映射，对外语义不变" },
+    { "id": "irq-raise", "from": "c6", "to": "cpu2", "y": 320, "label": "IRQ(P23.0) 拉高 = TX_PENDING", "variant": "emphasis", "note": "v2→SF 入队后 link_tx_kick 打包 DMA 段并置 TX_PENDING；主机电平轮询，最迟 2 ms 采样到" },
+    { "id": "rddma-read", "from": "cpu2", "to": "c6", "y": 348, "label": "RDDMA 0x04 读段 ≤260 B + INT0 0x08 收尾", "variant": "emphasis", "note": "4 字节对齐；TX_PENDING>640 视为坏寄存器读并钳制；漏发 INT0 从机缓冲卡死（E12）" },
+    { "id": "cmd-forward", "from": "cpu2", "to": "cpu0", "y": 378, "label": "白名单分派 → XCORE_cmdPush", "variant": "security", "note": "TYPE=CMD 且 CID∈{DRIVE,DIAG,DPT} 才入队；DRIVE 混控为 SET_SPEED ±100%；急停 0x32 先 XCORE_estopRequest 旁路队列" },
+
+    { "id": "status-read", "from": "cpu2", "to": "cpu0", "y": 436, "label": "XCORE_statusGet（每 20 ms）", "variant": "default", "note": "38 B 遥测只填有真源的字段（state/fault/uptime/fwVer），其余显式置 0" },
+    { "id": "wrdma-write", "from": "cpu2", "to": "c6", "y": 470, "label": "WRDMA 0x03 写段 + WR_END 0x07 收尾", "variant": "emphasis", "note": "RX_ROOM 门控写长；TYPE=TEL/CID=0x10，38 B 载荷是硬契约，短载荷=整帧丢弃（E13）" },
+    { "id": "ws-tel", "from": "c6", "to": "phone", "y": 498, "label": "WS v2 0x41 遥测广播", "variant": "return", "note": "sf_to_v2 后复用原 v2 解码器，手机页面语义与 UART 时代逐字节相同" },
+
+    { "id": "gen-cmd", "from": "cpu2", "to": "c6", "y": 552, "label": "WRBUF GEN{NOP 探针 → 真命令}", "variant": "default", "note": "回执粘滞：先 NOP 清槽再发真命令；SILENCE_ON/OFF 供 G4 故障注入，CLOCK_SET 单位 MHz 只进诊断" },
+    { "id": "gen-ack", "from": "c6", "to": "cpu2", "y": 584, "label": "CMDRSP={cmd, result}", "variant": "return" },
+    { "id": "alive-tick", "from": "c6", "to": "cpu2", "y": 614, "label": "SF_ALIVE 每 10 ms 自增", "variant": "dashed", "note": "esp_timer ISR 直接改寄存器区发布" },
+    { "id": "lost-estop", "from": "cpu2", "to": "cpu0", "y": 644, "label": "ALIVE 停更 >500 ms → LINK_LOST", "variant": "security", "note": "XCORE_estopRequest 锁存受控停车；判活只看 SF_ALIVE，不看 IRQ 电平（开漏线仅片内上拉，R11）" }
+  ],
+  "activations": [
+    { "participant": "c6", "from": 164, "to": 646, "type": "frontend" },
+    { "participant": "cpu2", "from": 166, "to": 646, "type": "backend" },
+    { "participant": "phone", "from": 286, "to": 494, "type": "external" },
+    { "participant": "cpu0", "from": 372, "to": 644, "type": "backend" }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "主机拉取模型",
+      "items": [
+        "C6 半双工不能主动推送：IRQ 提示 + 2 ms 保活轮询兜底",
+        "每圈顺序固定：寄存器快照 → 读(优先) → 写 → 判活",
+        "命令链路段时延 ≤2.3 ms，端到端预算 50 ms"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "安全语义",
+      "items": [
+        "LINK_LOST / 急停都走 XCORE_estopRequest 锁存，受控停车",
+        "急停旁路 CPU0 队列深度，不等出队",
+        "SEQ 严格前进窗口(32) + CRC16，从机 ERRSTAT 七位粘滞可读"
+      ]
+    },
+    {
+      "dot": "orange",
+      "title": "三条硬握手契约",
+      "items": [
+        "寄存器连读两次取相同值（E5，非原子读）",
+        "RDDMA/WRDMA 必须以 INT0/WR_END 收尾（E12，否则从机卡死）",
+        "GEN 回执跨两次从机任务调度，必须带 20 ms 超时（E14）"
+      ]
+    }
+  ]
+}
