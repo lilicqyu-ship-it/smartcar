@@ -388,7 +388,6 @@ static void test_seq_window(void)
 static void test_seq_relock(void)
 {
     SF_Parser p;
-    SF_Frame f;
     int16_t n;
     uint8_t k;
     uint16_t rejected = 0;
