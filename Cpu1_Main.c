@@ -32,6 +32,7 @@
 #include "IfxScuWdt.h"
 #include "motor.h"
 #include "motor_algo.h"
+#include "encoder.h"
 #include "stime.h"
 
 extern IfxCpu_syncEvent cpuSyncEvent;
@@ -53,6 +54,10 @@ void core1_main(void)
 
     /* Initialize the TB6612 motor drivers (4 channels, 2x TB6612) */
     MOTOR_init();
+
+    /* Wheel Hall encoder decode (GTM TIM0, needs the CMU CLK0 that
+     * MOTOR_init set up). ENCODER_task() runs inside the 1 kHz loop. */
+    ENCODER_init();
 
     MOTOR_ALGO_init();
     MOTOR_ALGO_run();                        /* never returns */

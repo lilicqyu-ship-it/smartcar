@@ -96,6 +96,21 @@ static void vRobotControlTask(void *pvParameters)
             status.heartbeatOk   = ROBOT_isHeartbeatOk() ? 1 : 0;
             status.faultCode     = ROBOT_getFaultCode();
             status.emergencyStop = ROBOT_isEmergencyStop() ? 1 : 0;
+
+            /* Measured wheel speed replaces the commanded echo once the Hall
+             * encoders report activity; until then the old behavior holds. */
+            {
+                sint16  encL, encR;
+                boolean encAlive;
+
+                XCORE_encoderGet(&encL, &encR, &encAlive);
+                if (encAlive)
+                {
+                    status.leftSpeed  = (sint8)(encL / 10);
+                    status.rightSpeed = (sint8)(encR / 10);
+                }
+            }
+
             XCORE_statusPublish(&status);
 
             /* map -100..+100 (protocol) to -1000..+1000 (motor algorithm) */

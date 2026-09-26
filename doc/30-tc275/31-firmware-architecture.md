@@ -13,7 +13,7 @@
 | 核 | 运行环境 | 职责 | 入口 |
 |---|---|---|---|
 | CPU0 | FreeRTOS（单核内核，仅此核跑调度器） | 控制任务：命令执行、安全状态机、状态发布、日志桥、控制台 UART、LED | Cpu0_Main.c → `core0_main` |
-| CPU1 | 裸机 1 kHz 超循环 | 电机算法：斜率限幅、失联看门狗、急停刹车，驱动 GTM/D24A | Cpu1_Main.c → `core1_main` |
+| CPU1 | 裸机 1 kHz 超循环 | 电机算法：斜率限幅、失联看门狗、急停刹车，驱动 GTM/D24A；编码器×4 测速（TIEM 边沿中断 + 1 kHz 测速任务） | Cpu1_Main.c → `core1_main` |
 | CPU2 | 裸机超循环 | ESP32-C6 AT 链路：softAP+TCP 服务、协议解码、HTTP 控制接口 | Cpu2_Main.c → `core2_main` |
 
 规则：**FreeRTOS API 只允许 CPU0 调用**（移植层绑定 CPU0：STM0 产生 tick、上下文切换中断、CCPN 屏蔽均只作用于 CPU0）。CPU1/CPU2 的时基来自 `Bsp/stime.c`（读 STM0 自由计数，unsigned 回绕安全）。
@@ -33,6 +33,7 @@
 ├──────────────────────────────────────────────────────┤
 │ Bsp/     uart.c/h    ASCLIN0 调试串口        (CPU0)  │
 │          motor.c/h   GTM PWM+D24A            (CPU1)  │
+│          encoder.c/h GTM TIM 编码器×4        (CPU1)  │
 │          stime.c/h   STM0 毫秒时基       (CPU1/CPU2) │
 ├──────────────────────────────────────────────────────┤
 │ FreeRtos/ + Configurations/FreeRTOSConfig.h  (CPU0)   │
@@ -54,7 +55,7 @@
 
 ASCLIN0 中断（CPU0）：TX 优先级 8、RX 4、ER 12。FreeRTOS 内核中断：tick(STM0) 优先级 2、上下文切换 1。
 
-**CPU1（裸机）**：无任务/中断，`MOTOR_ALGO_run()` 1 kHz 节拍（STM0 忙等）。
+**CPU1（裸机）**：`MOTOR_ALGO_run()` 1 kHz 节拍（STM0 忙等）+ 编码器边沿中断。GTM TIM0 CH0~CH7 各接一路编码器相（TIEM 输入事件模式、双边沿），`enc0Isr..enc7Isr` 优先级 **16~23**、`typeOfService = IfxSrc_Tos_cpu1`，同样 `IFX_INTERRUPT(fn, 0, prio)` 声明（0 号表共用）；ISR 内做 ×4 正交解码，主循环无每边沿轮询负担。
 
 **CPU2（裸机）**：`WIFI_main()` 超循环。ASCLIN1 中断：`wifiRxISR` 优先级 5、`wifiTxISR` 7、`wifiErISR` 13，`IFX_INTERRUPT(fn, 0, prio)` 声明且 `typeOfService = IfxSrc_Tos_cpu2`。
 
@@ -69,6 +70,7 @@ ASCLIN0 中断（CPU0）：TX 优先级 8、RX 4、ER 12。FreeRTOS 内核中断
 | 命令队列 (深 8) | CPU2 → CPU0 | 解码后的协议帧 `XcoreCmdMsg{cmd,len,data}`；满则丢弃并入日志 |
 | 电机目标 | CPU0 → CPU1 | 左右目标速度 -1000..+1000 + estop 位 + `seq` 计数（每 10 ms 递增，CPU1 据此判失联） |
 | 电机实际值 | CPU1 → 遥测 | 算法输出的左右侧速度（斜率后） |
+| 编码器实测 | CPU1 → 遥测 | `XCORE_encoderSet/Get`：实测左右侧速度（percent×10）+ alive 位（500 ms 内有边沿）；alive 时 CPU0 用它覆盖状态块的 leftSpeed/rightSpeed |
 | 状态块 `ProtocolStatus` | CPU0 → CPU2 | robot 状态镜像，10 ms 刷新；CPU2 直接用于 0x40 应答与 HTTP JSON |
 | 急停旁路 | CPU2 置位 / CPU0 清除 | `XCORE_estopRequest()` 让 CPU1 **不等** 10 ms 控制拍直接刹车 |
 | 日志环 (1 KB) | CPU1/CPU2 → CPU0 | 整行拷贝入环（满则整行丢弃），CPU0 控制任务 `XCORE_logService()` 出环打印 |
@@ -175,16 +177,16 @@ ATE0 → AT+CWMODE=2 → AT+CWSAP="AURIX-SmartDrive","12345678",11,3
 
 PWM 20 kHz，`MOTOR_setSpeed(id, -1000..+1000)`；robot 层 -100..+100 → ×10 后经 xcore 下发。轮侧映射（左=A+B，右=C+D）现在定义在 motor_algo.c。
 
-### 9.1 编码器映射（MG310 内置 260 线 AB 正交，方案定稿待实施，接线见 23-wiring.md §8）
+### 9.1 编码器映射（MG310 内置 260 线 AB 正交，固件已实现 `Bsp/encoder.c`，接线见 23-wiring.md §8）
 
-| 电机 | A 相 | B 相 | GTM0 TIM UDC 对 | 排针 |
+| 电机 | A 相 | B 相 | GTM0 TIM 通道（TIEM 中断） | 排针 |
 |---|---|---|---|---|
 | A（电机1） | P33.4 | P33.5 | TIM0_0 / TIM0_1 | X2-32/33 |
 | B（电机2） | P33.6 | P33.7 | TIM0_2 / TIM0_3 | X2-34/35 |
 | C（电机3） | P33.0 | P33.1 | TIM0_4 / TIM0_5 | X2-28/29 |
 | D（电机4） | P33.2 | P33.3 | TIM0_6 / TIM0_7 | X2-30/31 |
 
-硬件正交计数（×4 解码），≈21225 计数/轮转（减速比 1:20.409）；工程 iLLD 无 IfxEncoder 封装，需直写 TIM `UDCCTRL` 寄存器。测速读数归 CPU1 的 motor_algo 域。
+A 相进偶数通道、B 相进奇数通道，八通道全部配 TIEM 双边沿 + NEWVAL 中断（优先级 16~23，TOS=CPU1），ISR 按 4x 正交表软解码，≈**21225 计数/轮转**（减速比 1:20.409）。**实现注记**：原方案的 "TIM UDC 硬件正交"（`UDCCTRL/CLS/DUTC`）是 GTM gen2 的寄存器，本芯片 TC27D 的 GTM gen3 TIM **没有 UDC**（`IfxGtm_regdef.h` 无此寄存器，模式仅 TPWM/TPIM/TIEM/TIPM/TBCM/TGPS），GPT12 增量口与 ERU 输入又都不在引出脚上，故改为"硬件边沿中断 + 软件正交"。实测值经 `ENCODER_task()`（1 kHz，8 ms 中值窗）换算 mm/s 并经 xcore 出遥测；`ENCODER_getRawCounts` 供产测判向。
 
 ## 10. 设计决策（解释）
 

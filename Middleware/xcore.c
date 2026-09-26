@@ -39,6 +39,16 @@ typedef struct
 
 static MotorStatus g_motorStatus;
 
+/* CPU1 -> telemetry: measured side speeds from the Hall encoders */
+typedef struct
+{
+    sint16  left;                        /* -1000..+1000, measured */
+    sint16  right;
+    boolean alive;                       /* encoder edges within the alive window */
+} EncoderStatus;
+
+static EncoderStatus g_encoderStatus;
+
 /* CPU2 -> CPU1 fast e-stop bypass (cleared by CPU0 on fault clear/reset) */
 static volatile boolean g_estopReq;
 
@@ -71,6 +81,7 @@ void XCORE_init(void)
 {
     memset((void *)&g_motorTarget, 0, sizeof(g_motorTarget));
     memset((void *)&g_motorStatus, 0, sizeof(g_motorStatus));
+    memset((void *)&g_encoderStatus, 0, sizeof(g_encoderStatus));
     memset((void *)&g_status, 0, sizeof(g_status));
     memset((void *)&g_cmdQueue, 0, sizeof(g_cmdQueue));
     memset((void *)g_logRing, 0, sizeof(g_logRing));
@@ -120,6 +131,26 @@ void XCORE_motorStatusGet(sint16 *left, sint16 *right)
     *left  = g_motorStatus.left;
     *right = g_motorStatus.right;
     XCORE_unlock();
+}
+
+void XCORE_encoderSet(sint16 left, sint16 right, boolean alive)
+{
+    XCORE_lock();
+    g_encoderStatus.left  = left;
+    g_encoderStatus.right = right;
+    g_encoderStatus.alive = alive;
+    __dsync();
+    XCORE_unlock();
+}
+
+boolean XCORE_encoderGet(sint16 *left, sint16 *right, boolean *alive)
+{
+    XCORE_lock();
+    *left  = g_encoderStatus.left;
+    *right = g_encoderStatus.right;
+    *alive = g_encoderStatus.alive;
+    XCORE_unlock();
+    return *alive;
 }
 
 void XCORE_estopRequest(void)

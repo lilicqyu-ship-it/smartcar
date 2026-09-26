@@ -1,5 +1,6 @@
 #include "motor_algo.h"
 #include "motor.h"
+#include "encoder.h"
 #include "stime.h"
 #include "xcore.h"
 
@@ -97,6 +98,10 @@ void MOTOR_ALGO_init(void)
 
 void MOTOR_ALGO_task(void)
 {
+    /* Encoder tick first: it must run at 1 kHz regardless of the e-stop
+     * branch below, and its measured speeds feed the telemetry. */
+    ENCODER_task();
+
     MOTOR_ALGO_readTargets();
 
     /* E-stop (CPU2 bypass bit or the bit published by CPU0): brake at once,

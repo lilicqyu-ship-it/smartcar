@@ -28,6 +28,11 @@ uint32 XCORE_motorGetTarget(sint16 *left, sint16 *right, boolean *estop); /* ret
 void XCORE_motorStatusSet(sint16 left, sint16 right);
 void XCORE_motorStatusGet(sint16 *left, sint16 *right);
 
+/* Measured wheel speeds (CPU1 encoder -> telemetry). Percent*10 domain
+ * (-1000..+1000); alive = encoder edges seen within the alive window. */
+void    XCORE_encoderSet(sint16 left, sint16 right, boolean alive);
+boolean XCORE_encoderGet(sint16 *left, sint16 *right, boolean *alive);
+
 /* Direct e-stop bypass set by CPU2, cleared by CPU0 on fault clear/reset */
 void XCORE_estopRequest(void);
 void XCORE_estopClear(void);
