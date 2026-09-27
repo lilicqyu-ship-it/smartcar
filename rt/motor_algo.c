@@ -2,6 +2,7 @@
 #include "bsp/motor.h"
 #include "rt/encoder.h"
 #include "bsp/stime.h"
+#include "bsp/wdg.h"
 #include "mw/xcore/xcore.h"
 
 /* Left side: MOTOR_A + MOTOR_B (TB6612#1), Right side: MOTOR_C + MOTOR_D (TB6612#2)
@@ -126,6 +127,7 @@ void MOTOR_ALGO_run(void)
     while (1)
     {
         MOTOR_ALGO_task();
+        WDG_serviceCpu();               /* CPU1 WDT feed point, 1 kHz (SDD SS7.2) */
 
         nextMs += MOTOR_ALGO_PERIOD_MS;
         STIME_waitUntilMs(nextMs);

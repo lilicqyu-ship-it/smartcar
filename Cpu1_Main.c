@@ -31,6 +31,7 @@
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
 #include "bsp/motor.h"
+#include "bsp/wdg.h"
 #include "rt/motor_algo.h"
 #include "rt/encoder.h"
 #include "bsp/stime.h"
@@ -41,10 +42,12 @@ void core1_main(void)
 {
     IfxCpu_enableInterrupts();
 
-    /* !!WATCHDOG1 IS DISABLED HERE!!
-     * Enable the watchdog and service it periodically if it is required
-     */
-    IfxScuWdt_disableCpuWatchdog(IfxScuWdt_getCpuWatchdogPassword());
+    /* CPU1 (motor core) watchdog ON, fed from the 1 kHz loop inside
+     * MOTOR_ALGO_run() (doc 21 SS7.2/SS18 C8). If the loop sticks, the
+     * watchdog resets the whole device within ~0.5 s; the boot path back
+     * leaves every TB6612 channel stopped (MOTOR_init duty 0 +
+     * MOTOR_stopAll) with zero targets, i.e. the safe state. */
+    WDG_enableCpu();
 
     /* Wait for CPU sync event */
     IfxCpu_emitEvent(&cpuSyncEvent);

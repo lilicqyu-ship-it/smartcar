@@ -180,9 +180,12 @@ void core2_main(void)
 
     IfxCpu_enableInterrupts();
 
-    /* !!WATCHDOG2 IS DISABLED HERE!!
-     * Enable the watchdog and service it periodically if it is required
-     */
+    /* CPU2 watchdog intentionally stays DISABLED (doc 21 SS18 C8): a hung
+     * link pump cannot move the motors (CPU1's 150 ms command-loss ramp-stop
+     * and CPU0's 100 ms heartbeat stop them first), and per doc 21 SS7.2 a
+     * CPU2 fault must reset only CPU2 - that needs the production SMU alarm
+     * routing. The CPU2 WDT alarm here would reset the whole vehicle.
+     * Revisit together with the SS7.2 watchdog chain. */
     IfxScuWdt_disableCpuWatchdog(IfxScuWdt_getCpuWatchdogPassword());
 
     /* Wait for CPU sync event */

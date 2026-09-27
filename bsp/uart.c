@@ -109,3 +109,25 @@ void UART_echoTask(void)
         }
     }
 }
+
+/* Polled TX pump for the fatal-error path (Cpu0 stack-overflow hook),
+ * called with interrupts off: nothing else moves the software FIFO into
+ * the ASCLIN, so this performs the very transfer the TX ISR would do.
+ * The bound is iterations, not bytes -- with IRQs off the shift register
+ * drains at line rate (one byte ~ 87 us at 115200), so each byte needs
+ * thousands of spin iterations before the hardware has room again. The
+ * figure below covers a full 256-byte FIFO (~22 ms) at 200 MHz; it exists
+ * only to keep a dead peripheral from hanging the fatal path, where the
+ * CPU watchdog is the real exit. */
+#define UART_FLUSH_GUARD 200000u
+
+void UART_flushPolling(void)
+{
+    uint32 guard = UART_FLUSH_GUARD;
+
+    while ((guard > 0u) && (Ifx_Fifo_isEmpty(g_asclin.tx) == FALSE))
+    {
+        IfxAsclin_Asc_isrTransmit(&g_asclin);
+        guard--;
+    }
+}

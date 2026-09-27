@@ -32,6 +32,7 @@
 #include "IfxScuWdt.h"
 #include "IfxPort.h"
 #include "bsp/uart.h"
+#include "bsp/wdg.h"
 #include "mw/xcore/xcore.h"
 #include "mw/proto/protocol.h"
 #include "app/robot.h"
@@ -77,6 +78,8 @@ static void vRobotControlTask(void *pvParameters)
 
     while (1)
     {
+        WDG_serviceCpu();     /* CPU0 WDT feed point, 10 ms (vTaskDelay below) */
+
         XcoreCmdMsg msg;
 
         while (XCORE_cmdPop(&msg))
@@ -132,10 +135,17 @@ void core0_main(void)
 {
     IfxCpu_enableInterrupts();
 
-    /* !!WATCHDOG0 AND SAFETY WATCHDOG ARE DISABLED HERE!!
-     * Enable the watchdogs and service them periodically if it is required
-     */
-    IfxScuWdt_disableCpuWatchdog(IfxScuWdt_getCpuWatchdogPassword());
+    /* CPU0 watchdog ON (doc 21 SS18 C8): fed by the robot control task
+     * every 10 ms. A hung scheduler or a starved robot task resets the
+     * device in ~0.5 s, and vApplicationStackOverflowHook relies on this
+     * to turn a stack overflow into a reset instead of a silent spin.
+     * After the reset the boot comes back with all motors stopped. */
+    WDG_enableCpu();
+
+    /* Safety watchdog stays disabled on purpose: the SM watchdog is the
+     * root of the production chain (doc 21 SS7.2) and must only run with
+     * its feed conditions (CPU1 seq advancing && link healthy), which the
+     * demo does not have yet. */
     IfxScuWdt_disableSafetyWatchdog(IfxScuWdt_getSafetyWatchdogPassword());
 
     /* Shared memory must be initialized before any core leaves the sync event */
@@ -176,11 +186,27 @@ void core0_main(void)
 }
 
 #if defined(__TASKING__)
+/* FreeRTOS detected a task running past its stack (method 1, checked at
+ * context switch). Report on the console, then stop feeding: the CPU0
+ * watchdog enabled in core0_main bites in ~0.5 s and the reset lands the
+ * system in the safe (motors stopped) boot state. Spinning here without
+ * the watchdog armed - the old behavior - swallowed the fault. */
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
+    (void)xTask;
+
+    /* Print with the TX ISR still enabled (the blocking write waits on it
+     * to drain the software FIFO), then take interrupts away so the pump
+     * below is the only writer, then spin. */
+    UART_println("FATAL: stack overflow in task:");
+    UART_println(pcTaskName);
+
+    __disable();                     /* freeze the fault scene           */
+    UART_flushPolling();             /* push what is left out, no ISR    */
+
     while (1)
     {
-        __nop();
+        __nop();                     /* un-fed watchdog resets in ~0.5 s */
     }
 }
 #endif
