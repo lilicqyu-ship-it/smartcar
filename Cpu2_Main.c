@@ -64,35 +64,54 @@
  * zero. The zeros are not placeholders: each one names what has to exist first.
  * Filling a field with a number from another unit would be worse than a zero,
  * because the C6 forwards these bytes to the phone, which prints mm/s, mV and mm.
- *   vTargetL/R, vMeasL/R - mm/s. The speed figures this build has are the demo's
- *                  +-100 percent in ProtocolStatus and CPU1's target in
- *                  0.1 percent units; the mm/s domain needs the encoder channel
- *                  of SDD SS5.4 (doc 23 SS6 also lacks the wheel circumference
- *                  that would make the conversion definable).
+ *   vMeasL/R     - mm/s, straight from CPU1's encoder task through the xcore
+ *                  encoder block (doc 21 SS6.3: the SS5.1 encoder channel this
+ *                  field was waiting for). A dead or stopped encoder reads 0,
+ *                  which is honest in both cases - the payload has no alive bit.
+ *   odoSessionMm - overflow-free average of the two side odometries; both are
+ *                  absolute accumulators, so the average is the distance the
+ *                  chassis covered, straight or curved.
+ *   vTargetL/R   - stays 0 per doc 21 SS6.3 until SS5.2 servo gives targets in
+ *                  mm/s; this build's targets are percent, and a percent in an
+ *                  mm/s field is a lie, not a placeholder.
  *   batteryMv/Pct- no ADC channel is wired up in this build.
- *   odo*         - same reason as vMeas: needs the encoder counts.
+ *   odoTotalMm   - needs DFlash persistence (doc 21 SS4.3) on top of the encoder.
  *   linkRttMs    - needs the HBT transaction the RTT measurement rides on.
  *   hwRev        - no board id source yet; the DPT flow of SDD SS10 reads it
  *                  before it reads anything else, so it is the first field to
  *                  fill once the hardware revision has a home.
  * linkErrRate is computed from the link's own counters below. */
+
+/* Overflow-free average of the two side odometries (both absolute
+ * accumulators): the distance the chassis covered, straight or curved. */
+static uint32 link_sessionOdoMm(const XcoreEncoder *enc)
+{
+    return (enc->odoLeftMm / 2u) + (enc->odoRightMm / 2u)
+         + ((enc->odoLeftMm & 1u) & (enc->odoRightMm & 1u));
+}
+
 static void link_sendTelemetry(void)
 {
     Link_Health    health;
     ProtocolStatus status;
     SF_Telemetry   tel;
+    XcoreEncoder   enc;
     uint32         total;
     uint32         err;
     uint32         rate;
     uint32         perTenth;
 
     XCORE_statusGet(&status);
+    XCORE_encoderRead(&enc);
 
     memset(&tel, 0, sizeof(tel));
     tel.uptimeMs  = STIME_nowMs();
     tel.state     = status.state;
     tel.faultCode = status.faultCode;   /* demo code set is 8 bit, widened as-is */
     tel.fwVer     = LINK_FW_VERSION;
+    tel.vMeasLeft  = enc.vMeasLeftMmS;
+    tel.vMeasRight = enc.vMeasRightMmS;
+    tel.odoSessionMm = link_sessionOdoMm(&enc);
 
     /* SDD SS6.1c / 22 SS5.5: linkErrRate keeps its meaning but changes source -
      * frames this core's codec rejected, over frames it saw, in units of 0.1%
@@ -126,6 +145,25 @@ static void link_sendTelemetry(void)
     /* seq is stamped by the link, which owns the order frames actually go out in. */
     (void)LINK_sendTelemetry(&tel);
 }
+
+/* Bench speed line: the figures this core puts into telemetry vMeasL/R and
+ * odoSession, on the CPU0 console at 1 Hz so a bench check of the speed
+ * display needs no phone on the link. Signed values, hence XCORE_logi. */
+#define LINK_SPEED_PERIOD_MS     1000u
+
+static void link_speedPrint(void)
+{
+    XcoreEncoder enc;
+    sint32       vals[4];
+
+    XCORE_encoderRead(&enc);
+    vals[0] = enc.vMeasLeftMmS;
+    vals[1] = enc.vMeasRightMmS;
+    vals[2] = (sint32)link_sessionOdoMm(&enc);
+    vals[3] = enc.alive ? 1 : 0;
+
+    XCORE_logi("SPD=", vals, 4u);
+}
 #else
 #include "com/wifi_at.h"
 #endif
@@ -137,6 +175,7 @@ void core2_main(void)
 #ifdef USE_SPI_LINK
     uint32 nextTelMs;
     uint32 nextDiagMs;
+    uint32 nextSpdMs;
 #endif
 
     IfxCpu_enableInterrupts();
@@ -159,6 +198,7 @@ void core2_main(void)
     LINK_init(SPIHAL_CLK_1M);
     nextTelMs  = STIME_nowMs() + LINK_TELEMETRY_PERIOD_MS;
     nextDiagMs = STIME_nowMs() + LINK_DIAG_PERIOD_MS;
+    nextSpdMs  = STIME_nowMs() + LINK_SPEED_PERIOD_MS;
 
     while (1)
     {
@@ -174,6 +214,12 @@ void core2_main(void)
         {
             nextDiagMs += LINK_DIAG_PERIOD_MS;
             LINK_diagPrint();              /* bench: dump SPI link state to UART  */
+        }
+
+        if ((sint32)(STIME_nowMs() - nextSpdMs) >= 0)
+        {
+            nextSpdMs += LINK_SPEED_PERIOD_MS;
+            link_speedPrint();             /* bench: wheel speeds + odometer     */
         }
     }
 

@@ -311,7 +311,7 @@ typedef struct {                 /* 每页 = 头(16B) + 载荷 + CRC32 */
 - **已实现接口（`rt/encoder.c/h`，属主 CPU1，原 `Bsp/encoder.c/h` 随 §3.4 目录重排迁入）**：
   - `ENCODER_getSpeeds(int32 v[2])` —— 左/右侧轮速 mm/s（8 ms 滑窗 + 中值滤波；轮径 65 mm 为假设值，**台架标定**）；
   - `ENCODER_getOdometer(uint32 m[2])`；`ENCODER_getRawCounts(int32 c[4])`（产测判向用）；
-  - `ENCODER_isAlive()` —— 500 ms 窗口内有边沿即 alive；`ENCODER_task()` 在 1 kHz 算法环内运行并把实测速度（percent×10）经 `XCORE_encoderSet` 出遥测，alive 时 CPU0 用实测值覆盖状态块 leftSpeed/rightSpeed。
+  - `ENCODER_isAlive()` —— 500 ms 窗口内有边沿即 alive；`ENCODER_task()` 在 1 kHz 算法环内运行，经 `ENCODER_publish()` → `XCORE_encoderPublish` 一次发布**两个单位域**：实测速度 percent×10（alive 时 CPU0 用它覆盖状态块 leftSpeed/rightSpeed）+ 物理域 mm/s 与左右侧里程 mm（CPU2 取用填遥测 `vMeasL/R`、`odoSession`，§6.3，2026-09-27 起生效）。
 - **量产增量（本仓库未含）**：`ENCODER_selfCheck()`（静止漂移 + 单侧脉冲注入比对）、`ERR_ENC_DEAD` → `motor_guard` 安全态联动、速度系数标定写入 DFlash（§15.3）。
 - **关键行为**：计数 32 位累加（ISR 单写者）；判向符号表 `g_encInvert[4]` 默认全 `+1`，**接线后台架判向后修正**（23-wiring §8.4，即产测自动判向的手动版）。
 - **失败行为（量产）**：电机通电而对应编码器计数恒 0（500 ms）→ 上报 `ERR_ENC_DEAD` → `motor_guard` 进入安全态。
@@ -452,10 +452,10 @@ FLAGS: bit0=FRAG(段内后续还有分片)  bit1=FRAG_END(本帧末片)  bit2..7
 | 8 | state | u8 | mission 状态（§6.2 状态码） | ✅ |
 | 9 | faultCode | u16 | 活动最高级错误 | ✅ |
 | 11 | vTarget L/R | i16 ×2 | mm/s，目标 | ⚠️ 填 0：待 §5.2 伺服 |
-| 15 | vMeas L/R | i16 ×2 | mm/s，实测 | ⚠️ 填 0：待 §5.1 编码器 |
+| 15 | vMeas L/R | i16 ×2 | mm/s，实测 | ✅ CPU1 编码器（§5.1）经 xcore 物理域 |
 | 19 | battery_mV | u16 | 实测电压 | ⚠️ 填 0：无 ADC 通道 |
 | 21 | battPct | u8 | 估算电量 | ⚠️ 同上 |
-| 22 | odoSession | u32 | 本次里程 mm | ⚠️ 填 0：待编码器 |
+| 22 | odoSession | u32 | 本次里程 mm | ✅ 左右侧里程的无溢出平均（编码器，§5.1） |
 | 26 | odoTotal | u32 | 累计里程 mm | ⚠️ 同上（且需 DFlash 持久化，§4.3） |
 | 30 | linkRtt | u16 | SF HBT 事务边界 RTT ms | ⚠️ 填 0：HBT 未打点 |
 | 32 | linkErrRate | u8 | **0.1% 单位**，SPI 侧 `(crcErr+seqErr)`/已收帧 | ✅ |

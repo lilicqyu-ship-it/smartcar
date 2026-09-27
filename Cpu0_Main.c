@@ -100,14 +100,13 @@ static void vRobotControlTask(void *pvParameters)
             /* Measured wheel speed replaces the commanded echo once the Hall
              * encoders report activity; until then the old behavior holds. */
             {
-                sint16  encL, encR;
-                boolean encAlive;
+                XcoreEncoder enc;
 
-                XCORE_encoderGet(&encL, &encR, &encAlive);
-                if (encAlive)
+                XCORE_encoderRead(&enc);
+                if (enc.alive)
                 {
-                    status.leftSpeed  = (sint8)(encL / 10);
-                    status.rightSpeed = (sint8)(encR / 10);
+                    status.leftSpeed  = (sint8)(enc.pctLeft / 10);
+                    status.rightSpeed = (sint8)(enc.pctRight / 10);
                 }
             }
 

@@ -29,10 +29,25 @@ uint32 XCORE_motorGetTarget(sint16 *left, sint16 *right, boolean *estop); /* ret
 void XCORE_motorStatusSet(sint16 left, sint16 right);
 void XCORE_motorStatusGet(sint16 *left, sint16 *right);
 
-/* Measured wheel speeds (CPU1 encoder -> telemetry). Percent*10 domain
- * (-1000..+1000); alive = encoder edges seen within the alive window. */
-void    XCORE_encoderSet(sint16 left, sint16 right, boolean alive);
-boolean XCORE_encoderGet(sint16 *left, sint16 *right, boolean *alive);
+/* Measured wheel speeds (CPU1 encoder -> telemetry). One snapshot, two unit
+ * domains: pct*10 (-1000..+1000) for the demo status overlay, physical mm/s
+ * and per-side odometer for the SF telemetry (SDD §6.3 vMeasL/R, odoSession).
+ * alive = encoder edges seen within the alive window. CPU1 publishes; CPU0
+ * and CPU2 read. */
+typedef struct
+{
+    sint16  pctLeft;          /* -1000..+1000, percent*10 telemetry domain  */
+    sint16  pctRight;
+    sint16  vMeasLeftMmS;     /* physical mm/s, SF telemetry vMeasL         */
+    sint16  vMeasRightMmS;
+    uint32  odoLeftMm;        /* per-side absolute distance since boot, mm  */
+    uint32  odoRightMm;
+    boolean alive;
+} XcoreEncoder;
+
+void    XCORE_encoderPublish(const XcoreEncoder *enc);
+void    XCORE_encoderRead(XcoreEncoder *enc);
+boolean XCORE_encoderIsAlive(void);
 
 /* Direct e-stop bypass set by CPU2, cleared by CPU0 on fault clear/reset */
 void XCORE_estopRequest(void);
@@ -59,5 +74,9 @@ void XCORE_logService(void);              /* CPU0 only: print pending lines */
  * XCORE_log(). Pass n = 0 to print the label alone. */
 #define XCORE_LOG_MAX_VALS   20u
 void XCORE_logu(const char *label, const uint32 *vals, uint8 n);
+
+/* Signed twin of XCORE_logu: same line format, each value in decimal with a
+ * '-' when negative (e.g. reverse wheel speed). */
+void XCORE_logi(const char *label, const sint32 *vals, uint8 n);
 
 #endif

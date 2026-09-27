@@ -288,20 +288,7 @@ void ENCODER_task(void)
         }
     }
 
-    /* publish in the percent*10 telemetry domain (-1000..+1000) */
-    {
-        sint16 pctL, pctR;
-
-        pctL = (sint16)((g_speedMmS[0] * 1000) / ENCODER_FULL_SCALE_MM_S);
-        pctR = (sint16)((g_speedMmS[1] * 1000) / ENCODER_FULL_SCALE_MM_S);
-
-        if (pctL > 1000)  { pctL = 1000;  }
-        if (pctL < -1000) { pctL = -1000; }
-        if (pctR > 1000)  { pctR = 1000;  }
-        if (pctR < -1000) { pctR = -1000; }
-
-        XCORE_encoderSet(pctL, pctR, g_alive);
-    }
+    ENCODER_publish();
 }
 
 void ENCODER_getSpeedsMmS(sint32 v[2])
@@ -329,4 +316,44 @@ void ENCODER_getOdometer(uint32 m[2])
 boolean ENCODER_isAlive(void)
 {
     return g_alive;
+}
+
+/* The mm/s figures ride a sint16 across xcore; the physical top speed of this
+ * drivetrain is two orders below the limit, so saturation only trips when the
+ * count source is broken - clamp instead of wrapping into a bogus sign. */
+static sint16 enc_satS16(sint32 v)
+{
+    if (v > 32767)
+    {
+        return 32767;
+    }
+    if (v < -32768)
+    {
+        return -32768;
+    }
+    return (sint16)v;
+}
+
+/* Publish both unit domains in one snapshot: percent*10 for the demo status
+ * overlay (Cpu0_Main) and physical mm/s + per-side odometer for the SF
+ * telemetry fields vMeasL/R and odoSession (SDD §6.3, fed by Cpu2_Main). */
+void ENCODER_publish(void)
+{
+    XcoreEncoder enc;
+
+    enc.pctLeft  = (sint16)((g_speedMmS[0] * 1000) / ENCODER_FULL_SCALE_MM_S);
+    enc.pctRight = (sint16)((g_speedMmS[1] * 1000) / ENCODER_FULL_SCALE_MM_S);
+
+    if (enc.pctLeft > 1000)  { enc.pctLeft = 1000;  }
+    if (enc.pctLeft < -1000) { enc.pctLeft = -1000; }
+    if (enc.pctRight > 1000)  { enc.pctRight = 1000;  }
+    if (enc.pctRight < -1000) { enc.pctRight = -1000; }
+
+    enc.vMeasLeftMmS  = enc_satS16(g_speedMmS[0]);
+    enc.vMeasRightMmS = enc_satS16(g_speedMmS[1]);
+    enc.odoLeftMm     = g_odometerMm[0];
+    enc.odoRightMm    = g_odometerMm[1];
+    enc.alive         = g_alive;
+
+    XCORE_encoderPublish(&enc);
 }

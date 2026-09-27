@@ -41,15 +41,9 @@ typedef struct
 
 static MotorStatus g_motorStatus;
 
-/* CPU1 -> telemetry: measured side speeds from the Hall encoders */
-typedef struct
-{
-    sint16  left;                        /* -1000..+1000, measured */
-    sint16  right;
-    boolean alive;                       /* encoder edges within the alive window */
-} EncoderStatus;
-
-static EncoderStatus g_encoderStatus;
+/* CPU1 -> telemetry: measured side speeds from the Hall encoders, percent
+ * domain for the demo status and physical units for the SF telemetry */
+static XcoreEncoder g_encoderStatus;
 
 /* CPU2 -> CPU1 fast e-stop bypass (cleared by CPU0 on fault clear/reset) */
 static volatile boolean g_estopReq;
@@ -135,24 +129,34 @@ void XCORE_motorStatusGet(sint16 *left, sint16 *right)
     XCORE_unlock();
 }
 
-void XCORE_encoderSet(sint16 left, sint16 right, boolean alive)
+void XCORE_encoderPublish(const XcoreEncoder *enc)
 {
+    if (enc == NULL_PTR)
+    {
+        return;
+    }
+
     XCORE_lock();
-    g_encoderStatus.left  = left;
-    g_encoderStatus.right = right;
-    g_encoderStatus.alive = alive;
+    g_encoderStatus = *enc;
     __dsync();
     XCORE_unlock();
 }
 
-boolean XCORE_encoderGet(sint16 *left, sint16 *right, boolean *alive)
+void XCORE_encoderRead(XcoreEncoder *enc)
 {
     XCORE_lock();
-    *left  = g_encoderStatus.left;
-    *right = g_encoderStatus.right;
-    *alive = g_encoderStatus.alive;
+    *enc = g_encoderStatus;
     XCORE_unlock();
-    return *alive;
+}
+
+boolean XCORE_encoderIsAlive(void)
+{
+    boolean alive;
+
+    XCORE_lock();
+    alive = g_encoderStatus.alive;
+    XCORE_unlock();
+    return alive;
 }
 
 void XCORE_estopRequest(void)
@@ -301,6 +305,65 @@ void XCORE_logu(const char *label, const uint32 *vals, uint8 n)
             break;      /* no room for another " <=10 digits" group */
         }
         line[idx++] = ' ';
+        for (d = digits; d != &dec[sizeof(dec)]; d++)
+        {
+            line[idx++] = *d;
+        }
+    }
+
+    line[idx] = '\0';
+    XCORE_log(line);
+}
+
+/* Signed twin of XCORE_logu for values that are naturally negative (wheel
+ * speeds): same line format, each value in decimal with a '-' when negative. */
+void XCORE_logi(const char *label, const sint32 *vals, uint8 n)
+{
+    char   line[XCORE_LOG_LINE_MAX + 1];
+    char   dec[10];
+    uint32 idx = 0u;
+    uint8  v;
+
+    if (n > XCORE_LOG_MAX_VALS)
+    {
+        n = XCORE_LOG_MAX_VALS;
+    }
+
+    /* Copy the label, leaving room for at least one full value group ("- " and
+     * 10 digits) and the terminator, exactly like XCORE_logu. */
+    if (label != NULL_PTR)
+    {
+        while ((label[idx] != '\0') && (idx < (uint32)(XCORE_LOG_LINE_MAX - 13)))
+        {
+            line[idx] = label[idx];
+            idx++;
+        }
+    }
+
+    for (v = 0u; v < n; v++)
+    {
+        sint32      value = (vals != NULL_PTR) ? vals[v] : 0;
+        uint32      mag;
+        const char *digits;
+        const char *d;
+
+        if (idx >= (uint32)(XCORE_LOG_LINE_MAX - 12))
+        {
+            break;      /* no room for another " <=10 digits+sign" group */
+        }
+        line[idx++] = ' ';
+        if (value < 0)
+        {
+            line[idx++] = '-';
+            /* Magnitude in uint32: -(INT32_MIN+1) is the last value that fits
+             * a sint32, so the +1 happens only after the widen. */
+            mag = (uint32)(-(value + 1)) + 1u;
+        }
+        else
+        {
+            mag = (uint32)value;
+        }
+        digits = XCORE_u32ToDec(mag, &dec[sizeof(dec)]);
         for (d = digits; d != &dec[sizeof(dec)]; d++)
         {
             line[idx++] = *d;

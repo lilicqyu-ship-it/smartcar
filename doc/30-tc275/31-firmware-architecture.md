@@ -74,7 +74,7 @@ ASCLIN0 中断（CPU0）：TX 优先级 8、RX 4、ER 12。FreeRTOS 内核中断
 | 命令队列 (深 8) | CPU2 → CPU0 | 解码后的协议帧 `XcoreCmdMsg{cmd,len,data}`；满则丢弃并入日志 |
 | 电机目标 | CPU0 → CPU1 | 左右目标速度 -1000..+1000 + estop 位 + `seq` 计数（每 10 ms 递增，CPU1 据此判失联） |
 | 电机实际值 | CPU1 → 遥测 | 算法输出的左右侧速度（斜率后） |
-| 编码器实测 | CPU1 → 遥测 | `XCORE_encoderSet/Get`：实测左右侧速度（percent×10）+ alive 位（500 ms 内有边沿）；alive 时 CPU0 用它覆盖状态块的 leftSpeed/rightSpeed |
+| 编码器实测 | CPU1 → 遥测 | `XCORE_encoderPublish/Read`（`XcoreEncoder` 快照）：percent×10（-1000..+1000，alive 时 CPU0 覆盖状态块 leftSpeed/rightSpeed）+ 物理域 mm/s 与左右侧里程 mm（CPU2 填 SF 遥测 `vMeasL/R`、`odoSession`）+ alive 位（500 ms 内有边沿）。另有 `XCORE_logi`：`XCORE_logu` 的带符号版（负轮速） |
 | 状态块 `ProtocolStatus` | CPU0 → CPU2 | robot 状态镜像，10 ms 刷新；CPU2 直接用于 0x40 应答与 HTTP JSON |
 | 急停旁路 | CPU2 置位 / CPU0 清除 | `XCORE_estopRequest()` 让 CPU1 **不等** 10 ms 控制拍直接刹车 |
 | 日志环 (1 KB) | CPU1/CPU2 → CPU0 | 整行拷贝入环（满则整行丢弃），CPU0 控制任务 `XCORE_logService()` 出环打印 |
