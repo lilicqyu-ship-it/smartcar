@@ -4,7 +4,7 @@
 
 以 **Infineon TC275**（KIT-AURIX-TC275-LITE）为实时运动控制核心、**ESP32-C6**（DevKitC-1 V1.2）为 Wi-Fi 通信模块、**TB6612 四路驱动板（轮趣 D24A）**驱动 4 个 MG310 直流减速电机的智能双轮差速小车。手机通过 Wi-Fi 连接小车的 AP，用网页或自定义二进制协议下发运动指令。
 
-> **两条线并存，别混淆**：本仓库**当前代码**是 demo 现状（C6 跑官方 esp-at、开环 PWM）；**量产设计基准**是 [doc/20-design/21-software-design.md](doc/20-design/21-software-design.md)（SDD V1.6：C6 自研固件、板间 SPI + SF 帧、编码器闭环、OTA/产测/安全）。工程与文档改动以 SDD 为准，本文其余章节描述的是现状。
+> **两条线并存，别混淆**：本仓库**当前代码**是 demo 现状（C6 跑官方 esp-at、CPU1 已闭环）；**量产设计基准**是 [doc/20-design/21-software-design.md](doc/20-design/21-software-design.md)（SDD V1.7：C6 自研固件、板间 SPI + SF 帧、编码器闭环、OTA/产测/安全）。工程与文档改动以 SDD 为准，本文其余章节描述的是现状。
 >
 > **板间链路口径（2026-09-26）**：**UART 作为板间链路已弃用，SPI 是唯一板间链路**——`TriCore Debug (TASKING)` 与 `TriCore Release (TASKING)` 两个构建配置都定义了 `USE_SPI_LINK`，日常构建产出的就是 SF-over-QSPI3 路径；`com/wifi_at.c` 的 AT/UART 分支只有手动删掉该符号才编得出（真源 `21 §5.6` 末条、`21 §18 C15`）。UART 那组线（P15.0/P15.1 ↔ GPIO6/7）**保留不拆**，只作 C6 调试控制台。下面的架构图与"快速上手"仍描述 demo/UART 通路，做教程要先删符号（步骤见 `doc/01-getting-started.md` 第 1 步）。
 >
@@ -124,7 +124,8 @@ myCar/
 - ⚠️ 迁移遗留项（仅影响删符号后的 demo/UART 分支）：esp-at 的 UART1 默认开启 RTS 流控，建议在 AT 初始化序列开头补发 `AT+UART_CUR=115200,8,1,0,0`（见 [23-wiring.md](doc/20-design/23-wiring.md) §2）
 - ⚠️ `com/wifi_at.c` 的 HTTP keep-alive 修复（控制页按键不灵敏根因）**待烧录验证**，未提交
 - 📋 **板间链路 = SPI 单链路**（SDD V1.6 §3.7/§5.6，接线表 23-wiring.md V1.11 §9.1 + §9.3，详细设计 22-link-spi-design.md V1.6）：TC275 QSPI3 主机 ↔ C6 SPI2 从机（`spi_slave_hd`）+ P23.0 电平握手，LINK 段 SF 帧。**实物接线（五行 + 共地）与两侧固件代码均已完成，且 `USE_SPI_LINK` 已进 Debug/Release 两个 TASKING 配置**；IRQ 无外部上拉（高电平靠 TC275 片内上拉，`23 §9.3`）。**链路泵已按台架故障根因简化（2026-09-27）**：寄存器单读快照 + 消费端钳位、失联只由 `SF_ALIVE` 500 ms 判定、SEQ 越窗 8 帧重锁。**唯一未完成的主线 = 从未通电联调，G1 台架波形门禁未过**（验证 AURIX QSPI 无 CMD/ADDR 前导相位能否被 Espressif HD 从机解析，风险 R7）；G1 失败的退路代价已升高（删符号重编 + C6 重刷 esp-at，双侧动作）
-- ✅ **编码器测速已接入数据链（v0.2.1 / F03）**：`rt/encoder.c`（CPU1）用 GTM TIM0 八通道 TIEM 双边沿中断 + 软件 ×4 正交（该器件上 UDC 硬件正交计数不可用，见 23-wiring.md §8.3 的纠错），已挂进 `Cpu1_Main.c` 1 kHz 超循环；实测车速经 `mw/xcore` 编码器块出车：CPU0 状态回复在 `enc.alive` 时用实测速度替换命令回显（`Cpu0_Main.c`），CPU2 遥测填 `vMeasLeft/Right` 与 `odoSessionMm`（`Cpu2_Main.c`）。**固件与数据通路已闭合，仅 8 根编码器线待接**（方案 P33.0~7 ↔ X2-28~35，详见 23-wiring.md §8、SDD §5.1）；`vTargetL/R`、电量、`odoTotalMm` 等遥测字段仍按 SDD §6.3 留 0（对应 servo/ADC/DFlash 尚未落地）
+- ✅ **速度闭环已落地（2026-09-27 / F02，SDD V1.7 §5.2）**：新增 `rt/servo.c`（每侧 PI：前馈 + 抗饱和积分 ±30% duty + 输出钳位 ±1000；**编码器 `alive` 无效时整侧回退开环斜坡**——编码器线没接也能跑），`rt/motor_algo` 1 kHz 接入（目标斜坡 → servo → TB6612，急停/失联看门狗不变），控制台运动时有 1 Hz `SRV=` 行。**`g_encInvert` 判向从"纸面标定"转正**：运行时可写（`ENCODER_setInvert`）+ `0x70` 命令台架自动判向（CPU1 脉冲法，结果 `ENCCAL=` 行，**需四轮离地**，见 23-wiring.md §8.4）。**增益为待标定初值**，`motor_guard`（堵转/滑差/欠压）仍未做
+- ✅ **编码器测速已接入数据链（v0.2.1 / F03）**：`rt/encoder.c`（CPU1）用 GTM TIM0 八通道 TIEM 双边沿中断 + 软件 ×4 正交（该器件上 UDC 硬件正交计数不可用，见 23-wiring.md §8.3 的纠错），已挂进 `Cpu1_Main.c` 1 kHz 超循环；实测车速经 `mw/xcore` 编码器块出车：CPU0 状态回复在 `enc.alive` 时用实测速度替换命令回显（`Cpu0_Main.c`），CPU2 遥测填 `vMeasLeft/Right`、`odoSessionMm` 与 `vTargetL/R`（`Cpu2_Main.c`）。**固件与数据通路已闭合，仅 8 根编码器线待接**（方案 P33.0~7 ↔ X2-28~35，详见 23-wiring.md §8、SDD §5.1）；电量、`odoTotalMm` 等遥测字段仍按 SDD §6.3 留 0（对应 ADC/DFlash 尚未落地）
 - 📋 C6 侧自研固件在同级工程 `c6_car/`（审查修复未提交）
 - 📋 版本路线与量产里程碑：11-requirements.md 路线图（编码器闭环 → IMU → 毫米波雷达）对应 SDD §15 M0–M4
 

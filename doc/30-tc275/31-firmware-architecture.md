@@ -2,10 +2,10 @@
 
 > 文档编号 **31** · 域 TC275 · 状态：现状参考（描述当前代码） · 上级索引 [00-index.md](../00-index.md) · 操作指南见 [32-tc275-dev-guide.md](32-tc275-dev-guide.md)
 
-> **文档定位（重要）**：本文档描述**工作区里现在跑的这套代码**（esp-at + UART 链路、开环 PWM），用于排障、回归与理解现状。量产目标态的设计基准是 [21-software-design.md](../20-design/21-software-design.md)（SDD，当前 V1.6）——**两者不一致时以 SDD 为准**，本文不描述待实现内容。**读前先注意一件事**：UART 板间链路已于 2026-09-26 弃用（见下一条），所以本文 §5/§6/§8 的 UART/AT 通路描述的是"删掉 `USE_SPI_LINK` 才会编出来的那条分支"，不是当前构建产物。
+> **文档定位（重要）**：本文档描述**工作区里现在跑的这套代码**（esp-at + UART 链路、开环 PWM），用于排障、回归与理解现状。量产目标态的设计基准是 [21-software-design.md](../20-design/21-software-design.md)（SDD，当前 V1.8）——**两者不一致时以 SDD 为准**，本文不描述待实现内容。**读前先注意一件事**：UART 板间链路已于 2026-09-26 弃用（见下一条），所以本文 §5/§6/§8 的 UART/AT 通路描述的是"删掉 `USE_SPI_LINK` 才会编出来的那条分支"，不是当前构建产物。
 > **目录重排（2026-09-26）**：仓库已按 SDD §3.4 重排，本文下图的 `App/`、`Middleware/`、`Bsp/` 现对应 `app/`、`mw/`（xcore/proto/sf）+`com/`（link/spi_hal_pins/wifi_at）、`bsp/`；`encoder.c`/`motor_algo.c` 在 `rt/`。正文行文保留 demo 期目录名，按本映射读。
 > 本文唯一不可从代码推导、且已被 SDD 吸收的结论是 §3 的**中断向量表/优先级铁律**，权威版本见 **SDD §18**；本文不再维护该条。
-> 历史版本记录：V2.0 = 三核分区 + Wi-Fi 模块换为 ESP32-C6（esp-at）。板间链路已在 V1.2 决策改为 SPI（SDD §3.7），本文相关段落（§1/§5/§6/§8）仍是 UART 口径，属**demo 现状描述**——SPI 五行实物线已接好（2026-09-26），两侧 SPI 固件代码也已落地（TC275 侧 `com/`+`mw/sf/`；C6 侧 `c6_car` `22e15f2`），TC275 侧 IDE 构建链接闭合已达成（2026-09-26）。**2026-09-26 起 UART 板间链路弃用**：`USE_SPI_LINK` 定义进 Debug 与 Release 两个 TASKING 构建配置，本文 §1/§5/§6/§8 描述的 UART/AT 通路**不再被默认构建产出**（删掉该符号才编得出），只作 C6 调试控制台与 G1 失败的应急返修（`21 §5.6` 末条、`21 §18 C15`、`23 §2`）。**SPI 链路本身从未通电联调**，启用验证由 G1 把关（见 `22 §8`）。**V2.1（2026-09-26）** = 只加上述口径（本文档结构未动）：UART 段落自此是"删符号才编得出的分支"的描述，不再是默认构建产物。
+> 历史版本记录：**V2.3（2026-09-27）= CPU0/CPU1 硬件看门狗启用**（新增 `bsp/wdg.h`；CPU1 1 kHz 环与 CPU0 robot 任务 10 ms 分别喂狗，窗口 `REL=0xF800`≈0.3~0.5 s；SM/CPU2 看门狗有意仍关闭；FreeRTOS 栈溢出钩子改为打印 + 轮询泵串口 + 断喂复位，配套新增 `UART_flushPolling()`；详见 §6 与 SDD §7.2/§18 C8）；**V2.2（2026-09-27）= CPU1 速度闭环落地**（SDD §5.2 servo：`rt/servo.c` 每侧 PI + 抗饱和 + 编码器无效回退开环；`motor_algo` 改为『斜坡目标 → servo 出 duty』；`g_encInvert` 运行时可写 + `0x70` 台架自动判向 `ENCCAL=`；xcore 加 `dirCalib` 请求位；遥测 `vTargetL/R` 转 ✅）；V2.0 = 三核分区 + Wi-Fi 模块换为 ESP32-C6（esp-at）。板间链路已在 V1.2 决策改为 SPI（SDD §3.7），本文相关段落（§1/§5/§6/§8）仍是 UART 口径，属**demo 现状描述**——SPI 五行实物线已接好（2026-09-26），两侧 SPI 固件代码也已落地（TC275 侧 `com/`+`mw/sf/`；C6 侧 `c6_car` `22e15f2`），TC275 侧 IDE 构建链接闭合已达成（2026-09-26）。**2026-09-26 起 UART 板间链路弃用**：`USE_SPI_LINK` 定义进 Debug 与 Release 两个 TASKING 构建配置，本文 §1/§5/§6/§8 描述的 UART/AT 通路**不再被默认构建产出**（删掉该符号才编得出），只作 C6 调试控制台与 G1 失败的应急返修（`21 §5.6` 末条、`21 §18 C15`、`23 §2`）。**SPI 链路本身从未通电联调**，启用验证由 G1 把关（见 `22 §8`）。**V2.1（2026-09-26）** = 只加上述口径（本文档结构未动）：UART 段落自此是"删符号才编得出的分支"的描述，不再是默认构建产物。
 
 本文是信息型参考，按"查得到"组织；设计动机见文末「设计决策」。接线与引脚电气细节在 [23-wiring.md](../20-design/23-wiring.md)，产品需求在 [11-requirements.md](../10-product/11-requirements.md)。
 
@@ -14,7 +14,7 @@
 | 核 | 运行环境 | 职责 | 入口 |
 |---|---|---|---|
 | CPU0 | FreeRTOS（单核内核，仅此核跑调度器） | 控制任务：命令执行、安全状态机、状态发布、日志桥、控制台 UART、LED | Cpu0_Main.c → `core0_main` |
-| CPU1 | 裸机 1 kHz 超循环 | 电机算法：斜率限幅、失联看门狗、急停刹车，驱动 GTM/D24A；编码器×4 测速（TIEM 边沿中断 + 1 kHz 测速任务） | Cpu1_Main.c → `core1_main` |
+| CPU1 | 裸机 1 kHz 超循环 | 电机算法：目标斜坡 + **速度 PI 闭环**（`rt/servo`，编码器 alive 无效时回退开环）、失联看门狗、急停刹车，驱动 GTM/D24A；编码器×4 测速（TIEM 边沿中断 + 1 kHz 测速任务）+ `0x70` 台架自动判向 | Cpu1_Main.c → `core1_main` |
 | CPU2 | 裸机超循环 | ESP32-C6 AT 链路：softAP+TCP 服务、协议解码、HTTP 控制接口 | Cpu2_Main.c → `core2_main` |
 
 规则：**FreeRTOS API 只允许 CPU0 调用**（移植层绑定 CPU0：STM0 产生 tick、上下文切换中断、CCPN 屏蔽均只作用于 CPU0）。CPU1/CPU2 的时基来自 `Bsp/stime.c`（读 STM0 自由计数，unsigned 回绕安全）。
@@ -27,7 +27,8 @@
 ┌──────────────────────────────────────────────────────┐
 │ app/     robot.c/h      运动状态机·安全·心跳   (CPU0) │
 ├──────────────────────────────────────────────────────┤
-│ rt/      motor_algo.c/h  电机算法(斜率/看门狗) (CPU1) │
+│ rt/      motor_algo.c/h  电机任务(斜坡/看门狗/判向)   │
+│          servo.c/h   速度 PI×2（闭环，回退开环）(CPU1) │
 │          encoder.c/h GTM TIM 编码器×4        (CPU1)  │
 ├──────────────────────────────────────────────────────┤
 │ mw/proto/  protocol.c/h  协议解码(CPU2)/执行(CPU0)    │
@@ -73,10 +74,11 @@ ASCLIN0 中断（CPU0）：TX 优先级 8、RX 4、ER 12。FreeRTOS 内核中断
 |---|---|---|
 | 命令队列 (深 8) | CPU2 → CPU0 | 解码后的协议帧 `XcoreCmdMsg{cmd,len,data}`；满则丢弃并入日志 |
 | 电机目标 | CPU0 → CPU1 | 左右目标速度 -1000..+1000 + estop 位 + `seq` 计数（每 10 ms 递增，CPU1 据此判失联） |
-| 电机实际值 | CPU1 → 遥测 | 算法输出的左右侧速度（斜率后） |
+| 电机实际值 | CPU1 → 遥测 | 算法输出的左右侧 duty（percent×10，servo 闭环输出） |
 | 编码器实测 | CPU1 → 遥测 | `XCORE_encoderPublish/Read`（`XcoreEncoder` 快照）：percent×10（-1000..+1000，alive 时 CPU0 覆盖状态块 leftSpeed/rightSpeed）+ 物理域 mm/s 与左右侧里程 mm（CPU2 填 SF 遥测 `vMeasL/R`、`odoSession`）+ alive 位（500 ms 内有边沿）。另有 `XCORE_logi`：`XCORE_logu` 的带符号版（负轮速） |
 | 状态块 `ProtocolStatus` | CPU0 → CPU2 | robot 状态镜像，10 ms 刷新；CPU2 直接用于 0x40 应答与 HTTP JSON |
 | 急停旁路 | CPU2 置位 / CPU0 清除 | `XCORE_estopRequest()` 让 CPU1 **不等** 10 ms 控制拍直接刹车 |
+| 判向请求 | CPU0 置位 / CPU1 消费 | `XCORE_dirCalibRequest/Consume`：`0x70` 台架自动判向的跨核一位通道，结果走 `ENCCAL=` 日志行（23 §8.4） |
 | 日志环 (1 KB) | CPU1/CPU2 → CPU0 | 整行拷贝入环（满则整行丢弃），CPU0 控制任务 `XCORE_logService()` 出环打印 |
 
 ## 5. 数据流
@@ -94,7 +96,8 @@ PC 上位机 ──TCP:8080──►                              │ GET /api/.
         ├─ 心跳 100 ms 超时→停车
         ├─ FAULT/急停锁存
         └─ 左右轮目标 -100..+100 ──xcore(×10)──► [CPU1] motor_algo.c 1 kHz
-                斜率限幅(±2/ms) → 失联 150 ms 看门狗 → estop 刹车
+                斜坡(±2/ms) → rt/servo 速度PI(编码器无效回退开环) → duty
+                失联 150 ms 看门狗 → estop 刹车（并中止判向脉冲）
                                                      ▼
                                     motor.c → GTM ATOM PWM 20kHz
                                     D24A 四路驱动板（J4=A/B · J6=C/D）→ 4 电机
@@ -144,6 +147,7 @@ ATE0 → AT+CWMODE=2 → AT+CWSAP="AURIX-SmartDrive","12345678",11,3
 | 0x30 | RESET | — | 复位状态机 |
 | 0x31 | CLEAR_FAULT | — | 解除 FAULT（CPU0 同时清急停旁路） |
 | 0x32 | EMERGENCY_STOP | — | 急停：命令**先入队**（CPU0 锁存 FAULT），**随后**置旁路位（CPU1 当拍刹车）——该顺序防止控制拍在入队前清掉旁路 |
+| 0x70 | DPT_CAL_DIR | — | **台架判向**（V2.2 新增）：CPU0 置 `XCORE_dirCalibRequest`，CPU1 逐轮 +12% duty 脉冲 250 ms 自动翻转 `g_encInvert`，结果 `ENCCAL=` 日志行；**四轮必须离地**（≈1.4 s，急停即中止）。SF 侧走 CMD/DPT 通道由 `link.c` 白名单转发（22 §5.5），手机 UI 无此按钮 |
 
 ### 7.3 状态应答（TC275 → 主机），CMD = 0x40，LEN = 6
 
@@ -207,7 +211,7 @@ A 相进偶数通道、B 相进奇数通道，八通道全部配 TIEM 双边沿 
 C6 只做 AT 透明 TCP 桥，不跑业务。好处：换任何 AT 模组代码零改动；控制逻辑与运动控制同处一个实时域，心跳超时、急停的执行不依赖协议栈之上再通信一次。代价：C6 无法独立提供页面，TC275 要处理 HTTP 文本（本实现只支持单行 GET 请求，够用且可控）。
 
 **为什么 V2.0 仍是开环 PWM，不上 PID？**
-没有编码器反馈，PID 无被控量可用。状态机输出的“速度”实际是占空比期望值；加编码器后在 CPU1 的 motor_algo 内替换实现即可，协议、xcore 与接线不变——这正是把算法独立成核内模块的原因之一。V1.1 编码器硬件路线已定稿（MG310 内置 AB 编码器 → GTM0 TIM UDC 硬件计数，引脚映射见 §9.1 与 23-wiring.md §8），软件侧只替换 motor_algo 的反馈量来源。
+**【2026-09-27 已落地】**编码器就绪后，闭环在 `rt/servo`（每侧 PI + 抗饱和 + 编码器 alive 无效回退开环）内实现、由 motor_algo 调用——协议、xcore 与接线确实未动，只新增了 `dirCalib` 请求位；增益仍待台架整定。原决策背景：没有编码器反馈，PID 无被控量可用。状态机输出的“速度”实际是占空比期望值；加编码器后在 CPU1 的 motor_algo 内替换实现即可，协议、xcore 与接线不变——这正是把算法独立成核内模块的原因之一。V1.1 编码器硬件路线已定稿（MG310 内置 AB 编码器 → GTM0 TIM UDC 硬件计数，引脚映射见 §9.1 与 23-wiring.md §8），软件侧只替换 motor_algo 的反馈量来源。
 
 **为什么心跳 50 ms / 超时 100 ms？**
 容忍 1 次丢帧不误停车，2 次丢失（100 ms）必须停车——遥控车上电机制响应上限 0.1 s。HTTP 模式由页面 JS 以 50 ms 轮询 `/api/heartbeat` 实现，与二进制协议 `0x21` 语义一致。
@@ -221,4 +225,6 @@ C6 只做 AT 透明 TCP 桥，不跑业务。好处：换任何 AT 模组代码�
 **为什么 CPU1/CPU2 的调试打印不直接走 ASCLIN0？**
 iLLD ASC 驱动的软件 FIFO 与临界区只在属主核内互斥；两个核并发调用会踩 FIFO 状态。因此核间日志统一走 xcore 日志环，由属主 CPU0 落串口。
 
-**看门狗现状**：`Cpu*_Main.c` 目前显式关闭了 CPU/安全看门狗（调试期行为），量产化必须重新启用并在各核循环喂狗——这是 11-requirements.md F09 的已知未完成项，目标态设计见 SDD §7.2 与 §18 C8。
+**看门狗现状**（2026-09-27 起）：**CPU0/CPU1 的 CPU 看门狗已启用**——`bsp/wdg.h` 提供 `WDG_enableCpu()`（改重载值 `REL=0xF800`，≈0.3~0.5 s）与 `WDG_serviceCpu()`，喂狗点分别为 CPU1 的 1 kHz 环（`rt/motor_algo.c`）与 CPU0 的 robot 任务（10 ms）。SM(安全)与 CPU2 看门狗**有意保持关闭**，理由见 SDD §7.2 现状表。
+两条约束：① 新增核/新循环必须自带喂狗点，否则该核在窗口内被复位；② 喂狗只能用 `bsp/wdg.h` 的 clear+set 平衡对——`ENDINIT` 是饱和计数器，纯 set 的 `IfxScuWdt_serviceCpuWatchdog()` 累加 16 次后 ENDINIT 再也解不开，Flash/DFlash 解锁会静默卡死（SDD §18 C8）。
+调试期挂 TASKING 调试器时 TriCore OCD 会挂起看门狗，故启用不影响 flash 调试；脱机跑才是真复位。

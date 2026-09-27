@@ -3,9 +3,9 @@
 | 项 | 内容 |
 |---|---|
 | 文档编号 | **21**（域：设计·硬件）· **`doc/` 唯一设计基准** · 上级索引 [00-index.md](../00-index.md) |
-| 文档版本 | **V1.6**（V1.5 + §3.7/§5.6/§6.1a/§7.1/§16/§17/§18 C14：**链路泵按台架故障根因简化**——寄存器快照从"连读两次比对"改为**单读 + 消费端钳位容错**，失联判定**只由 `SF_ALIVE` 500 ms** 承担，移除 READY 沿的 `RESET_LINK` 重同步握手，SEQ 改"连续 8 帧越窗即丢窗重锁"；依据 `com/link.c` 提交 `ae10aac` 与 [22 V1.6](22-link-spi-design.md) §4.2/§5.4）（V1.5 = V1.4 + §3.7/§5.6 末条/§16 R7/§17：**UART 板间链路弃用**，`USE_SPI_LINK` 已定义进两个 TASKING 构建配置，SPI 为唯一量产链路）（V1.4 = §3.7/§16 R11/**§18 新增 C14**：实物确认两板之间所有连线均为杜邦线直连、**不含任何外部元件**，IRQ 高电平仅由 TC275 片内上拉提供，据此给出写代码时的三条硬约束）（V1.2c + §3.4 目标态目录落地：仓库由 demo 布局重排为 `app/ rt/ com/ mw/ bsp/`，`Bsp/encoder.c` 随之迁至 `rt/encoder.c`） |
+| 文档版本 | **V1.8**（V1.7 + §7.2/§18 C8：**评估报告 §6 两条 🔴 落地——跑飞自恢复 + 栈溢出上报**——CPU0/CPU1 的 CPU 看门狗启用并周期喂狗（新增 `bsp/wdg.h`，平衡 ENDINIT clear+set 喂狗；CPU0=robot 任务 10 ms、CPU1=`MOTOR_ALGO_run` 1 kHz；REL=0xF800≈0.3~0.5 s，换算锚点：Infineon 官方示例 Watchdog_1_KIT_TC275_LK 的 0xE000≈1.3 s），`vApplicationStackOverflowHook` 从静默空转变为"串口上报（`UART_flushPolling` 轮询泵）→ 停喂"，由 CPU0 看门狗复位整机、回电机停止的安全启动态；SM 看门狗与 CPU2 看门狗**有意保持关闭**（理由见 C8），属 §7.2 量产链项）（V1.7 = V1.6 + §5.1/§5.2/§6.3/§17：**F02 速度闭环落地 + 判向标定从"空操作"转正**——新增 `rt/servo`（每侧 PI：前馈 + 抗饱和积分限幅 ±30% duty + 输出钳位 ±1000，编码器 alive 无效时回退开环斜坡），`rt/motor_algo` 1 kHz 接入；`g_encInvert` 改运行时可写并新增 **0x70 台架自动判向**（CPU1 脉冲法，`ENCCAL=` 结果行，23 §8.4 步骤 2 的自动化）；遥测 `vTargetL/R` 转 ✅（percent×10 经 `ENCODER_FULL_SCALE_MM_S` 换算 mm/s）。增益/前馈为待台架标定初值；motor_guard（堵转/滑差/欠压/STBY）仍未做）（V1.6 = V1.5 + §3.7/§5.6/§6.1a/§7.1/§16/§17/§18 C14：**链路泵按台架故障根因简化**——寄存器快照从"连读两次比对"改为**单读 + 消费端钳位容错**，失联判定**只由 `SF_ALIVE` 500 ms** 承担，移除 READY 沿的 `RESET_LINK` 重同步握手，SEQ 改"连续 8 帧越窗即丢窗重锁"；依据 `com/link.c` 提交 `ae10aac` 与 [22 V1.6](22-link-spi-design.md) §4.2/§5.4）（V1.5 = V1.4 + §3.7/§5.6 末条/§16 R7/§17：**UART 板间链路弃用**，`USE_SPI_LINK` 已定义进两个 TASKING 构建配置，SPI 为唯一量产链路）（V1.4 = §3.7/§16 R11/**§18 新增 C14**：实物确认两板之间所有连线均为杜邦线直连、**不含任何外部元件**，IRQ 高电平仅由 TC275 片内上拉提供，据此给出写代码时的三条硬约束）（V1.2c + §3.4 目标态目录落地：仓库由 demo 布局重排为 `app/ rt/ com/ mw/ bsp/`，`Bsp/encoder.c` 随之迁至 `rt/encoder.c`） |
 | 日期 | 2026-09-27 |
-| 修订记录 | V1.0 初版；V1.1 新增 §3.6 多核 OS 形态选型（SMP/AMP 决策为 AMP 及演进条件）、§3.7 板间通信方式选型（UART/SPI/TWAI 对比，当时选定 UART @2 Mbps）及 SPI 主从角色分配（TC275 主机 / C6 从机 + CMD_RDY 握手）；**V1.2 板间链路换向：V1.0 主链路改为 SPI（TC275 QSPI3 主机 ↔ C6 SPI2 从机 `spi_slave_hd`，1 MHz 起 / 5 MHz 量产基线），UART 降级为调试与回退通道；LINK 段帧协议改为新定 SF 帧，手机 WS 段仍用 v2 帧；§1.1/§1.3/§2.2/§3.2/§3.4/§3.5/§3.7/§5.6/§6/§12/§14/§15/§16/§17 同步。详细设计、接线表、验证门禁与两固件改动清单见 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。**V1.2 同时确立本文档为 `doc/` 唯一设计基准**：新增 §18 工程级实现约束（吸收 31-firmware-architecture.md 的实测坑），`ux-performance-plan.md` 结论全部并入本文（§3.5/§11/§14），C6 固件详细设计移出本仓库、由 `c6_car/doc/` 承载**；**V1.2a：TC275 侧 SPI 链路代码落地后回写**——§3.4 加落地进度注记（目标态目录 vs 当前 `Middleware/` 布局）、§3.5 命令流补 auth 未落地、§3.7/§5.6 握手改为 **P23.0 电平轮询**（原稿边沿中断在 TC275 上做不出来）、§16 R11 口径随之调整、§17 映射表标出已落地文件、§18 新增 **C9（P23.x 无 GPIO 边沿中断）** 与 **C10（`RDDMA`/`WRDMA` 突发必须用 `INT0`/`WR_END` 收尾，线上命令字节以 `spi_ll.h` 为准）**，C2 登记 QSPI3 优先级 6/9/10。依据见 [22 §2 E11/E12](../20-design/22-link-spi-design.md)**；**V1.2b：C6 已烧录固件后按契约完善 TC275 侧的回写**——SF 常量表以从机为真源更正三处（`FLAGS bit1=FRAG_END` 非 ACK、OTA CID 补 `0x35 ABORT`、`ERRSTAT` 位图整张重写，原 V1.2 值系臆造，22 §2 E13）；§6.1c 映射表按"五条 CMD 通道形状不统一"重写并落**三层白名单分派**规则；§6.3 遥测表补**逐字节偏移 + 38 B 定长硬约束 + 当前有源/填 0 字段**；§6.3 遥测表补**逐字节偏移 + 38 B 定长硬约束 + 当前有源/填 0 字段**；22 §4.3 补 `SF_REG_GEN(24)` 寄存器与 `GEN` 命令表、本文 §5.6 补 `LINK_gen/LINK_setClock`（含 `CLOCK_SET` payload 单位 MHz、回执跨两次从机任务故必须带超时，22 §2 E14）；§18 新增 **C11（跨侧常量整表比对 + 编译对方源码的测试）**、**C12（定长载荷短一点=全丢）**、**C13（不得假设首字节是命令码）**；**V1.3：§3.4 目标态目录落地（M1 目录项）**——仓库由 demo 布局（`App/ Middleware/ Bsp/`）重排为 `app/ rt/ com/ mw/ bsp/`，全部内部 include 改为工程根模块限定路径（`"com/link.h"`、`"mw/sf/sf_frame.h"`…），`.cproject` 四个构建配置 include 路径同步；主机单测回归全绿（SF 2855 断言 + 遥测跨侧 154 断言）；§3.4 注记、§5.1、§6.1c、§6.3、§15、§16、§17、§18 C2 路径同步。**同轮达成首次 TASKING IDE 构建链接闭合**（Debug 配置 0 错误，QSPI+DMA 链接证实闭合），构建暴露并修复 `rt/encoder.c`/`encoder.h` 的 `int32`→`sint32` 类型错误（该文件此前从未被 TriCore 编译过，依据见 [22 §8 执行状态](22-link-spi-design.md)）；**V1.4：实物确认板间连线全部为杜邦线直连、不含任何外部元件**——新增 §18 **C14**，§3.7 接线前言与线注、§16 R11 口径随之更正，电气形态真源落在 [23 §9.3](23-wiring.md)；**V1.5：UART 板间链路弃用**（用户决策）——`.cproject` 的 **Debug 与 Release（TASKING）两个配置都定义 `USE_SPI_LINK`**，`Cpu2_Main.c` 的 AT/UART 分支不再是任何配置的默认，`com/wifi_at.c` 的定位降为"G1 失败应急返修 + C6 调试控制台"；§3.7、§5.6 末条、§17 同步，§16 R7 的退路②随之改写（回退 UART 需删符号重编 + 重刷 esp-at，代价一次刷机）。**G1 波形门禁仍未过**：本决策只取消 UART 的默认地位，不改变"SPI 波形兼容性尚未经台架证明"这一事实；**V1.6：链路泵简化（2026-09-27，`ae10aac`，台架"无法连接"类故障的主机侧根因修复）**——① §3.7/§5.6：寄存器快照从"连读两次取相同值 + 重试 3 次"改为**单读 + 消费端钳位容错**（从机每段完成/10 ms ALIVE 跳变都会即时改写寄存器，链路越忙双读比对越容易失败并升级成失联急停——"空载正常、满载断连"的根因；READY 魔数不对改为**静默 LINK_DOWN**，下周期好读即恢复，`RX_ROOM` 新增 1024 钳位）；② §5.6/§7.1：**失联判定只由 `SF_ALIVE` 500 ms 承担**，事务失败/CRC/魔数错一律只计数不判死，电机停止仍由 CPU0 的 100 ms 心跳看门狗兜底；③ §6.1a：SF_Parser 新增 **SEQ 越窗重锁**——连续 `SF_SEQ_RELOCK_RUN`(8) 帧越窗即丢窗、下一帧重锁（对端复位后最坏拒收 8 帧，原为最多 224 帧 ≈7.5 s），`test_sf` 新增 `test_seq_relock`，帧层断言升至 **2873**；④ §5.6：**移除 READY 沿的 `GEN RESET_LINK` 重同步握手**（从机不回执时泵被无限占住——状态 READY 却永不行数据事务、遥测队列静默溢出，"复位后无法连接"的第二根因），READY 沿仅 `SF_parserInit` 重锁 RX，本机 TX SEQ 保持连续，`LINK_gen` 保留作台架/诊断入口 |
+| 修订记录 | V1.0 初版；V1.1 新增 §3.6 多核 OS 形态选型（SMP/AMP 决策为 AMP 及演进条件）、§3.7 板间通信方式选型（UART/SPI/TWAI 对比，当时选定 UART @2 Mbps）及 SPI 主从角色分配（TC275 主机 / C6 从机 + CMD_RDY 握手）；**V1.2 板间链路换向：V1.0 主链路改为 SPI（TC275 QSPI3 主机 ↔ C6 SPI2 从机 `spi_slave_hd`，1 MHz 起 / 5 MHz 量产基线），UART 降级为调试与回退通道；LINK 段帧协议改为新定 SF 帧，手机 WS 段仍用 v2 帧；§1.1/§1.3/§2.2/§3.2/§3.4/§3.5/§3.7/§5.6/§6/§12/§14/§15/§16/§17 同步。详细设计、接线表、验证门禁与两固件改动清单见 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。**V1.2 同时确立本文档为 `doc/` 唯一设计基准**：新增 §18 工程级实现约束（吸收 31-firmware-architecture.md 的实测坑），`ux-performance-plan.md` 结论全部并入本文（§3.5/§11/§14），C6 固件详细设计移出本仓库、由 `c6_car/doc/` 承载**；**V1.2a：TC275 侧 SPI 链路代码落地后回写**——§3.4 加落地进度注记（目标态目录 vs 当前 `Middleware/` 布局）、§3.5 命令流补 auth 未落地、§3.7/§5.6 握手改为 **P23.0 电平轮询**（原稿边沿中断在 TC275 上做不出来）、§16 R11 口径随之调整、§17 映射表标出已落地文件、§18 新增 **C9（P23.x 无 GPIO 边沿中断）** 与 **C10（`RDDMA`/`WRDMA` 突发必须用 `INT0`/`WR_END` 收尾，线上命令字节以 `spi_ll.h` 为准）**，C2 登记 QSPI3 优先级 6/9/10。依据见 [22 §2 E11/E12](../20-design/22-link-spi-design.md)**；**V1.2b：C6 已烧录固件后按契约完善 TC275 侧的回写**——SF 常量表以从机为真源更正三处（`FLAGS bit1=FRAG_END` 非 ACK、OTA CID 补 `0x35 ABORT`、`ERRSTAT` 位图整张重写，原 V1.2 值系臆造，22 §2 E13）；§6.1c 映射表按"五条 CMD 通道形状不统一"重写并落**三层白名单分派**规则；§6.3 遥测表补**逐字节偏移 + 38 B 定长硬约束 + 当前有源/填 0 字段**；§6.3 遥测表补**逐字节偏移 + 38 B 定长硬约束 + 当前有源/填 0 字段**；22 §4.3 补 `SF_REG_GEN(24)` 寄存器与 `GEN` 命令表、本文 §5.6 补 `LINK_gen/LINK_setClock`（含 `CLOCK_SET` payload 单位 MHz、回执跨两次从机任务故必须带超时，22 §2 E14）；§18 新增 **C11（跨侧常量整表比对 + 编译对方源码的测试）**、**C12（定长载荷短一点=全丢）**、**C13（不得假设首字节是命令码）**；**V1.3：§3.4 目标态目录落地（M1 目录项）**——仓库由 demo 布局（`App/ Middleware/ Bsp/`）重排为 `app/ rt/ com/ mw/ bsp/`，全部内部 include 改为工程根模块限定路径（`"com/link.h"`、`"mw/sf/sf_frame.h"`…），`.cproject` 四个构建配置 include 路径同步；主机单测回归全绿（SF 2855 断言 + 遥测跨侧 154 断言）；§3.4 注记、§5.1、§6.1c、§6.3、§15、§16、§17、§18 C2 路径同步。**同轮达成首次 TASKING IDE 构建链接闭合**（Debug 配置 0 错误，QSPI+DMA 链接证实闭合），构建暴露并修复 `rt/encoder.c`/`encoder.h` 的 `int32`→`sint32` 类型错误（该文件此前从未被 TriCore 编译过，依据见 [22 §8 执行状态](22-link-spi-design.md)）；**V1.4：实物确认板间连线全部为杜邦线直连、不含任何外部元件**——新增 §18 **C14**，§3.7 接线前言与线注、§16 R11 口径随之更正，电气形态真源落在 [23 §9.3](23-wiring.md)；**V1.5：UART 板间链路弃用**（用户决策）——`.cproject` 的 **Debug 与 Release（TASKING）两个配置都定义 `USE_SPI_LINK`**，`Cpu2_Main.c` 的 AT/UART 分支不再是任何配置的默认，`com/wifi_at.c` 的定位降为"G1 失败应急返修 + C6 调试控制台"；§3.7、§5.6 末条、§17 同步，§16 R7 的退路②随之改写（回退 UART 需删符号重编 + 重刷 esp-at，代价一次刷机）。**G1 波形门禁仍未过**：本决策只取消 UART 的默认地位，不改变"SPI 波形兼容性尚未经台架证明"这一事实；**V1.6：链路泵简化（2026-09-27，`ae10aac`，台架"无法连接"类故障的主机侧根因修复）**——① §3.7/§5.6：寄存器快照从"连读两次取相同值 + 重试 3 次"改为**单读 + 消费端钳位容错**（从机每段完成/10 ms ALIVE 跳变都会即时改写寄存器，链路越忙双读比对越容易失败并升级成失联急停——"空载正常、满载断连"的根因；READY 魔数不对改为**静默 LINK_DOWN**，下周期好读即恢复，`RX_ROOM` 新增 1024 钳位）；② §5.6/§7.1：**失联判定只由 `SF_ALIVE` 500 ms 承担**，事务失败/CRC/魔数错一律只计数不判死，电机停止仍由 CPU0 的 100 ms 心跳看门狗兜底；③ §6.1a：SF_Parser 新增 **SEQ 越窗重锁**——连续 `SF_SEQ_RELOCK_RUN`(8) 帧越窗即丢窗、下一帧重锁（对端复位后最坏拒收 8 帧，原为最多 224 帧 ≈7.5 s），`test_sf` 新增 `test_seq_relock`，帧层断言升至 **2873**；④ §5.6：**移除 READY 沿的 `GEN RESET_LINK` 重同步握手**（从机不回执时泵被无限占住——状态 READY 却永不行数据事务、遥测队列静默溢出，"复位后无法连接"的第二根因），READY 沿仅 `SF_parserInit` 重锁 RX，本机 TX SEQ 保持连续，`LINK_gen` 保留作台架/诊断入口；**V1.7：F02 速度闭环 + 判向标定转正（2026-09-27）**——① §5.2：**新增 `rt/servo`**（每侧 PI，SDD §5.2 控制结构的落地：前馈 `FF_GAIN` + `Kp` + 抗饱和积分（限幅 ±30% duty）+ 输出钳位 ±1000 与输出死区；**编码器 `alive` 无效时整侧回退开环斜坡并清积分**——这是闭环能在 8 根编码器线尚未接线时就安全上车的原因）；`rt/motor_algo` 演进为任务属主：目标斜坡（单速率 `MAX_STEP`，双斜率参数待配置系统）→ servo 出 duty → BSP；急停/150 ms 失联看门狗/刹车语义不变；新增 1 Hz `SRV=` 台架行（目标/实测/duty，仅供运动时输出）。增益 `Kp=0.8/Ki=0.01/ms/FF=1.0` 为**待标定初值**（§15.3 台架整定，不许在无数据时改）。② §5.1：`g_encInvert` 从 const 全 +1 的"纸面标定"转正为**运行时可写**（`ENCODER_setInvert`，CPU1 属主），并新增 **`0x70` 台架自动判向**：CPU0 `XCORE_dirCalibRequest` → CPU1 逐轮 +12% duty 脉冲 250 ms、按计数符号翻转 `g_encInvert`（23 §8.4 步骤 2 的自动化 = §15.3 产测自动判向的前身；**轮子必须离地**，结果 `ENCCAL=` 行，急停即中止）；xcore 相应加 `dirCalib` 请求位（31 §4）。③ §6.3：`vTargetL/R` 转 ✅——CPU0 目标（percent×10）经 `ENCODER_FULL_SCALE_MM_S` 换算成 mm/s，与 `vMeas` 共用同一标定常数（vTarget 是"被要求跟的速度"，servo 闭环的作用对象，不再是另一个单位的谎言）。④ §17：`rt/motor_algo 演进 servo` 完成拆分的第一半（`motor_guard` 堵转/滑差/欠压/STBY 仍未做）。验证：`rt/servo`、`rt/motor_algo`、`mw/xcore`、`mw/proto`、`Cpu0/Cpu2_Main` 过主机 gcc `-Wall -Wextra -Werror`（桩）；SF 2873 + 遥测 116 断言回归全绿；闭环增益与判向结果**待台架**；**V1.8：跑飞自恢复 + 栈溢出上报（2026-09-27，[50-tech-assessment.md](../50-tech-assessment.md) §6 两条 🔴 落地）**——§7.2/§18 C8：**CPU0/CPU1 硬件看门狗启用**（新增 header-only `bsp/wdg.h`，`WDG_enableCpu`/`WDG_serviceCpu`；CPU1 在 1 kHz 环每圈喂、CPU0 robot 任务 10 ms 喂；窗口 `REL=0xF800`≈0.3~0.5 s，锚点为官方 Infineon `Watchdog_1_KIT_TC275_LK` 的 `0xE000`≈1.3 s 线性换算，台架实测后收紧到 §7.1 目标）；栈溢出钩子从静默 spin 改为**上报 + 主动断喂复位**（`UART_println`→`UART_flushPolling` 轮询泵 TX→`__disable` 冻结现场→空转待 CPU0 WDT 复位）；**SM 与 CPU2 看门狗有意保留关闭并各自写明理由**（SM=§7.2 量产权项；CPU2"只复位故障核"需 SMU 路由，现在开只会整机复位）；§18 C8 改写为现状 + **ENDINIT 饱和计数铁律**（喂狗必须走 `bsp/wdg.h` 的 clear+set 平衡对，纯 `IfxScuWdt_serviceCpuWatchdog()` 每次给饱和计数器 +1，16 次后 ENDINIT 再也解不开——量产 §9 OTA/Flash 解锁会静默卡死）。本机未过 TASKING 编译，IDE 构建与台架复位窗口实测为遗留项 |
 | 产品定位 | 从 **demo（硬件调通验证）** 升级为 **可商业化量产** 的智能遥控底盘平台 |
 | 硬件平台 | TC275（AURIX 三核 200 MHz，2×2 MB PFlash 双 bank，128 KB DFlash0 + 64 KB DFlash1）+ ESP32-C6（Wi-Fi 6 + BLE 5，512 KB SRAM，8 MB flash）+ 2×TB6612 + **4× 直流减速电机（带霍尔编码器，A/B 正交输出，预留 C/Index）** |
 | 上游文档 | **本文档是 `doc/` 的设计基准**，其余文档按下列定位引用：[22-link-spi-design.md](../20-design/22-link-spi-design.md)（板间 SPI 链路详细设计，V1.2 决策来源，本文 §3.7/§5.6/§6.1a 的展开）、[23-wiring.md](../20-design/23-wiring.md)（引脚与接线真源）、[11-requirements.md](../10-product/11-requirements.md)（产品需求层，V1.2 起与本文口径对齐）、[12-demo-evaluation.md](../10-product/12-demo-evaluation.md)（demo 问题基线，其 P0/P1 已作为架构约束吸收进本文，不再逐条重复）、[31-firmware-architecture.md](../30-tc275/31-firmware-architecture.md)（**demo 代码现状参考**，量产目标态以本文为准；其唯一不可推导的结论已迁入本文 §18）。历史文档《ux-performance-plan》《esp32c6-fw-design/coding-plan》已删除：前者结论并入本文 §3.5/§11/§14，后者由 `c6_car/doc/` 取代 |
@@ -149,6 +149,7 @@ myCar-mp/
 │   ├── proto/               # v2 帧编解码（手机 WS 段，§6.1b）
 │   └── log/                 # 跨核日志环（继承 demo 设计，加溢出统计）
 ├── bsp/                     # 板级：pwm_motor / enc_pins / adc_batt / stby / led / button / uart_dbg
+│                            #   已落地额外有 `wdg.h`（header-only CPU 看门狗助手，§7.2/§18 C8；`rt/timebase` 落地后由其承担调用）
 ├── Configurations/          # FreeRTOSConfig.h（量产版：看门狗/栈检查/断言全开）
 └── test/                    # 主机端单元测试（Unity），CI 执行
 ```
@@ -313,7 +314,7 @@ typedef struct {                 /* 每页 = 头(16B) + 载荷 + CRC32 */
   - `ENCODER_getOdometer(uint32 m[2])`；`ENCODER_getRawCounts(int32 c[4])`（产测判向用）；
   - `ENCODER_isAlive()` —— 500 ms 窗口内有边沿即 alive；`ENCODER_task()` 在 1 kHz 算法环内运行，经 `ENCODER_publish()` → `XCORE_encoderPublish` 一次发布**两个单位域**：实测速度 percent×10（alive 时 CPU0 用它覆盖状态块 leftSpeed/rightSpeed）+ 物理域 mm/s 与左右侧里程 mm（CPU2 取用填遥测 `vMeasL/R`、`odoSession`，§6.3，2026-09-27 起生效）。
 - **量产增量（本仓库未含）**：`ENCODER_selfCheck()`（静止漂移 + 单侧脉冲注入比对）、`ERR_ENC_DEAD` → `motor_guard` 安全态联动、速度系数标定写入 DFlash（§15.3）。
-- **关键行为**：计数 32 位累加（ISR 单写者）；判向符号表 `g_encInvert[4]` 默认全 `+1`，**接线后台架判向后修正**（23-wiring §8.4，即产测自动判向的手动版）。
+- **关键行为**：计数 32 位累加（ISR 单写者）；判向符号表 `g_encInvert[4]` 默认全 `+1`，**运行时可写**（`ENCODER_setInvert`，CPU1 属主，ISR 即时生效）——台架判向走 **`0x70` 自动判向**（CPU1 逐轮 +12% duty 脉冲 250 ms，按计数符号翻转符号表，结果 `ENCCAL=` 日志行，急停即中止；**轮子必须离地**，见 23-wiring §8.4 步骤 2 的自动化版，§15.3 产测自动判向的前身）。
 - **失败行为（量产）**：电机通电而对应编码器计数恒 0（500 ms）→ 上报 `ERR_ENC_DEAD` → `motor_guard` 进入安全态。
 
 ### 5.2 rt/servo —— 闭环速度伺服（替代 demo motor_algo.c）
@@ -337,6 +338,8 @@ typedef struct {                 /* 每页 = 头(16B) + 载荷 + CRC32 */
   - 欠压：`adc_batt` 低于警告阈值 → 目标全局限幅 50%；低于临界 → 受控减速停车 + `ERR_BATT_LOW`（区别于急停的立即刹车）；
   - **STBY 硬线**：`bsp/stby` 独占控制 TB6612 STBY，任何 `ERR_STALL/ERR_BATT_CRIT/急停/看门狗复位路径` 直接拉低——与软件 PWM 形成双通道断电。
 - **失败行为**：目标流 E2E 失效或 150 ms 无更新（继承 demo 看门狗）→ 目标置零减速停车。
+
+> **落地状态（2026-09-27，V1.7）**：**闭环本体已落地**——`rt/servo.c/.h`（每侧 PI：前馈 + Kp + 抗饱和积分限幅 ±30% duty、输出钳位 ±1000 + 死区 0.5%、`ENCODER_getSpeeds` 换为 xcore 编码器快照的 percent×10 域）+ `rt/motor_algo.c` 接入（目标斜坡 → servo → BSP，急停/失联看门狗语义不变，新增 1 Hz `SRV=` 台架行）。与上图的两处**诚实偏差**：① 目标域暂为 percent×10（§11 物理运动学未标定，CPU0 只产百分比），mm/s 仅经 `ENCODER_FULL_SCALE_MM_S` 出现在遥测；② 增益 `Kp=0.8 / Ki=0.01/ms / FF_GAIN=1.0` 是"近似线性被控对象"的**待标定初值**，台架按 `SRV=` 行整定（§15.3）。**闭环安全次序（硬性门禁）**：首次闭环前必须先执行 §5.1 的 `0x70` 自动判向并核对 `ENCCAL=` 结果——某轮符号错的闭环是**正反馈**（越推越快），判向先于闭环，不是建议。**未做**：motor_guard 全部保护项（堵转/滑差/欠压/STBY 硬线）、双斜率两参数、产测在线整定与回存。
 
 ### 5.3 app/mission —— 运行模式状态机（CPU0，替代并扩展 robot.c）
 
@@ -451,7 +454,7 @@ FLAGS: bit0=FRAG(段内后续还有分片)  bit1=FRAG_END(本帧末片)  bit2..7
 | 4 | uptime | u32 | 运行时间 ms | ✅ |
 | 8 | state | u8 | mission 状态（§6.2 状态码） | ✅ |
 | 9 | faultCode | u16 | 活动最高级错误 | ✅ |
-| 11 | vTarget L/R | i16 ×2 | mm/s，目标 | ⚠️ 填 0：待 §5.2 伺服 |
+| 11 | vTarget L/R | i16 ×2 | mm/s，目标 | ✅（V1.7）：CPU0 目标 percent×10 经 `ENCODER_FULL_SCALE_MM_S` 换算，与 `vMeas` 共用同一标定常数（伺服闭环的作用对象） |
 | 15 | vMeas L/R | i16 ×2 | mm/s，实测 | ✅ CPU1 编码器（§5.1）经 xcore 物理域 |
 | 19 | battery_mV | u16 | 实测电压 | ⚠️ 填 0：无 ADC 通道 |
 | 21 | battPct | u8 | 估算电量 | ⚠️ 同上 |
@@ -496,6 +499,8 @@ FLAGS: bit0=FRAG(段内后续还有分片)  bit1=FRAG_END(本帧末片)  bit2..7
 | 5V 掉电/电压跌落 | EVRC brownout + ADC | TC275 复位至安全态；C6 brownout 自保护 | 硬件级 |
 | PFlash 位翻转 | 整 bank CRC（POST）+ 常数段 CRC（RUNST） | 拒绝启动/进入 FAULT | 上电 / 10 s 周期 |
 
+> **V1.8 口径更正（本表前两行）**：CPU0/CPU1 看门狗现已启用，故"硬复位"这条路径**已经存在**（≈0.3~0.5 s，非 ≤200 ms，见 §7.2）；而"复位期间 STBY 上电默认拉低 → 电机断电"这一假设**与实物不符**——D24A 的 STBY 由跳线接板载 3300mil 常使能（[23 §9.3](23-wiring.md)），复位期间 MCU 引脚浮空、TB6612 输入行为未逐项核实。因此**复位是否等于电机断电尚未被证明**，是 §7.2 列出的台架检查项；真正的"许可关闭"要等 STBY 硬线化（§17 未做项）。
+
 ### 7.2 看门狗链（吸收并关闭评估报告 P0-4）
 
 ```
@@ -506,6 +511,23 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 ```
 
 调试构建用 `DEBUG_WATCHDOG=0` 统一关闭（避免量产配置漂移，评估报告 P0-4 建议）。
+
+> 该开关**尚未实现**，且 V1.8 的落地选择与之相反：**Debug 与 Release 都启用 CPU0/CPU1 看门狗**，调试期靠 TriCore OCD 在 halt 时挂起看门狗（不是关狗）来避免误咬。量产前若补 `DEBUG_WATCHDOG` 宏，必须同时保证"Release 强制 =1、不可配置漂移"，否则等于把这条底线又撤掉。
+
+**demo 现状（V1.8，2026-09-27）**——上面三级链已通两级，且**与上文相反：CPU 看门狗现在是开的**：
+
+| 看门狗 | 现状 | 喂狗点 / 不启用理由 |
+|---|---|---|
+| CPU1 | **已启用** | `rt/motor_algo.c:MOTOR_ALGO_run()` 1 kHz 循环内 `WDG_serviceCpu()`。这是"电机核跑飞 → 复位 → 上电回安全态"这条底线，评估报告 §6 第一条 🔴 就此关闭 |
+| CPU0 | **已启用** | `Cpu0_Main.c:vRobotControlTask()` 10 ms 循环顶部 `WDG_serviceCpu()`；同时作为 FreeRTOS 栈溢出钩子的复位手段（见下） |
+| SM(安全) | 有意关闭 | 其喂狗条件（CPU1 seq 推进 && LINK 健康位）是 §7.2 的**量产权项**，demo 尚无该判据；无条件开启只会变成"没喂就咬"的噪声源 |
+| CPU2 | 有意关闭 | "只复位故障核"需 SMU 告警路由（§7.2 链式含义）；现在开 CPU2 WDT 的动作是**整机复位**——链路核挂死并不使电机失控（CPU1 有 150 ms 失联看门狗自行刹停），用整机复位响应它属于过度反应 |
+
+复位后的安全态由软件默认值保证，不依赖硬件：`MOTOR_init` duty=0 + `MOTOR_ALGO_init` 的 `MOTOR_stopAll()` + 零目标 + 应用层看门狗（CPU1 150 ms 失联 / CPU0 100 ms 心跳）。**台架待验证项**：复位瞬间 TB6612 输入浮空期间电机行为（D24A 的 STBY 由板载 3V3 常使能，23 §9.3），实测结果记入 51-verification-log。
+
+窗口值 `REL=0xF800`（`bsp/wdg.h`）按官方示例 `Watchdog_1_KIT_TC275_LK` 的 `0xE000`≈1.3 s 线性换算得 ≈0.3~0.5 s（上电默认分频），**尚未台架实测**；实测后按 §7.1 目标收紧至 ≤200 ms。调试器挂接时 TriCore OCD 会挂起看门狗，因此启用不影响 flash 调试，仅脱机运行才真复位。
+
+栈溢出钩子（`Cpu0_Main.c:vApplicationStackOverflowHook`）从原先的静默 spin 改为：打印任务名 → `UART_flushPolling()` 轮询泵出 TX FIFO（钩子可能在 tick ISR 级运行，不能依赖 TX 中断）→ `__disable()` 冻结现场 → 空转，由已启用的 CPU0 看门狗在窗口内复位。这是评估报告 §6 第二条 🔴 的落地。
 
 ### 7.3 POST / RUNST
 
@@ -628,7 +650,7 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 
 | 里程碑 | 内容 | 验收门（节选） |
 |---|---|---|
-| **M0 量产基线**（1 周） | demo 安全 P0 修复（看门狗链/急停竞态/心跳锁存/CPU2 栈）、仓库瘦身、CI headless 构建、主机单测框架 | 评估报告 P0 清零；CI 绿 |
+| **M0 量产基线**（1 周） | demo 安全 P0 修复（看门狗链/急停竞态/心跳锁存/CPU2 栈）、仓库瘦身、CI headless 构建、主机单测框架。**看门狗链进度（V1.8）：CPU0/CPU1 已启用 + 无条件周期喂狗；SM/CPU2 仍有意关闭，"带条件喂狗"与 STBY 硬线待补** | 评估报告 P0 清零；CI 绿 |
 | **M1 架构重构**（2 周） | §3 目录结构落地、xcore v2 + E2E、SF + v2 双段协议、config/diag/telemetry、C6 固件骨架 + **SPI 链路打通（R7/G1 波形兼容为 M1 入口门禁）** | 主机单测达标；G1 通过；1/2/5 MHz 各档 CRC 误码 0（30 min/档） |
 | **M2 实时闭环**（2 周） | 编码器 ×4 解码（**解码层已实现** `rt/encoder.c`，原 `Bsp/encoder.c`，TIEM 边沿中断 + 软件正交，见 §16 R2）、速度 PI + 双斜率、堵转/滑差/欠压保护、STBY 硬线、电池 ADC | 坡道/负载速度误差 <5%；堵转 500 ms 进安全态 |
 | **M3 OTA + 安全 + 产测**（2 周） | SBL + 双 bank 切换、双板 OTA、签名/secure boot、配对、产测序列 + 标定 + SN | 断电回滚 100/100；产测 ≤90 s/台 |
@@ -665,7 +687,7 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 | `Middleware/xcore.c` | 升级 xcore v2（E2E 头、类型化消息），锁与日志环设计保留 |
 | `Middleware/protocol.c` | 不再是 LINK 段**容器**真源：SF 编解码落地于 `mw/sf/`（§6.1a），主机单测对象。命令**码表**（`PROTO_CMD_*`，现 `mw/proto/protocol.h`）仍是唯一真源并被 `link.c` 直接复用为 SF 载荷首字节，被取代的只是 UART 时代的 `AA 55` 容器；`mw/proto` 只保留手机 WS 段 v2 帧（§6.1b，在 C6 侧实现） |
 | `Middleware/wifi_at.c` | 现位于 `com/wifi_at.c`。已退出板间链路（**2026-09-26 决策：UART 弃用**，两个 TASKING 配置都定义 `USE_SPI_LINK`，§5.6 末条）；保留为**C6 调试控制台 + G1 失败应急返修 + 产线返工**通道，只在手动删除该符号时才编译；极性翻正为 `USE_WIFI_AT` 的动作仍排在 G1 之后；前端页面字符串迁移至 C6 assets |
-| （新增，无 demo 对应） | 已落地：`com/link.c`（QSPI3 主机事务调度器，§5.6；V1.6 起为单读快照 + ALIVE 判活）、`com/spi_hal_pins.c`（引脚/时钟档/前导模拟）、`mw/sf/sf_frame.c`（SF 编解码，`test/host/test_sf.c` **2873** 断言通过，含 SEQ 越窗重锁 `test_seq_relock`）、`mw/sf/sf_telemetry.c`（38 B 遥测 codec，`test/host/test_sf_telemetry.c` 跨侧模式 154 断言、无跨侧 116 项，含编译从机解码器的交叉验证，§6.3）。尚未落地：`com/auth`、`com/fw_stream`（OTA 走 SF TYPE 0x06/0x07，§9）；`rt/encoder` 解码层已落地（原 `Bsp/encoder.c`），§5.1 的量产增量（自检、`ERR_ENC_DEAD` 联动、标定回存）仍待做 |
+| （新增，无 demo 对应） | 已落地：`com/link.c`（QSPI3 主机事务调度器，§5.6；V1.6 起为单读快照 + ALIVE 判活）、`com/spi_hal_pins.c`（引脚/时钟档/前导模拟）、`mw/sf/sf_frame.c`（SF 编解码，`test/host/test_sf.c` **2873** 断言通过，含 SEQ 越窗重锁 `test_seq_relock`）、`mw/sf/sf_telemetry.c`（38 B 遥测 codec，`test/host/test_sf_telemetry.c` 跨侧模式 154 断言、无跨侧 116 项，含编译从机解码器的交叉验证，§6.3）、`rt/servo.c`（闭环速度 PI，§5.2 落地状态注记；motor_algo 自 V1.7 起为任务属主 + 保护钩位）。尚未落地：`com/auth`、`com/fw_stream`（OTA 走 SF TYPE 0x06/0x07，§9）、`rt/motor_guard`（堵转/滑差/欠压/STBY，§5.2）；`rt/encoder` 解码层已落地（原 `Bsp/encoder.c`，判向已可运行时标定 + 0x70 自动判向），§5.1 的量产增量（自检、`ERR_ENC_DEAD` 联动、标定回存 DFlash）仍待做 |
 | `Bsp/motor.c` | 保留，增加 STBY 控制与钳位职责确认 |
 | `Bsp/uart.c` / `Bsp/stime.c` | 保留（console 归 diag；时基归 `rt/timebase` 并承担喂狗） |
 | `Cpu0/1/2_Main.c` | 重写为 §3.4 初始化时序（POST → 任务创建 → 看门狗链启动） |
@@ -686,7 +708,7 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 | C5 | **三核共用一个二进制**，启动期靠 `IfxCpu_emitEvent/waitEvent` 同步；共享数据必须在同步点**之前**由 CPU0 完成初始化 | 否则 CPU1/CPU2 可能读到未初始化锁/队列。量产初始化时序（§3.4）保留该前置条件 |
 | C6 | TC275 无数据 Cache，跨核共享内存落在默认数据段（CPU0 DSPR）即可，**无需 Cache 维护** | 不要为跨核同步添加 `__sync()`/Cache 无效化代码，那是无效噪声 |
 | C7 | **片选脚固定用 QSPI3 SLSO5 = P23.4，不得改用 SLSO7 = P33.7**（P33.0~P33.7 已被编码器八通道占满，见 [23-wiring.md](../20-design/23-wiring.md) §8/§9） | 改脚即与 E1B 短路，硬件级冲突 |
-| C8 | 硬件看门狗在 demo 中被 `Cpu*_Main.c` 显式关闭（调试期行为） | 量产必须按 §7.2 重新启用并在各核循环喂狗；这是 11-requirements.md F09 的未完成项，交付前必须关闭 |
+| C8 | 看门狗现状（V1.8 起）：**CPU0/CPU1 已启用并周期喂狗**（CPU1 1 kHz 环、CPU0 robot 任务 10 ms），SM 与 CPU2 看门狗**有意保持关闭**并各附理由（§7.2 表） | 新增核/新循环必须自带喂狗点，否则该核在 0.3~0.5 s 内被复位。**喂狗必须走 `bsp/wdg.h` 的 `WDG_serviceCpu()`（clear+set 平衡对）**：`ENDINIT` 是**饱和计数器**，直接调 `IfxScuWdt_serviceCpuWatchdog()`（纯 set）每次给计数 +1，16 次后饱和在 15，此后单次 clear 再也解不开 ENDINIT → §9 的 OTA/Flash 解锁会静默卡死。SM 看门狗仍属 11-requirements.md F09 未完成项，交付前必须按 §7.2 补上 |
 | C9 | **P23.x 上做不出 GPIO 边沿中断**：TC27x 的 GPIO 边沿事件只有 ERU 与 IOM 两条硬件通路，二者都不覆盖 P23.x（TC27D 无 ERU 模块目录、无 `IfxIom_PinMap.h`，iLLD `Iom/` 也不提供 `initRiseInterrupt/initFallInterrupt`）。证据：[22 §2 E11](22-link-spi-design.md) | 握手线只能**输入+内部上拉 + 电平轮询**。若按原稿去配 IOM/边沿中断，会浪费一轮调试才发现"中断永不触发"；同理任何"排针 GPIO 触发中断"的需求在 TC275 上都要先查这两条通路 |
 | C10 | **`spi_slave_hd` 的 DMA 突发必须由额外事务收尾**：一次 `RDDMA` 突发要再发一帧 `INT0`(0x08)、一次 `WRDMA` 突发要再发一帧 `WR_END`(0x07)，从机才会计数完毕并释放缓冲。线上命令字节取自 `spi_ll.h` 的 `SPI_LL_BASE_CMD_HD_*`（`WRBUF 0x01 / RDBUF 0x02 / WRDMA 0x03 / RDDMA 0x04 / SEG_END 0x05 / EN_QPI 0x06 / WR_END 0x07 / INT0 0x08`）；`spi_types.h` 的 `BIT(n)` 是内部枚举，**照抄到线上必错**。证据：[22 §2 E12](22-link-spi-design.md) | 漏掉收尾事务 = 从机 TX/RX 槽位永久卡住，链路表现为"握手寄存器全零、只在第一次能通"。G1 台架若出现"能通一帧后死掉"，先查本条 |
 | C11 | **跨侧协议常量必须"整表覆盖式"比对，并且用编译对方源码的测试锁死**。已烧录的一侧是事实真源；文档、注释、自己的记忆都不是。证据：[22 §2 E13](22-link-spi-design.md) | 2026-09-26 一轮比对查出三处同名不同义（`FLAGS bit1`、OTA CID 缺 `0x35`、`ERRSTAT` 整张位表），**抽查关心的项查不出来**。后果不是崩溃而是"错误位读反 / 台架上莫名格式错"，定位成本极高。验证：`test/host/test_sf_telemetry.c` 把从机 `proto_frames.c` 编进同一可执行文件双向交叉（154 断言）——改过任一侧的 `sf` 目录必须重跑 |
@@ -696,4 +718,4 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 | C15 | **UART 不再是板间链路**（2026-09-26 用户决策弃用）：`USE_SPI_LINK` 已定义进 `.cproject` 的 Debug 与 Release 两个 TASKING 配置，`Cpu2_Main.c` 的 `#else`（AT/UART）分支只在手动删除该符号时才编译；`com/wifi_at.c` 代码保留但不再承担命令、遥测与鉴权。P15.0/P15.1 ↔ GPIO6/7 这组线的现行用途只有**C6 侧调试控制台**（`23 §2`） | 三条后果：① **不得新增依赖 UART 收发业务帧的代码路径**，也不得在任何文档/注释里把 UART 写成"当前默认"或"正在跑的链路"；② G1 失败时"退回 UART"是**双侧动作**（TC275 删符号重编 + C6 重刷 esp-at），不是一句 `#ifdef`，排障计划要按一次刷机的代价排；③ 链路问题的可观测手段只剩 SPI 自身计数器（`crcErrors`/`seqErrors`/事务超时）与 C6 串口日志，**没有第二条业务通道可交叉验证**，所以 §5.6 的计数器与 `linkErrRate` 上报必须保持可读 |
 
 
-> 本文档为设计基线 V1.6，接口签名以代码落地时的头文件为准；任何架构级变更需回写本文档并升版。板间 SPI 链路的详细设计（接线表、事务模型、SF 帧、两固件改动清单、台架门禁）见 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。
+> 本文档为设计基线 V1.7，接口签名以代码落地时的头文件为准；任何架构级变更需回写本文档并升版。板间 SPI 链路的详细设计（接线表、事务模型、SF 帧、两固件改动清单、台架门禁）见 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。
