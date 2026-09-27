@@ -54,6 +54,13 @@ void XCORE_estopRequest(void);
 void XCORE_estopClear(void);
 boolean XCORE_estopIsActive(void);
 
+/* Battery voltage (CPU1 ADC -> telemetry; doc 23 section 6: D24A J6-1
+ * divider on AN4/X2-23). CPU1 publishes the filtered VIN in mV; CPU2 puts it
+ * into the SF telemetry batteryMv/batteryPct fields, CPU0's future under-
+ * voltage guard (doc 21 SS5.2) reads the same block. 0 = not measured yet. */
+void   XCORE_battSetMv(uint16 mv);        /* CPU1 only                          */
+uint16 XCORE_battGetMv(void);             /* any core                           */
+
 /* Bench wheel-direction calibration request (doc 23 section 8.4): CPU0
  * latches it on PROTO 0x70, CPU1 consumes it once and runs the per-wheel
  * pulse test on the same core that owns the motors. The result is reported

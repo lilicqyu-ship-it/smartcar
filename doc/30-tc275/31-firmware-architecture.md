@@ -2,10 +2,10 @@
 
 > 文档编号 **31** · 域 TC275 · 状态：现状参考（描述当前代码） · 上级索引 [00-index.md](../00-index.md) · 操作指南见 [32-tc275-dev-guide.md](32-tc275-dev-guide.md)
 
-> **文档定位（重要）**：本文档描述**工作区里现在跑的这套代码**（esp-at + UART 链路、开环 PWM），用于排障、回归与理解现状。量产目标态的设计基准是 [21-software-design.md](../20-design/21-software-design.md)（SDD，当前 V1.8）——**两者不一致时以 SDD 为准**，本文不描述待实现内容。**读前先注意一件事**：UART 板间链路已于 2026-09-26 弃用（见下一条），所以本文 §5/§6/§8 的 UART/AT 通路描述的是"删掉 `USE_SPI_LINK` 才会编出来的那条分支"，不是当前构建产物。
+> **文档定位（重要）**：本文档描述**工作区里现在跑的这套代码**（esp-at + UART 链路、开环 PWM），用于排障、回归与理解现状。量产目标态的设计基准是 [21-software-design.md](../20-design/21-software-design.md)（SDD，当前 V1.9）——**两者不一致时以 SDD 为准**，本文不描述待实现内容。**读前先注意一件事**：UART 板间链路已于 2026-09-26 弃用（见下一条），所以本文 §5/§6/§8 的 UART/AT 通路描述的是"删掉 `USE_SPI_LINK` 才会编出来的那条分支"，不是当前构建产物。
 > **目录重排（2026-09-26）**：仓库已按 SDD §3.4 重排，本文下图的 `App/`、`Middleware/`、`Bsp/` 现对应 `app/`、`mw/`（xcore/proto/sf）+`com/`（link/spi_hal_pins/wifi_at）、`bsp/`；`encoder.c`/`motor_algo.c` 在 `rt/`。正文行文保留 demo 期目录名，按本映射读。
 > 本文唯一不可从代码推导、且已被 SDD 吸收的结论是 §3 的**中断向量表/优先级铁律**，权威版本见 **SDD §18**；本文不再维护该条。
-> 历史版本记录：**V2.3（2026-09-27）= CPU0/CPU1 硬件看门狗启用**（新增 `bsp/wdg.h`；CPU1 1 kHz 环与 CPU0 robot 任务 10 ms 分别喂狗，窗口 `REL=0xF800`≈0.3~0.5 s；SM/CPU2 看门狗有意仍关闭；FreeRTOS 栈溢出钩子改为打印 + 轮询泵串口 + 断喂复位，配套新增 `UART_flushPolling()`；详见 §6 与 SDD §7.2/§18 C8）；**V2.2（2026-09-27）= CPU1 速度闭环落地**（SDD §5.2 servo：`rt/servo.c` 每侧 PI + 抗饱和 + 编码器无效回退开环；`motor_algo` 改为『斜坡目标 → servo 出 duty』；`g_encInvert` 运行时可写 + `0x70` 台架自动判向 `ENCCAL=`；xcore 加 `dirCalib` 请求位；遥测 `vTargetL/R` 转 ✅）；V2.0 = 三核分区 + Wi-Fi 模块换为 ESP32-C6（esp-at）。板间链路已在 V1.2 决策改为 SPI（SDD §3.7），本文相关段落（§1/§5/§6/§8）仍是 UART 口径，属**demo 现状描述**——SPI 五行实物线已接好（2026-09-26），两侧 SPI 固件代码也已落地（TC275 侧 `com/`+`mw/sf/`；C6 侧 `c6_car` `22e15f2`），TC275 侧 IDE 构建链接闭合已达成（2026-09-26）。**2026-09-26 起 UART 板间链路弃用**：`USE_SPI_LINK` 定义进 Debug 与 Release 两个 TASKING 构建配置，本文 §1/§5/§6/§8 描述的 UART/AT 通路**不再被默认构建产出**（删掉该符号才编得出），只作 C6 调试控制台与 G1 失败的应急返修（`21 §5.6` 末条、`21 §18 C15`、`23 §2`）。**SPI 链路本身从未通电联调**，启用验证由 G1 把关（见 `22 §8`）。**V2.1（2026-09-26）** = 只加上述口径（本文档结构未动）：UART 段落自此是"删符号才编得出的分支"的描述，不再是默认构建产物。
+> 历史版本记录：**V2.4（2026-09-27）= 电池电压采集落地**（SDD §6.3/V1.9：新增 `bsp/adc.c/.h`，D24A J6-1 分压 **VIN/11** → kit **X2-23/AN4 = VADC G0 CH4**，100 Hz 询问式采样 + 1/16 EMA，CPU1 属主；xcore 新增电池块 `XCORE_battSetMv/GetMv`，遥测 `batteryMv/batteryPct` 转 ✅，接线真源 23 §5.5；`.cproject` 解除 `Vadc` 排除）；V2.3（2026-09-27）= CPU0/CPU1 硬件看门狗启用（新增 `bsp/wdg.h`；CPU1 1 kHz 环与 CPU0 robot 任务 10 ms 分别喂狗，窗口 `REL=0xF800`≈0.3~0.5 s；SM/CPU2 看门狗有意仍关闭；FreeRTOS 栈溢出钩子改为打印 + 轮询泵串口 + 断喂复位，配套新增 `UART_flushPolling()`；详见 §6 与 SDD §7.2/§18 C8）；**V2.2（2026-09-27）= CPU1 速度闭环落地**（SDD §5.2 servo：`rt/servo.c` 每侧 PI + 抗饱和 + 编码器无效回退开环；`motor_algo` 改为『斜坡目标 → servo 出 duty』；`g_encInvert` 运行时可写 + `0x70` 台架自动判向 `ENCCAL=`；xcore 加 `dirCalib` 请求位；遥测 `vTargetL/R` 转 ✅）；V2.0 = 三核分区 + Wi-Fi 模块换为 ESP32-C6（esp-at）。板间链路已在 V1.2 决策改为 SPI（SDD §3.7），本文相关段落（§1/§5/§6/§8）仍是 UART 口径，属**demo 现状描述**——SPI 五行实物线已接好（2026-09-26），两侧 SPI 固件代码也已落地（TC275 侧 `com/`+`mw/sf/`；C6 侧 `c6_car` `22e15f2`），TC275 侧 IDE 构建链接闭合已达成（2026-09-26）。**2026-09-26 起 UART 板间链路弃用**：`USE_SPI_LINK` 定义进 Debug 与 Release 两个 TASKING 构建配置，本文 §1/§5/§6/§8 描述的 UART/AT 通路**不再被默认构建产出**（删掉该符号才编得出），只作 C6 调试控制台与 G1 失败的应急返修（`21 §5.6` 末条、`21 §18 C15`、`23 §2`）。**SPI 链路本身从未通电联调**，启用验证由 G1 把关（见 `22 §8`）。**V2.1（2026-09-26）** = 只加上述口径（本文档结构未动）：UART 段落自此是"删符号才编得出的分支"的描述，不再是默认构建产物。
 
 本文是信息型参考，按"查得到"组织；设计动机见文末「设计决策」。接线与引脚电气细节在 [23-wiring.md](../20-design/23-wiring.md)，产品需求在 [11-requirements.md](../10-product/11-requirements.md)。
 
@@ -14,7 +14,7 @@
 | 核 | 运行环境 | 职责 | 入口 |
 |---|---|---|---|
 | CPU0 | FreeRTOS（单核内核，仅此核跑调度器） | 控制任务：命令执行、安全状态机、状态发布、日志桥、控制台 UART、LED | Cpu0_Main.c → `core0_main` |
-| CPU1 | 裸机 1 kHz 超循环 | 电机算法：目标斜坡 + **速度 PI 闭环**（`rt/servo`，编码器 alive 无效时回退开环）、失联看门狗、急停刹车，驱动 GTM/D24A；编码器×4 测速（TIEM 边沿中断 + 1 kHz 测速任务）+ `0x70` 台架自动判向 | Cpu1_Main.c → `core1_main` |
+| CPU1 | 裸机 1 kHz 超循环 | 电机算法：目标斜坡 + **速度 PI 闭环**（`rt/servo`，编码器 alive 无效时回退开环）、失联看门狗、急停刹车，驱动 GTM/D24A；编码器×4 测速（TIEM 边沿中断 + 1 kHz 测速任务）+ `0x70` 台架自动判向；**电池电压采样**（`bsp/adc`，100 Hz + EMA） | Cpu1_Main.c → `core1_main` |
 | CPU2 | 裸机超循环 | ESP32-C6 AT 链路：softAP+TCP 服务、协议解码、HTTP 控制接口 | Cpu2_Main.c → `core2_main` |
 
 规则：**FreeRTOS API 只允许 CPU0 调用**（移植层绑定 CPU0：STM0 产生 tick、上下文切换中断、CCPN 屏蔽均只作用于 CPU0）。CPU1/CPU2 的时基来自 `Bsp/stime.c`（读 STM0 自由计数，unsigned 回绕安全）。
@@ -39,6 +39,8 @@
 ├──────────────────────────────────────────────────────┤
 │ bsp/     uart.c/h    ASCLIN0 调试串口        (CPU0)  │
 │          motor.c/h   GTM PWM+D24A            (CPU1)  │
+│          adc.c/h     VADC 电池电压(AN4)       (CPU1)  │
+│          wdg.h       看门狗启停/喂狗              │
 │          stime.c/h   STM0 毫秒时基       (CPU1/CPU2) │
 ├──────────────────────────────────────────────────────┤
 │ FreeRtos/ + Configurations/FreeRTOSConfig.h  (CPU0)   │
@@ -79,6 +81,7 @@ ASCLIN0 中断（CPU0）：TX 优先级 8、RX 4、ER 12。FreeRTOS 内核中断
 | 状态块 `ProtocolStatus` | CPU0 → CPU2 | robot 状态镜像，10 ms 刷新；CPU2 直接用于 0x40 应答与 HTTP JSON |
 | 急停旁路 | CPU2 置位 / CPU0 清除 | `XCORE_estopRequest()` 让 CPU1 **不等** 10 ms 控制拍直接刹车 |
 | 判向请求 | CPU0 置位 / CPU1 消费 | `XCORE_dirCalibRequest/Consume`：`0x70` 台架自动判向的跨核一位通道，结果走 `ENCCAL=` 日志行（23 §8.4） |
+| 电池电压 | CPU1 → 遥测/CPU0 | `XCORE_battSetMv/GetMv`：CPU1 `bsp/adc`（X2-23/AN4，VIN/11 分压）100 Hz EMA 后发布 mV；CPU2 填遥测 `batteryMv/batteryPct`（真源 23 §5.5） |
 | 日志环 (1 KB) | CPU1/CPU2 → CPU0 | 整行拷贝入环（满则整行丢弃），CPU0 控制任务 `XCORE_logService()` 出环打印 |
 
 ## 5. 数据流

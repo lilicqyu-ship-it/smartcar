@@ -52,6 +52,10 @@ static volatile boolean g_estopReq;
  * by CPU1 so repeated 0x70 commands while a run is in flight do not queue up */
 static boolean g_calibReq;
 
+/* CPU1 -> telemetry: battery VIN in mV (bsp/adc EMA-filtered). Single writer
+ * CPU1, readers CPU0/CPU2; 0 until the first sample lands. */
+static uint16 g_battMv;
+
 /* CPU0 -> CPU2 robot status mirror */
 static ProtocolStatus g_status;
 
@@ -88,6 +92,7 @@ void XCORE_init(void)
     g_lock     = 0;
     g_estopReq = FALSE;
     g_calibReq = FALSE;
+    g_battMv   = 0u;
     g_logWr    = 0;
     g_logRd    = 0;
     __dsync();
@@ -198,6 +203,24 @@ boolean XCORE_dirCalibConsume(void)
     g_calibReq = FALSE;
     XCORE_unlock();
     return req;
+}
+
+void XCORE_battSetMv(uint16 mv)
+{
+    XCORE_lock();
+    g_battMv = mv;
+    __dsync();
+    XCORE_unlock();
+}
+
+uint16 XCORE_battGetMv(void)
+{
+    uint16 mv;
+
+    XCORE_lock();
+    mv = g_battMv;
+    XCORE_unlock();
+    return mv;
 }
 
 void XCORE_statusPublish(const ProtocolStatus *status)

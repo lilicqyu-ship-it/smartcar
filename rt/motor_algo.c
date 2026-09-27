@@ -3,6 +3,7 @@
 #include "rt/encoder.h"
 #include "rt/servo.h"
 #include "bsp/stime.h"
+#include "bsp/adc.h"
 #include "bsp/wdg.h"
 #include "mw/xcore/xcore.h"
 
@@ -306,6 +307,7 @@ void MOTOR_ALGO_init(void)
     g_calib.countAtStart = 0;
 
     SERVO_init();
+    ADC_init();                          /* battery telemetry, CPU1-owned     */
     MOTOR_stopAll();
 }
 
@@ -314,6 +316,11 @@ void MOTOR_ALGO_task(void)
     /* Encoder tick first: it must run at 1 kHz regardless of the branch
      * taken below, and its measured speeds feed the servo and the telemetry. */
     ENCODER_task();
+
+    /* Battery telemetry: a polled conversion every 10th tick (~3 us each),
+     * filtered and published to the xcore battery block from here. It must
+     * run in every branch, so it sits before the e-stop return. */
+    ADC_task();
 
     MOTOR_ALGO_readTargets();
 

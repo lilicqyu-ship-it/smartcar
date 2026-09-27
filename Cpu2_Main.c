@@ -46,6 +46,7 @@
 #include "com/link.h"
 #include "mw/xcore/xcore.h"
 #include "rt/encoder.h"
+#include "bsp/adc.h"
 #include <string.h>
 
 /* 22 SS6: telemetry is aggregated at 20 ms. */
@@ -77,7 +78,11 @@
  *                  the percent domain of vMeas, so both columns share one
  *                  calibration (SDD SS5.2 servo landed 2026-09-27; before
  *                  that the target was a raw percent and stayed 0 here).
- *   batteryMv/Pct- no ADC channel is wired up in this build.
+ *   batteryMv/Pct- VIN from CPU1's VADC (D24A J6-1 divider on AN4/X2-23,
+ *                  EMA-filtered, through the xcore battery block). Pct is
+ *                  derived with ADC_BATT_CELLS, an assumption until the cell
+ *                  count question (SDD SS16 Q1) gets a config home; mV is
+ *                  the measurement, pct is the display nicety.
  *   odoTotalMm   - needs DFlash persistence (doc 21 SS4.3) on top of the encoder.
  *   linkRttMs    - needs the HBT transaction the RTT measurement rides on.
  *   hwRev        - no board id source yet; the DPT flow of SDD SS10 reads it
@@ -135,6 +140,11 @@ static void link_sendTelemetry(void)
     tel.vMeasLeft  = enc.vMeasLeftMmS;
     tel.vMeasRight = enc.vMeasRightMmS;
     tel.odoSessionMm = link_sessionOdoMm(&enc);
+
+    /* Battery: CPU1 measures VIN (D24A J6-1 divider, AN4) at 100 Hz and
+     * publishes the filtered mV; pct is the per-cell estimate. */
+    tel.batteryMv  = XCORE_battGetMv();
+    tel.batteryPct = ADC_battPctFromMv(tel.batteryMv);
 
     /* The command the drive is currently asked to follow (the CPU0 -> CPU1
      * target, before the servo loop acts on it). CPU0 is the block's only
