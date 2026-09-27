@@ -5083,7 +5083,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <div class="pulse-dot"></div>
         <h1>TC275 ↔ ESP32-C6 板间 SPI 链路交互</h1>
       </div>
-      <p class="subtitle">SF 帧半双工事务：QSPI3 主机轮询拉取 + 共享寄存器握手（doc 22-link-spi-design V1.5）</p>
+      <p class="subtitle">SF 帧半双工事务：QSPI3 主机轮询拉取 + 共享寄存器握手（doc 22-link-spi-design V1.6）</p>
     </div>
 
     <script id="archify-guided-views-data" type="application/json">[{"id":"command-path","label":"命令下行","focus":["phone","c6","cpu2","cpu0"],"note":"手机命令如何在半个轮询周期内到达 CPU0 队列。"},{"id":"telemetry","label":"遥测上行","focus":["cpu2","c6","phone"],"note":"20 ms 聚合的 38 字节遥测如何原样到达手机页面。"},{"id":"failure","label":"失联保护","focus":["c6","cpu2","cpu0"],"note":"ALIVE 停更 500 ms 判失联，受控停车而不是失控。"}]</script>
@@ -5133,7 +5133,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
          data-preset-badge-editorial-plate="ARCHIFY / 图版 04">
       <svg viewBox="0 0 1000 740" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-preset="classic" data-quality-profile="showcase">
         <title id="archify-diagram-title">TC275 ↔ ESP32-C6 板间 SPI 链路交互</title>
-        <desc id="archify-diagram-description">SF 帧半双工事务：QSPI3 主机轮询拉取 + 共享寄存器握手（doc 22-link-spi-design V1.5）</desc>
+        <desc id="archify-diagram-description">SF 帧半双工事务：QSPI3 主机轮询拉取 + 共享寄存器握手（doc 22-link-spi-design V1.6）</desc>
         <!-- Definitions -->
         <defs>
           <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
@@ -5188,7 +5188,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <rect x="440" y="150" width="142" height="16" rx="3" class="c-mask"/>
           <text x="511" y="160" class="t-backend" font-size="9" text-anchor="middle">RDBUF 0x02 读 24 B 寄存器</text>
         </g>
-        <text data-detail="fine" x="412" y="188" class="t-dim" font-size="7">连读两次取相同值才可信（E5），重试 3 次仍不稳判 LINK_LOST；IRQ 高或每 2 ms 保活触发一次循环</text>
+        <text data-detail="fine" x="412" y="188" class="t-dim" font-size="7">单读快照 + 消费端钳位（V1.6，E5 事实改由钳位容忍）；撕裂/魔数错不判死，失联只由 ALIVE 判定；IRQ 高或每 2 ms 保活触发一次循环</text>
         </g>
 
         <g data-edge-from="c6" data-edge-to="cpu2" data-edge-label="READY=0x5F534601 + RX_ROOM" data-edge-key="1" data-edge-id="reg-ready">
@@ -5200,13 +5200,13 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <text data-detail="fine" x="412" y="216" class="t-dim" font-size="7">从机 link_task 已布防 2×512 B RX DMA 缓冲并发布就绪魔数；魔数不合法则停在 LINK_DOWN，禁止数据事务</text>
         </g>
 
-        <g data-edge-from="cpu2" data-edge-to="c6" data-edge-label="WRBUF GEN{RESET_LINK}" data-edge-key="2" data-edge-id="gen-reset">
-          <path data-composition-edge-from="cpu2" data-composition-edge-to="c6" data-composition-edge-id="gen-reset" data-composition-points="622,226;400,226" d="M 622 226 L 400 226" class="a-security" stroke-width="1.4" marker-end="url(#arrowhead-security)"/>
+        <g data-edge-from="cpu2" data-edge-to="c6" data-edge-label="WRBUF GEN{RESET_LINK}（仅台架/诊断）" data-edge-key="2" data-edge-id="gen-reset">
+          <path data-composition-edge-from="cpu2" data-composition-edge-to="c6" data-composition-edge-id="gen-reset" data-composition-points="622,226;400,226" d="M 622 226 L 400 226" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <g data-detail="context">
-          <rect x="450.4" y="206" width="121.2" height="16" rx="3" class="c-mask"/>
-          <text x="511" y="216" class="t-security" font-size="9" text-anchor="middle">WRBUF GEN{RESET_LINK}</text>
+          <rect x="414" y="206" width="194" height="16" rx="3" class="c-mask"/>
+          <text x="511" y="216" class="t-backend" font-size="9" text-anchor="middle">WRBUF GEN{RESET_LINK}（仅台架/诊断）</text>
         </g>
-        <text data-detail="fine" x="412" y="244" class="t-dim" font-size="7">每个新 READY 沿（上电/恢复）先重同步：从机清 RX SEQ 窗口，回执可见后才把自身 TX SEQ 归零（E14：跨两次从机任务调度，超时 20 ms）</text>
+        <text data-detail="fine" x="412" y="244" class="t-dim" font-size="7">V1.6 起生产泵不再依赖它：READY 沿只做 SF_parserInit 重锁本机 RX，TX SEQ 保持连续；从机靠 SEQ 越窗重锁自愈——连续 8 帧（SF_SEQ_RELOCK_RUN）越窗即丢窗重锁，对端复位后最坏拒收 8 帧（原最多 224 帧 ≈7.5 s）</text>
         </g>
 
         <g data-edge-from="c6" data-edge-to="cpu2" data-edge-label="CMDRSP={1, OK}" data-edge-key="3" data-edge-id="gen-reset-ack">
@@ -5215,6 +5215,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <rect x="468.6" y="236" width="84.8" height="16" rx="3" class="c-mask"/>
           <text x="511" y="246" class="t-muted" font-size="9" text-anchor="middle">CMDRSP={1, OK}</text>
         </g>
+        <text data-detail="fine" x="412" y="264" class="t-dim" font-size="7">回执跨两次从机任务调度才可见（E14）——正是这个时序让重同步握手进不了生产泵</text>
         </g>
 
         <g data-edge-from="phone" data-edge-to="c6" data-edge-label="WS v2 帧 0x50 DRIVE {v, ω}" data-edge-key="4" data-edge-id="ws-cmd">
@@ -5318,7 +5319,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <!-- Segment Labels -->
         <g data-graph-role="segment-label" data-segment-id="0">
           <rect x="56" y="118" width="102.4" height="18" rx="3" class="c-mask"/>
-          <text x="62" y="131" class="t-dim" font-size="9" font-weight="600">启动 / SEQ 重同步</text>
+          <text x="62" y="131" class="t-dim" font-size="9" font-weight="600">启动 / SEQ 自愈重锁</text>
         </g>
         <g data-graph-role="segment-label" data-segment-id="1">
           <rect x="56" y="250" width="133.60000000000002" height="18" rx="3" class="c-mask"/>
@@ -5612,7 +5613,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
         <ul>
           <li>&bull; LINK_LOST / 急停都走 XCORE_estopRequest 锁存，受控停车</li>
           <li>&bull; 急停旁路 CPU0 队列深度，不等出队</li>
-          <li>&bull; SEQ 严格前进窗口(32) + CRC16，从机 ERRSTAT 七位粘滞可读</li>
+          <li>&bull; SEQ 严格前进窗口(32)、连续 8 帧越窗即重锁 + CRC16，从机 ERRSTAT 七位粘滞可读</li>
         </ul>
       </div>
 
@@ -5622,7 +5623,7 @@ OTHER DEALINGS IN THE FONT SOFTWARE.
           <h3>三条硬握手契约</h3>
         </div>
         <ul>
-          <li>&bull; 寄存器连读两次取相同值（E5，非原子读）</li>
+          <li>&bull; 寄存器单读快照 + 消费端钳位（V1.6：E5 非原子属实，但双读比对越忙越误判失联，已废弃）</li>
           <li>&bull; RDDMA/WRDMA 必须以 INT0/WR_END 收尾（E12，否则从机卡死）</li>
           <li>&bull; GEN 回执跨两次从机任务调度，必须带 20 ms 超时（E14）</li>
         </ul>

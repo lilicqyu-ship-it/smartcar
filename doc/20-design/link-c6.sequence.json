@@ -3,7 +3,7 @@
   "diagram_type": "sequence",
   "meta": {
     "title": "TC275 ↔ ESP32-C6 板间 SPI 链路交互",
-    "subtitle": "SF 帧半双工事务：QSPI3 主机轮询拉取 + 共享寄存器握手（doc 22-link-spi-design V1.5）",
+    "subtitle": "SF 帧半双工事务：QSPI3 主机轮询拉取 + 共享寄存器握手（doc 22-link-spi-design V1.6）",
     "locale": "zh-CN",
     "output": "doc/20-design/22-link-sequence.html",
     "viewBox": [1000, 740],
@@ -22,16 +22,16 @@
     { "id": "cpu0", "type": "backend", "label": "TC275 CPU0", "sublabel": "控制命令队列" }
   ],
   "segments": [
-    { "from": 140, "to": 262, "label": "启动 / SEQ 重同步" },
+    { "from": 140, "to": 262, "label": "启动 / SEQ 自愈重锁" },
     { "from": 272, "to": 412, "label": "命令下行（手机 → 车轮）" },
     { "from": 424, "to": 500, "label": "遥测上行（20 ms 聚合）" },
     { "from": 540, "to": 652, "label": "GEN 命令 / 判活看门狗" }
   ],
   "messages": [
-    { "id": "reg-poll", "from": "cpu2", "to": "c6", "y": 170, "label": "RDBUF 0x02 读 24 B 寄存器", "variant": "default", "note": "连读两次取相同值才可信（E5），重试 3 次仍不稳判 LINK_LOST；IRQ 高或每 2 ms 保活触发一次循环" },
+    { "id": "reg-poll", "from": "cpu2", "to": "c6", "y": 170, "label": "RDBUF 0x02 读 24 B 寄存器", "variant": "default", "note": "单读快照 + 消费端钳位（V1.6，E5 事实改由钳位容忍）；撕裂/魔数错不判死，失联只由 ALIVE 判定；IRQ 高或每 2 ms 保活触发一次循环" },
     { "id": "reg-ready", "from": "c6", "to": "cpu2", "y": 198, "label": "READY=0x5F534601 + RX_ROOM", "variant": "return", "note": "从机 link_task 已布防 2×512 B RX DMA 缓冲并发布就绪魔数；魔数不合法则停在 LINK_DOWN，禁止数据事务" },
-    { "id": "gen-reset", "from": "cpu2", "to": "c6", "y": 226, "label": "WRBUF GEN{RESET_LINK}", "variant": "security", "note": "每个新 READY 沿（上电/恢复）先重同步：从机清 RX SEQ 窗口，回执可见后才把自身 TX SEQ 归零（E14：跨两次从机任务调度，超时 20 ms）" },
-    { "id": "gen-reset-ack", "from": "c6", "to": "cpu2", "y": 256, "label": "CMDRSP={1, OK}", "variant": "return" },
+    { "id": "gen-reset", "from": "cpu2", "to": "c6", "y": 226, "label": "WRBUF GEN{RESET_LINK}（仅台架/诊断）", "variant": "default", "note": "V1.6 起生产泵不再依赖它：READY 沿只做 SF_parserInit 重锁本机 RX，TX SEQ 保持连续；从机靠 SEQ 越窗重锁自愈——连续 8 帧（SF_SEQ_RELOCK_RUN）越窗即丢窗重锁，对端复位后最坏拒收 8 帧（原最多 224 帧 ≈7.5 s）" },
+    { "id": "gen-reset-ack", "from": "c6", "to": "cpu2", "y": 256, "label": "CMDRSP={1, OK}", "variant": "return", "note": "回执跨两次从机任务调度才可见（E14）——正是这个时序让重同步握手进不了生产泵" },
 
     { "id": "ws-cmd", "from": "phone", "to": "c6", "y": 292, "label": "WS v2 帧 0x50 DRIVE {v, ω}", "variant": "emphasis", "note": "手机侧仍是 v2 帧，C6 bridge 做 v2↔SF 字段级映射，对外语义不变" },
     { "id": "irq-raise", "from": "c6", "to": "cpu2", "y": 320, "label": "IRQ(P23.0) 拉高 = TX_PENDING", "variant": "emphasis", "note": "v2→SF 入队后 link_tx_kick 打包 DMA 段并置 TX_PENDING；主机电平轮询，最迟 2 ms 采样到" },
@@ -69,14 +69,14 @@
       "items": [
         "LINK_LOST / 急停都走 XCORE_estopRequest 锁存，受控停车",
         "急停旁路 CPU0 队列深度，不等出队",
-        "SEQ 严格前进窗口(32) + CRC16，从机 ERRSTAT 七位粘滞可读"
+        "SEQ 严格前进窗口(32)、连续 8 帧越窗即重锁 + CRC16，从机 ERRSTAT 七位粘滞可读"
       ]
     },
     {
       "dot": "orange",
       "title": "三条硬握手契约",
       "items": [
-        "寄存器连读两次取相同值（E5，非原子读）",
+        "寄存器单读快照 + 消费端钳位（V1.6：E5 非原子属实，但双读比对越忙越误判失联，已废弃）",
         "RDDMA/WRDMA 必须以 INT0/WR_END 收尾（E12，否则从机卡死）",
         "GEN 回执跨两次从机任务调度，必须带 20 ms 超时（E14）"
       ]

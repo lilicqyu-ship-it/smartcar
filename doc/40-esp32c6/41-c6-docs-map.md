@@ -4,7 +4,7 @@
 |---|---|
 | 文档编号 | 41 |
 | 域 | ESP32-C6（C6 固件开发） |
-| 版本 | V1.2（2026-09-26，随 doc 目录重构建立；V1.1 = §4 补入板间连线电气形态（杜邦线直连、无外部上拉）与 Debug 已定义 `USE_SPI_LINK` 的现状，登记 C6 侧 `link.c` 注释待更正；V1.2 = §3 T6/§4 按"UART 板间链路弃用、Release 也定义 `USE_SPI_LINK`"改口径，并写明恢复 UART 是双侧刷机动作） |
+| 版本 | V1.3（2026-09-27：§3 T4 的主机侧读法改按 22 号文档 V1.6 新口径——**单读快照 + 消费端钳位**，原"连读两次取相同值"规范已随链路泵简化（`ae10aac`）废弃）。V1.2（2026-09-26，随 doc 目录重构建立；V1.1 = §4 补入板间连线电气形态（杜邦线直连、无外部上拉）与 Debug 已定义 `USE_SPI_LINK` 的现状，登记 C6 侧 `link.c` 注释待更正；V1.2 = §3 T6/§4 按"UART 板间链路弃用、Release 也定义 `USE_SPI_LINK`"改口径，并写明恢复 UART 是双侧刷机动作） |
 | 为什么在本仓库 | C6 固件的**代码与模块设计在 `c6_car` 仓库**，但"两板之间怎么连、谁对什么负责"这件事的裁决权在 TC275 侧。本篇是**边界声明 + 索引 + 跨仓库待办清单**，不镜像 C6 内容（避免双写漂移） |
 
 ---
@@ -51,7 +51,7 @@
 | T1 | `c6_link` 传输层由 UART 改 `spi_slave_hd`（半双工 + 共享寄存器 + IRQ），`link.h` 对外 API 签名不变，`bridge`/`ota_relay` 不感知物理层 | `c6_car/components/c6_link/`，`c6_car/doc/04` | `22 §8` G1~G2 |
 | T2 | 删除 UART 专有物：0x44 BAUD REQ/ACK/NAK 状态机、`C6_LINK_TX_GPIO`/`RX_GPIO` 配置项 | 同上 + `Kconfig` | 全仓库 grep 无 `0x44` 波特率协商残留 |
 | T3 | **调试串口脚位统一**：Kconfig 现在默认 `TX=10 / RX=11`，与实物接线（`23 §2` 的 GPIO6=RX / GPIO7=TX，J1-5/6）不一致 | `c6_car` Kconfig + help | 文档、Kconfig、实物三者一致 |
-| T4 | C6 侧发布 6 个 u32 握手寄存器（`SF_READY`/`SF_TX_PENDING`/`SF_RX_ROOM`/`SF_ALIVE`/`SF_ERRSTAT`/`SF_CMDRSP`），主机侧"连读两次取相同值" | `22 §4.3` | G1 |
+| T4 | C6 侧发布 6 个 u32 握手寄存器（`SF_READY`/`SF_TX_PENDING`/`SF_RX_ROOM`/`SF_ALIVE`/`SF_ERRSTAT`/`SF_CMDRSP`）；主机侧**单读快照 + 消费端钳位**（2026-09-27 起，`22 §4.2` V1.6——原"连读两次取相同值"规范已废弃） | `22 §4.3` | G1 |
 | T5 | OTA 分片上限 62 B → 240 B（4 B 对齐约束带来的红利），两端同步 | `c6_car/doc/09` + `21 §9.2` | G5 提速档下 OTA 1 MB ≤3 s |
 | T6 | `esp-at` 工程保留为**应急返修镜像**：G1 失败时刷回 esp-at 走 UART 通道（**2026-09-26 起 UART 已弃用**，还需 TC275 侧删除 `USE_SPI_LINK` 重编，双侧动作） | `23 §2`、`21 §16 R4`/`R7` | 回退流程可复现（含 `AT+UART_CUR=115200,8,1,0,0` 关流控） |
 

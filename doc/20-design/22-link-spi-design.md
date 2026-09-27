@@ -3,11 +3,11 @@
 | 项 | 内容 |
 |---|---|
 | 文档编号 | **22**（域：设计·硬件）· 定位：21（SDD）§3.7/§6 的 LINK 段展开 · 上级索引 [00-index.md](../00-index.md) |
-| 文档版本 | V1.5（V1.2 = C6 已烧录 SPI 固件后完善 TC275 侧的回写：E13/E14 证据、SF 常量对齐、三层白名单、38 B 遥测硬契约；**V1.3 = 2026-09-26 目录重排与构建闭合**：TC275 侧代码随 SDD V1.3 由 `Middleware/{com,sf}/` 迁至目标态 `com/`、`mw/sf/`（§7.2 表内路径已同步），**TASKING IDE 构建链接闭合达成**（Debug 0 错误，顺带修复 `rt/encoder.c` 的 `int32`→`sint32` 类型错，该文件此前从未被 TriCore 编译过），§11 第 1 问的 IDE 构建前置已销项。**V1.4 = 2026-09-26 电气形态确认**：两板之间所有连线均为杜邦线直连、**无任何外部元件**（无外部上拉/端接/电平转换），IRQ 高电平仅由 TC275 片内上拉提供——§3 待确认项 ① 随之销项，§3.1 表、§3.2、§5.4、§9 R11 同步；真源与 coding 后果见 [23-wiring.md](../20-design/23-wiring.md) §9.3。实施仍待 G1 台架门禁通过，未拍板项见 §11。**V1.5 = 2026-09-26 UART 板间链路弃用**（用户决策）：`USE_SPI_LINK` 定义进 `.cproject` 的 Debug 与 Release 两个 TASKING 配置，SPI 成为唯一被构建出来的板间链路，UART/AT 分支降为"删符号才编得出"的 G1 应急返修 + C6 调试控制台；§7.2 两行、§9 R7 退路代价、§11 状态同步；口径真源 SDD V1.5 §5.6 末条） |
-| 日期 | 2026-09-26 |
+| 文档版本 | **V1.6**（2026-09-27 **链路泵简化**，`com/link.c` 提交 `ae10aac` 的文档回写：§4.2 寄存器快照从"连读两次比对"改为**单读 + 消费端钳位容错**（双读比对在从机随时改写寄存器的实况下是"空载正常、满载断连"的根因）；**失联判定只由 `SF_ALIVE` 500 ms 承担**，READY 魔数错改为静默 `LINK_DOWN` 自愈；§4.3 `RESET_LINK` 降级为台架/诊断入口，READY 沿的重同步握手移除；§5.3/§5.4 SEQ 新增**连续 8 帧越窗即丢窗重锁**（`SF_SEQ_RELOCK_RUN`）；§7.2/§8 断言数同步 2873。V1.2 = C6 已烧录 SPI 固件后完善 TC275 侧的回写：E13/E14 证据、SF 常量对齐、三层白名单、38 B 遥测硬契约；**V1.3 = 2026-09-26 目录重排与构建闭合**：TC275 侧代码随 SDD V1.3 由 `Middleware/{com,sf}/` 迁至目标态 `com/`、`mw/sf/`（§7.2 表内路径已同步），**TASKING IDE 构建链接闭合达成**（Debug 0 错误，顺带修复 `rt/encoder.c` 的 `int32`→`sint32` 类型错，该文件此前从未被 TriCore 编译过），§11 第 1 问的 IDE 构建前置已销项。**V1.4 = 2026-09-26 电气形态确认**：两板之间所有连线均为杜邦线直连、**无任何外部元件**（无外部上拉/端接/电平转换），IRQ 高电平仅由 TC275 片内上拉提供——§3 待确认项 ① 随之销项，§3.1 表、§3.2、§5.4、§9 R11 同步；真源与 coding 后果见 [23-wiring.md](../20-design/23-wiring.md) §9.3。实施仍待 G1 台架门禁通过，未拍板项见 §11。**V1.5 = 2026-09-26 UART 板间链路弃用**（用户决策）：`USE_SPI_LINK` 定义进 `.cproject` 的 Debug 与 Release 两个 TASKING 配置，SPI 成为唯一被构建出来的板间链路，UART/AT 分支降为"删符号才编得出"的 G1 应急返修 + C6 调试控制台；§7.2 两行、§9 R7 退路代价、§11 状态同步；口径真源 SDD V1.5 §5.6 末条） |
+| 日期 | 2026-09-27 |
 | 参考体例 | [21-software-design.md](../20-design/21-software-design.md) §3.7（板间通信选型）、§6（协议）、§16（风险） |
 | 决策范围 | C6↔TC275 主链路物理层 = **SPI**；帧协议 = **新定 SPI 专用 SF 帧**；拓扑 = **TC275 QSPI3 主机 ↔ ESP32-C6 SPI2 从机（`spi_slave_hd`）+ 1 根握手线** |
-| 交付状态 | **设计 + 两侧固件代码 + 文档回写均已落地**：C6 侧见 `c6_car` `22e15f2`（§7.1），TC275 侧见 `com/`+`mw/sf/`（§7.2，2026-09-26 随 SDD V1.3 目录重排迁入目标态目录）。SDD **V1.5**、23-wiring.md **V1.10**。主机单测：帧层 2855 断言 + 遥测层 154 断言（后者**把从机 `proto_frames.c` 编进同一可执行文件**做双向交叉）。**TASKING IDE 构建链接已闭合**（2026-09-26，Debug 配置 0 错误）。**未做**：G1 台架波形验证、整车通电联调。**接线形态已确认**：两板之间全部杜邦线直连、无外部元件（含 IRQ 无外部上拉），见 23 §9.3。**UART 板间链路已弃用**（2026-09-26）：Debug/Release 两个 TASKING 配置都定义 `USE_SPI_LINK`，日常构建只产出 SPI 路径 |
+| 交付状态 | **设计 + 两侧固件代码 + 文档回写均已落地**：C6 侧见 `c6_car` `22e15f2`（§7.1），TC275 侧见 `com/`+`mw/sf/`（§7.2，2026-09-26 随 SDD V1.3 目录重排迁入目标态目录）。**2026-09-27 链路泵已按台架故障根因简化**（V1.6 §4.2/§5.4：单读快照 + ALIVE 唯一判活 + SEQ 越窗重锁）。SDD **V1.6**、23-wiring.md **V1.11**。主机单测：帧层 2873 断言 + 遥测层 154 断言（跨侧模式；无跨侧 116 项；后者**把从机 `proto_frames.c` 编进同一可执行文件**做双向交叉）。**TASKING IDE 构建链接已闭合**（2026-09-26，Debug 配置 0 错误）。**未做**：G1 台架波形验证、整车通电联调。**接线形态已确认**：两板之间全部杜邦线直连、无外部元件（含 IRQ 无外部上拉），见 23 §9.3。**UART 板间链路已弃用**（2026-09-26）：Debug/Release 两个 TASKING 配置都定义 `USE_SPI_LINK`，日常构建只产出 SPI 路径 |
 | 前提变化 | ① C6 改为自研固件（`c6_car` 工程），不再受 esp-at 约束；② `c6_car` 的 proto v2 与 myCar 的 demo 异或 CRC 帧**本来就不兼容**，链路换向时一并按 SPI 特性重定帧，成本最低 |
 
 ---
@@ -101,13 +101,21 @@ TC275 LITE kit (QSPI3 主机, X1 侧)              ESP32-C6-DevKitC-1 (SPI2 从�
 
 ```
 loop:
-  1. 读寄存器组（4 个 u32，一次事务打包）→ 连读两次取相同值（E5）
+  1. 单读寄存器组（4 个 u32，一次 RDBUF 24 B 事务）→ **V1.6 起不再连读比对**（E5 的非原子事实仍在，
+       但从机每段完成/10 ms ALIVE 跳变都会即时改写寄存器，双读比对越忙越容易失败并升级成失联急停；
+       撕裂值改由消费端钳位容忍，见序 5 与 §5.4）
        READY_FLAG / TX_PENDING / RX_ROOM / ALIVE
-  2. TX_PENDING > 0  → 发 RDDMA 事务读 ceil(len/4)*4 字节 → 解 SF 段 → 入命令队列
-  3. 有待发帧(遥测/ACK/OTA) 且 RX_ROOM ≥ 帧长 → 发 WRDMA 事务写
-  4. ALIVE 未在 500 ms 内推进 → 报 ERR_LINK_LOST（等价 demo 的心跳判据）
-  5. 任一事务超时（CS 有效期内无有效 MISO 回读 / 状态寄存器回 0x00 或 0xFF）→ 计 SPI_ERR，连续 N 次判链路故障
+  2. TX_PENDING > 0（越 LINK_RX_BURST_MAX=640 即钳位）→ 发 RDDMA 事务读 ceil(len/4)*4 字节
+       → 解 SF 段 → 入命令队列 → 补 INT0 收尾
+  3. 有待发帧(遥测/ACK/OTA) 且 RX_ROOM（越 LINK_RX_ROOM_MAX=1024 即钳位）≥ 帧长
+       → 发 WRDMA 事务写 → 补 WR_END 收尾
+  4. ALIVE 未在 500 ms 内推进 → 报 ERR_LINK_LOST（**唯一判活判据**，等价 demo 的心跳判据；
+       电机停止另由 CPU0 的 100 ms 心跳看门狗兜底）
+  5. 快照容错（V1.6）：READY 魔数不对 → 静默 LINK_DOWN（禁数据事务，下一好读即恢复，不判失联）；
+       事务不完整 → 计 SPI_ERR 并跳过本周期
 ```
+
+> **V1.6 泵简化记录**（台架"无法连接"类故障的主机侧根因修复，`com/link.c` `ae10aac`）：原稿按 E5 把"连读两次直到相同"继承为硬性规范（重试 3 次、仍不等判 `regUnstable` → 失联急停）。实机发现链路负载越重比对越容易失败——`TX_PENDING`/`RX_ROOM` 本来就随数据事务即时变化，"越忙越断连"不是从机故障而是主机误判。对策不是恢复重试，而是**把"快照必须稳定"的假设整个去掉**：每个字段单读后直接消费、越界即钳位，只有 `SF_ALIVE` 有资格宣布失联。
 
 ### 4.3 共享寄存器映射（C6 从机发布，主机读；每项 u32 小端，地址 = 4×序）
 
@@ -123,8 +131,8 @@ loop:
 
 - `SF_ERRSTAT` 位值（E13，从机 `sf_frame.h:95-101`）：`CRC 0x01`（帧 CRC 失败）、`FMT 0x02`（帧格式/VER 错）、`SEQ 0x04`（SEQ 前进窗口违例）、`RXOVFL 0x08`（RX 队列溢出/丢帧）、`TXOVFL 0x10`（TX 队列满 BUSY）、`TRUN 0x20`（跨段残帧）、`LINKLOST 0x40`（连续 5 次 CRC 失败）。主机 `com/link.h` 的 `LINK_ERRSTAT_SLAVE_*` 与此逐项对齐，G1 判读只看这七位。
 - 从机发布区共 **28 B**（含 `GEN` 槽回显），主机每次 `RD_REG` 只读前 **24 B**（偏移 0..23）——读的是前缀，不冲突；`GEN` 是主写槽，主机读回它没有意义。
-- **`GEN` 命令表与时序（E14，主机侧 `LINK_gen()` 已按此实现）**：`NOP 0`（探针）、`RESET_LINK 1`（从机重置解析器与 RX SEQ）、`SILENCE_ON 2` / `SILENCE_OFF 3`（强制/恢复 IRQ 静默，G4 的台架注入手段）、`CLOCK_SET 4`（**payload 单位 MHz**，从机只记入诊断回显，真正的时钟归主机）。回执**跨两次从机任务调度**才可见，故 `LINK_gen()` 必须带超时（`LINK_GEN_TIMEOUT_MS = 20`），超时计 `stats.genNoAck`。因 `NOP` 走从机 `default` 分支（回执 `result=UNKNOWN`），`LINK_gen()` 的用法是：**先写一发 NOP 清掉粘滞的旧回执，再发真命令**，这样"重复下发同一条命令"也不会被旧回执假命中。
-- 前 5 项与官方 `segment_mode` 例子的 5 寄存器一一对应（E4），只是字段语义按本产品重定义；例子的读法（连读两次相同）作为硬性规范继承（E5）。
+- **`GEN` 命令表与时序（E14，主机侧 `LINK_gen()` 已按此实现）**：`NOP 0`（探针）、`RESET_LINK 1`（从机重置解析器与 RX SEQ；**2026-09-27 起降级为台架/诊断入口**——泵不再依赖它，READY 沿只做 `SF_parserInit` 重锁 RX，本机 TX SEQ 保持连续、从机按 §5.3 的越窗重锁自愈，原"READY 沿握手 RESET_LINK"因从机不回执时会把泵无限占住而移除）、`SILENCE_ON 2` / `SILENCE_OFF 3`（强制/恢复 IRQ 静默，G4 的台架注入手段）、`CLOCK_SET 4`（**payload 单位 MHz**，从机只记入诊断回显，真正的时钟归主机）。回执**跨两次从机任务调度**才可见，故 `LINK_gen()` 必须带超时（`LINK_GEN_TIMEOUT_MS = 20`），超时计 `stats.genNoAck`。因 `NOP` 走从机 `default` 分支（回执 `result=UNKNOWN`），`LINK_gen()` 的用法是：**先写一发 NOP 清掉粘滞的旧回执，再发真命令**，这样"重复下发同一条命令"也不会被旧回执假命中。
+- 前 5 项与官方 `segment_mode` 例子的 5 寄存器一一对应（E4），只是字段语义按本产品重定义；例子的"连读两次相同"读法 **V1.6 起不再继承**（§4.2 泵简化记录：官方注释描述的是非原子事实，不是对主机唯一可行的对策）。
 - 命令/地址相位取值：`command_bits=8, address_bits=8, dummy_bits=8`（E3），低 4 位需命中 E6 的 CMD7/8/9/A 事件编码。**编码表已按 E12 的源码证据冻结**（不再等 G1 猜测）；G1 要验的是"TC275 用数据相位模拟出的这段前导，从机能否正确解析"，而不是"取值对不对"。
 
 ### 4.4 事务类型（取值已按 E12 冻结，见 `com/spi_hal_pins.h`）
@@ -201,6 +209,7 @@ loop:
 ### 5.3 SEQ / E2E
 
 - 每方向独立 1 字节 SEQ，单调递增（mod 256），接收侧**严格前进窗口** `1 ≤ (seq - last) ≤ 32`（沿用 c6_car `ws_sessions` 的窗口思路，拒绝旧帧与超窗洪水）；
+- **越窗重锁（V1.6，两侧 codec 同规则）**：连续 `SF_SEQ_RELOCK_RUN`(8) 帧越窗即判定"发送端已重启、SEQ 不会自己落回窗口"，**丢弃窗口、下一帧重锁**。对端复位后最坏拒收 8 帧；若没有这条规则，最多要拒收到 u8 回绕（≈224 帧 ≈7.5 s），这是"对端复位后连不上"的另一半根因。`test_sf.c` 的 `test_seq_relock` 覆盖（含"重锁后第一帧立即收下"）；
 - 命令方向：SEQ 不前进即拒收（重放防护，SDD §8.1 的"帧内 SEQ 单调 + 会话 nonce"保留）；
 - 链路级 E2E 由 §4.3 的 `SF_ALIVE`/`SF_TX_PENDING` 寄存器 + SF 帧 SEQ **双层**承担：寄存器保证"数据在不在"，SEQ 保证"这一帧新不新"。
 
@@ -208,12 +217,13 @@ loop:
 
 | 现象 | 检测 | 处置 |
 |---|---|---|
-| 帧 CRC 失败 | 解析器 | 丢弃 + `SF_ERRSTAT`/SPI_ERR 计数；连续 5 帧失败 → `ERR_LINK_LOST` |
-| SEQ 回退/超窗 | 前进窗口 | 丢弃 + 计数（不锁存，区别于安全故障） |
+| 帧 CRC 失败 | 解析器 | 丢弃 + 计数。**不由此判失联**（V1.6：`ERR_LINK_LOST` 只由 `SF_ALIVE` 判定；从机侧粘滞位 `LINKLOST 0x40` 保留作诊断） |
+| SEQ 回退/超窗 | 前进窗口 | 丢弃 + 计数；连续 8 帧（`SF_SEQ_RELOCK_RUN`）越窗 → 丢窗、下一帧重锁（§5.3），不改链路状态 |
 | 段内残帧（跨事务未收完） | 状态机超时 4 ms 无续字节 | 丢弃残段，重同步到 MAGIC |
 | IRQ 线读不到（片内上拉驱动能力弱/线松/从机未上电） | 电平轮询本身就是主路径（E11） | 无感（时延回到 2 ms 档，吞吐不变）；**不得**用该电平判从机在位，判活只看 `SF_ALIVE`（23 §9.3） |
-| 寄存器连读两次不等 | §4.3 规范 | 重试 3 次，仍不等 → 判从机状态不可信 → `ERR_LINK_LOST` |
-| 从机挂死/掉电 | `SF_ALIVE` 500 ms 不推进、读回 0x00/0xFF | 主机事务超时 → `ERR_LINK_LOST` → mission 目标置零受控停车（**不导致失控**，SDD §3.1 原则成立） |
+| 寄存器单读撕裂 / `TX_PENDING`·`RX_ROOM` 读出越界值 | §4.2 序 5 快照容错 | **消费端钳位**（640/1024），慢一拍而不是误发越界突发；不判失联（V1.6，原"连读两次不等 → 判从机状态不可信"随双读比对一起移除） |
+| `SF_READY` 魔数读错 | §4.2 序 5 | 静默 `LINK_DOWN`（禁数据事务），下一好读经 READY 沿恢复；不判失联 |
+| 从机挂死/掉电 | **唯一判据**：`SF_ALIVE` 500 ms 不推进 | `ERR_LINK_LOST` → mission 目标置零受控停车（**不导致失控**，SDD §3.1 原则成立）；电机停止另由 CPU0 的 100 ms 心跳看门狗兜底 |
 | 主机泵挂死 | CPU2 独立看门狗（SDD §7.2 不变） | 复位 CPU2，链路断 → 停车 |
 
 ### 5.5 v2（手机/WS）↔ SF 字段映射（摘要）
@@ -295,10 +305,10 @@ loop:
 
 | 文件 | 动作 | 实测状态 |
 |---|---|---|
-| `mw/sf/sf_frame.c/.h` | SF 帧编解码（纯 C99，无 OS/iLLD 依赖，TriCore/RISC-V/主机三目标同份源码） | **已完成**：`test/host/test_sf.c` 2855 项断言 0 失败（含 0..248 全长度往返、段内多帧、乱字节重同步、SEQ 窗口与回绕、残帧超时、400 万字节随机风暴 + 金库哨兵未越界）→ **门禁 G2 的帧层部分已过**。本轮按 E13 把 `FLAGS`/OTA CID 与从机对齐，并删掉零引用、从机也没有的 `SF_FLAG_RESYNC 0x04` |
+| `mw/sf/sf_frame.c/.h` | SF 帧编解码（纯 C99，无 OS/iLLD 依赖，TriCore/RISC-V/主机三目标同份源码） | **已完成**：`test/host/test_sf.c` **2873** 项断言 0 失败（含 0..248 全长度往返、段内多帧、乱字节重同步、SEQ 窗口与回绕、**SEQ 越窗 8 帧重锁 `test_seq_relock`（2026-09-27 新增）**、残帧超时、400 万字节随机风暴 + 金库哨兵未越界）→ **门禁 G2 的帧层部分已过**。本轮按 E13 把 `FLAGS`/OTA CID 与从机对齐，并删掉零引用、从机也没有的 `SF_FLAG_RESYNC 0x04` |
 | `mw/sf/sf_telemetry.c/.h`（新增） | 38 B 遥测载荷 codec（纯 C99、显式小端、不做结构体强转——TriCore 大端） | **已完成并验证**：`test/host/test_sf_telemetry.c` 把**从机自己的 `proto_frames.c` 编进同一可执行文件**做双向交叉（我编→从机解 / 从机编→我解，含"短于 38 B 必须拒解"），`154 断言 / 0 失败`，`-Wall -Wextra -Werror` 干净。全表仅此一条测试直接证明"两侧字节一致"，其余都是源码比对 |
 | `com/spi_hal_pins.c/.h` | QSPI3 主机：E7 符号集中、§4.4 前导模拟、时钟档位表、一次裸事务。**ISR 声明在 0 号向量表**（SDD §18 C1），优先级 **TX=6 / RX=9 / ER=10**（C2 表中 CPU2 空档，避开 ASCLIN1 的 5/7/13） | 已完成，**已随 2026-09-26 IDE 构建闭合通过 TriCore 编译**。已核对：`channelBasedCs=disabled` + `mode=short` 下 iLLD 全程保持 CS 有效（"begin stream" BACON + 末字 LAST=1，`deactivateSlso()` 仅在 `rx.remaining==0` 时执行）→ 前导与数据在同一次片选内 |
-| `com/link.c/.h` | §4.2 泵：寄存器连读两次取稳定快照（重试 3 次）、`TX_PENDING` 门控 RDDMA 突发 + `INT0` 收尾、`RX_ROOM` 门控 WRDMA 突发 + `WR_END` 收尾、`SF_ALIVE` 500 ms 判活、P23.0 **电平轮询 + 2 ms 保活**（原稿"IOM 中断"作废，E11）、§5.5 命令入队；本轮再加 `LINK_gen()`/`LINK_setClock()`（§4.3 + E14）、`LINK_sendTelemetry()`、按 TYPE/CID 白名单的 `link_dispatch` | 已完成（主机 `-Wall -Wextra -Werror` 语法干净，**已通过 TriCore 编译与链接**）；`Link_Health` 作为 G1/G5 的观测点（CPU2 无可打印串口，见 SDD §18 C3）。**本轮修掉的自身缺陷**：① 分派不看 CID（会把 `CFG`/`PAIR` 首字节当命令执行，§5.2）；② `txFrames` 按"段"而非"帧"计数，G5 的吞吐判据会虚高；③ `ERRSTAT` 位表臆造（E13）；④ 遥测 6 B（E13/§5.5）。新增观测计数器：`cmdBadLen`/`cmdUnsupportedCid`/`cmdUnsupportedOp`/`unhandledType`/`genWrites`/`genNoAck`，G1 台架上这几个**必须全 0 或可解释** |
+| `com/link.c/.h` | §4.2 泵：**寄存器单读快照 + 消费端钳位**（V1.6；原"连读两次取稳定快照（重试 3 次）"已移除，是"空载正常、满载断连"的根因）、`SF_READY` 魔数错静默 `LINK_DOWN` 自愈、`TX_PENDING` 门控 RDDMA 突发 + `INT0` 收尾、`RX_ROOM` 门控 WRDMA 突发 + `WR_END` 收尾、**`SF_ALIVE` 500 ms 唯一判活**、P23.0 **电平轮询 + 2 ms 保活**（原稿"IOM 中断"作废，E11）、§5.5 命令入队；另有 `LINK_gen()`/`LINK_setClock()`（§4.3 + E14）、`LINK_sendTelemetry()`、按 TYPE/CID 白名单的 `link_dispatch`、1 Hz 档台架诊断行 `LINK_diagPrint()` | 已完成（主机 `-Wall -Wextra -Werror` 语法干净，**已通过 TriCore 编译与链接**）；`Link_Health` 作为 G1/G5 的观测点（CPU2 无可打印串口，见 SDD §18 C3）。**2026-09-27 泵简化（V1.6/`ae10aac`）**：① 快照改单读 + 钳位（`RX_ROOM` 新增 `LINK_RX_ROOM_MAX=1024` 钳位），撕裂读不再升级成失联急停；② LOST 只由 ALIVE 判定；③ READY 沿仅 `SF_parserInit` 重锁 RX、移除 `GEN RESET_LINK` 重同步握手（原重试路径可把泵无限占住——"复位后无法连接"的第二根因）；④ 本机 TX SEQ 保持连续，从机按 §5.3 重锁自愈。**此前修掉的自身缺陷**：① 分派不看 CID（会把 `CFG`/`PAIR` 首字节当命令执行，§5.2）；② `txFrames` 按"段"而非"帧"计数，G5 的吞吐判据会虚高；③ `ERRSTAT` 位表臆造（E13）；④ 遥测 6 B（E13/§5.5）。观测计数器：`cmdBadLen`/`cmdUnsupportedCid`/`cmdUnsupportedOp`/`unhandledType`/`genWrites`/`genNoAck`，G1 台架上这几个**必须全 0 或可解释** |
 | `Cpu2_Main.c` | 挂载 `LINK_init(SPIHAL_CLK_1M)` + `LINK_main()` 超循环 + 20 ms 遥测发送 | 已完成，**且已是两个 TASKING 构建配置的默认路径**（`USE_SPI_LINK` 定义进 Debug 与 Release，2026-09-26 UART 链路弃用，见 SDD §5.6 末条）。遥测已改填完整 `SF_Telemetry`：**有真源的**有 `seq`/`uptimeMs`/`state`/`faultCode`/`fwVer`(0x00010200)/`linkErrRate`，**2026-09-27 起新增 `v_meas`（CPU1 编码器经 xcore 物理域，mm/s）与 `odo_session`（左右侧里程平均）**；**其余仍显式填 0 并在代码里逐条注明缺什么**——`v_target` 待 §5.2 伺服（毫米目标域）、`battery_mv/pct` 缺 ADC 通道、`odo_total` 缺 DFlash 持久化（§4.3）、`linkRttMs` 缺 HBT 打点、`hwRev` 缺板级标识来源。手机页面据此显示 0 是**如实**，不是丢包。另有 1 Hz `SPD=` 台架行（`XCORE_logi`，左/右 mm/s + 本次里程 + alive），无手机也可在 CPU0 控制台核对车速 |
 | `.cproject` | 两个 TASKING 配置解除 `Libraries/iLLD/TC27D/Tricore/Qspi{,/.Std,.SpiMaster}` 与 `Dma{,/.Dma,.Std}` 排除项（`Qspi/SpiSlave` 仍排除）；`test/` 加入排除（主机单测不得进 TriCore 构建）；V1.3 又随目录重排把 `App/Bsp/Middleware{,/com,/sf}` include 项换成 `app/bsp/mw{,/xcore,/proto}/com/mw/sf` | 已完成，**IDE 构建链接闭合已于 2026-09-26 达成**（Debug 配置 0 错误；`IfxQspi_SpiMaster.c` 即使 `useDma=FALSE` 也引用三个非内联 `IfxDma_Dma_*`，故 Dma 必须一并放开——构建结果证实该判断） |
 | `com/wifi_at.c`（原 `Middleware/wifi_at.c`） | 量产构建默认关闭（`USE_WIFI_AT`），保留为 G1 失败回退与产线返工通道 | **2026-09-26 已弃用 UART 板间链路**（用户决策）：`USE_SPI_LINK` 定义进 Debug 与 Release 两个 TASKING 配置，UART/AT 分支只在手动删除该符号时才编译，功能上等同"默认关闭"。**剩余的差最后一步**：把开关极性翻正为 `USE_WIFI_AT`（SDD §5.6 末条），排在 G1 之后做，届时同步改本行与 SDD 该条口径 |
@@ -315,7 +325,7 @@ loop:
 
 ## 8. 验证计划与门禁（逐档，不可跳级）
 
-> **执行状态（2026-09-26 第三轮）**：**G2 的"主机单测"子项已过两件事**——① SF 编解码（`test/host/test_sf.c`，2855 断言 / 400 万随机字节）；② 38 B 遥测布局（`test/host/test_sf_telemetry.c`，154 断言，且是把从机 `proto_frames.c` 编进来做双向交叉，这条才算跨侧证据）。**TC275 侧 TASKING IDE 构建链接闭合也已达成**（2026-09-26，Debug 0 错误，QSPI+DMA 链接证实闭合；顺带修复 `rt/encoder.c` 的 `int32` 类型错——该文件此前从未被 TriCore 编译过）。**剩余门禁全部未执行**：G1 波形兼容是下一步唯一入口。G4 的注入手段在软件侧不再欠账。
+> **执行状态（2026-09-26 第三轮）**：**G2 的"主机单测"子项已过两件事**——① SF 编解码（`test/host/test_sf.c`，**2873** 断言 / 400 万随机字节，含 2026-09-27 新增的 SEQ 越窗重锁 `test_seq_relock`）；② 38 B 遥测布局（`test/host/test_sf_telemetry.c`，154 断言，且是把从机 `proto_frames.c` 编进来做双向交叉，这条才算跨侧证据）。**TC275 侧 TASKING IDE 构建链接闭合也已达成**（2026-09-26，Debug 0 错误，QSPI+DMA 链接证实闭合；顺带修复 `rt/encoder.c` 的 `int32` 类型错——该文件此前从未被 TriCore 编译过）。**剩余门禁全部未执行**：G1 波形兼容是下一步唯一入口。G4 的注入手段在软件侧不再欠账。
 
 | 门禁 | 内容 | 通过判据 | 失败动作 |
 |---|---|---|---|
@@ -334,7 +344,7 @@ loop:
 |---|---|---|---|
 | R7（新增，取代 R4 的主风险位） | **E8：AURIX QSPI 无 CMD/ADDR 相位，用数据字节模拟能否被 Espressif HD 从机正确解析未证** | 方案根本可行性 | G1 前置一次性验证；已备两条退路（自写从机驱动 / 回退 UART——**2026-09-26 起 UART 已弃用，退路要删 `USE_SPI_LINK` 重编 + 两侧重刷镜像，代价比弃用前高**） |
 | R8 | C6 从机 RX 须 4 字节对齐 + DMA 缓冲约束 | 帧/段设计 | 已通过"段末补 0 到 4 倍数 + LEN 只数字节载荷"吸收（§5.1） |
-| R9 | 寄存器读非原子（E5） | 主机误判待发长度 | 连读两次相同 + 重试 3 次 + 不可信即判失联（§4.3/§5.4） |
+| R9 | 寄存器读非原子（E5） | 主机误判待发长度 | **单读 + 消费端钳位容错**（V1.6 重写）：READY 魔数错 → 静默 `LINK_DOWN` 自愈；`TX_PENDING`/`RX_ROOM` 越界即钳位；判失联只由 ALIVE 承担。原"连读两次相同 + 重试 3 次 + 不可信即判失联"已废弃——从机随时改写寄存器，比对只会把撕裂读放大成"越忙越断连"（§4.2/§5.4） |
 | R10 | C6 自身 OTA 写 flash 期间 SPI 从机是否掉事务 | OTA 过程链路抖动 | 台架实测项；必要时 OTA 写块间隙插入 HBT 保活，或 OTA 期间限速/限动（对齐 SDD R3 的"OTA 中限速 50%"） |
 | R11 | **实物已确认为"杜邦线直连 + 无外部上拉"**（23 §9.3）：IRQ 开漏仅由 TC275 片内上拉撑高 → 边沿慢、驱动阻抗高 → **电平读错**（握手是轮询不是中断，E11） | 偶发空读事务（只耗轮询带宽）、命令下行时延退化 | 2 ms 保活轮询 + 寄存器连读校验兜底；**判活只看 `SF_ALIVE`，不用 IRQ 电平**；量产线束定长屏蔽并补外部上拉后再谈提速档 |
 | R12 | **两侧常量表各自漂移**（E13 已实测发生三次：FLAGS bit1、OTA CID、ERRSTAT 位图）。协议改动后只改一侧、或文档与代码不同步，都会在台架上表现为"莫名 CRC/格式错"或"错误位读反" | 联调期定位成本，且可能只在提速档出现 | ① `sf_frame.h` 与从机 `c6_sf/sf_frame.h` 的常量必须**整表覆盖式**比对，不抽查；② 38 B 载荷由 `test_sf_telemetry.c` 编译对方源码来锁死，**改过 `mw/sf/` 或 `c6_car/components/c6_sf` 必须重跑**；③ 本轮起该测试与门禁 G2 绑定（§8） |
