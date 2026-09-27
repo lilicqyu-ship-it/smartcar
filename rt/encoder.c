@@ -61,6 +61,12 @@ static const IfxGtm_Tim_TinMap *const g_tinPins[8] = {
  * a rebuild - ENCODER_setInvert() is the only writer, the ISR only reads. */
 static sint8 g_encInvert[ENCODER_COUNT] = { +1, +1, +1, +1 };
 
+/* Speed-conversion parameters, runtime state of the two macros above
+ * (doc 34 SS8.2). Only the setters write them, always clamped legal, so the
+ * 1 kHz conversions below can read them without re-checking. */
+static sint32 g_fullScaleMmS = ENCODER_FULL_SCALE_MM_S;
+static sint32 g_wheelDiaMm   = ENCODER_WHEEL_DIA_MM;
+
 static volatile sint32  g_count[ENCODER_COUNT];   /* x4 decoded, signed        */
 static volatile uint32 g_lastEdgeMs[ENCODER_COUNT];
 
@@ -185,6 +191,11 @@ void ENCODER_init(void)
         g_count[i]     = 0;
         g_lastEdgeMs[i] = 0u;
     }
+    /* The record apply path can run before ENCODER_init on a cold core;
+     * re-establish the defaults here so startup never inherits a stale
+     * divisor. */
+    g_fullScaleMmS = ENCODER_FULL_SCALE_MM_S;
+    g_wheelDiaMm   = ENCODER_WHEEL_DIA_MM;
     g_speedMmS[0] = 0;
     g_speedMmS[1] = 0;
     g_odometerMm[0] = 0u;
@@ -269,10 +280,12 @@ void ENCODER_task(void)
         }
 
         /* side delta counts BOTH wheels of the side, so a wheel rev is
-         * 2 * ENCODER_COUNTS_WHEEL_REV; side counts/ms -> wheel mm/s */
+         * 2 * ENCODER_COUNTS_WHEEL_REV; side counts/ms -> wheel mm/s.
+         * circMm/mmPerCount ride the runtime wheel diameter (doc 34 SS8.2,
+         * setter-clamped); the formulas are the pre-existing ones. */
         {
             float32 countsPerWheelRev = (float32)(2u * ENCODER_COUNTS_WHEEL_REV);
-            float32 circMm            = 3.14159265f * 65.0f;   /* wheel dia, bench-confirm */
+            float32 circMm            = 3.14159265f * (float32)g_wheelDiaMm;
             float32 mmPerS            = ((float32)medL * 1000.0f / countsPerWheelRev) * circMm;
 
             g_speedMmS[0] = (sint32)mmPerS;
@@ -283,7 +296,8 @@ void ENCODER_task(void)
         odomAcc[0] += (dl >= 0) ? (float32)dl : (float32)(-dl);
         odomAcc[1] += (dr >= 0) ? (float32)dr : (float32)(-dr);
         {
-            float32 mmPerCount = 65.0f * 3.14159265f / (float32)(2u * ENCODER_COUNTS_WHEEL_REV);
+            float32 mmPerCount = (float32)g_wheelDiaMm * 3.14159265f
+                               / (float32)(2u * ENCODER_COUNTS_WHEEL_REV);
 
             g_odometerMm[0] = (uint32)(odomAcc[0] * mmPerCount);
             g_odometerMm[1] = (uint32)(odomAcc[1] * mmPerCount);
@@ -338,6 +352,31 @@ sint8 ENCODER_getInvert(uint8 enc)
     return (enc < ENCODER_COUNT) ? g_encInvert[enc] : (sint8)0;
 }
 
+/* Setters clamp to the doc 34 SS8.1 ranges; an illegal value (a DFlash bit
+ * flip reaching the apply path) falls back to the macro default instead of
+ * dividing by zero or scaling by nonsense in the 1 kHz loop. */
+void ENCODER_setFullScaleMmS(sint32 mmS)
+{
+    g_fullScaleMmS = (mmS >= CALIB_FULLSCALE_MIN) && (mmS <= CALIB_FULLSCALE_MAX)
+                         ? mmS : (sint32)ENCODER_FULL_SCALE_MM_S;
+}
+
+sint32 ENCODER_getFullScaleMmS(void)
+{
+    return g_fullScaleMmS;
+}
+
+void ENCODER_setWheelDiaMm(sint32 mm)
+{
+    g_wheelDiaMm = (mm >= CALIB_WHEELDIA_MIN) && (mm <= CALIB_WHEELDIA_MAX)
+                       ? mm : (sint32)ENCODER_WHEEL_DIA_MM;
+}
+
+sint32 ENCODER_getWheelDiaMm(void)
+{
+    return g_wheelDiaMm;
+}
+
 /* The mm/s figures ride a sint16 across xcore; the physical top speed of this
  * drivetrain is two orders below the limit, so saturation only trips when the
  * count source is broken - clamp instead of wrapping into a bogus sign. */
@@ -361,8 +400,8 @@ void ENCODER_publish(void)
 {
     XcoreEncoder enc;
 
-    enc.pctLeft  = (sint16)((g_speedMmS[0] * 1000) / ENCODER_FULL_SCALE_MM_S);
-    enc.pctRight = (sint16)((g_speedMmS[1] * 1000) / ENCODER_FULL_SCALE_MM_S);
+    enc.pctLeft  = (sint16)((g_speedMmS[0] * 1000) / g_fullScaleMmS);
+    enc.pctRight = (sint16)((g_speedMmS[1] * 1000) / g_fullScaleMmS);
 
     if (enc.pctLeft > 1000)  { enc.pctLeft = 1000;  }
     if (enc.pctLeft < -1000) { enc.pctLeft = -1000; }

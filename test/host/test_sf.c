@@ -15,6 +15,7 @@
 #include <string.h>
 
 #include "mw/sf/sf_frame.h"
+#include "mw/calib/calib_record.h"
 
 static int g_checks;
 static int g_failed;
@@ -459,6 +460,230 @@ static void test_residual_timeout(void)
     CHECK_EQ(p.lastSeq, 1);
 }
 
+/* ---------------- DPT bench events + calibration record (doc 34) ------------ */
+
+/* EVT 0x22 (calibration result) and 0x23 (record echo) are the only frames
+ * the TC275 sends on its own initiative besides telemetry, and the C6 side
+ * decodes them by byte offset - so the exact payload length and the
+ * little-endian signed encoding are wire contract, not implementation. */
+static void test_evt_dpt_round_trip(void)
+{
+    SF_Parser p;
+    SF_Frame  f;
+    int16_t   n;
+    uint8_t   in22[CALIB_EVT_RESULT_LEN];
+    uint8_t   in23[CALIB_EVT_REC_LEN];
+    int8_t    invert[CALIB_REC_WHEELS] = { 1, -1, 1, -1 };
+    int32_t   delta[CALIB_REC_WHEELS]  = { 0, -123456, 42, 2147483647 };
+    CalibRecord rec;
+    uint16_t  i;
+
+    /* The declared lengths must match what the builders actually write:
+     * {op, status, invert x4, delta i32 x4, saved} is contiguous, so the
+     * length is exactly one byte past the saved index. doc 34 SS3.1's "26 B"
+     * was an arithmetic slip that left payload[22..25] uninitialised; the
+     * slave decoder (c6_car bridge.c:bridge_emit_cal) is the reference. */
+    CHECK_EQ(CALIB_EVT_RESULT_LEN, 23u);
+    CHECK_EQ(CALIB_EVT_RESULT_SAVED, CALIB_EVT_RESULT_LEN - 1u);
+    CHECK_EQ(2u + CALIB_REC_WHEELS + (CALIB_REC_WHEELS * 4u) + 1u,
+             CALIB_EVT_RESULT_LEN);
+    CHECK_EQ(CALIB_EVT_REC_LEN, 15u);
+
+    CALIBREC_fillDefaults(&rec);
+    rec.src          = CALIB_SRC_DFLASH;
+    rec.invert[1]    = -1;
+    rec.fullScaleMmS = 843;
+    rec.wheelDiaMm   = 65;
+    CALIBREC_buildEvtResult(in22, CALIB_STATUS_DONE, invert, delta,
+                            CALIB_SAVED_WRITTEN);
+    CALIBREC_buildEvtRec(in23, &rec, 1u);
+
+    /* 0x22: op, status, invert i8x4, delta i32x4 LE, saved */
+    SF_parserInit(&p);
+    n = SF_build(SF_TYPE_EVT, 1, 0, SF_CID_DPT_RESULT, in22, sizeof(in22),
+                 seg, sizeof(seg));
+    CHECK_EQ(n, (int16_t)SF_wireSize(CALIB_EVT_RESULT_LEN));
+    feed_all(&p, seg, (uint16_t)n, 10u);
+    CHECK_EQ(p.stats.frames, 1);
+
+    SF_parserInit(&p);
+    {
+        SF_Event ev = SF_EV_NONE;
+
+        for (i = 0u; i < (uint16_t)n && ev != SF_EV_FRAME; i++)
+        {
+            ev = SF_parserFeed(&p, seg[i], 10u + i, &f);
+        }
+        CHECK_EQ(ev, SF_EV_FRAME);
+    }
+    CHECK_EQ(f.type, SF_TYPE_EVT);
+    CHECK_EQ(f.cid, SF_CID_DPT_RESULT);
+    CHECK_EQ(f.len, CALIB_EVT_RESULT_LEN);
+    CHECK_EQ(f.payload[0], 0x70);                 /* the op being answered   */
+    CHECK_EQ(f.payload[1], CALIB_STATUS_DONE);
+    for (i = 0u; i < CALIB_REC_WHEELS; i++)
+    {
+        CHECK_EQ((int8_t)f.payload[2u + i], invert[i]);
+    }
+    for (i = 0u; i < CALIB_REC_WHEELS; i++)
+    {
+        CHECK_EQ(CALIBREC_getI32(&f.payload[6u + i * 4u]), delta[i]);
+    }
+    CHECK_EQ(f.payload[CALIB_EVT_RESULT_SAVED], CALIB_SAVED_WRITTEN);
+
+    /* 0x23: ver, src, pos u8x4, invert i8x4, fullScale i16, wheelDia i16,
+     * crcOk */
+    SF_parserInit(&p);
+    n = SF_build(SF_TYPE_EVT, 2, 0, SF_CID_DPT_REC, in23, sizeof(in23),
+                 seg, sizeof(seg));
+    CHECK_EQ(n, (int16_t)SF_wireSize(CALIB_EVT_REC_LEN));
+    {
+        SF_Event ev = SF_EV_NONE;
+
+        for (i = 0u; i < (uint16_t)n && ev != SF_EV_FRAME; i++)
+        {
+            ev = SF_parserFeed(&p, seg[i], 40u + i, &f);
+        }
+        CHECK_EQ(ev, SF_EV_FRAME);
+    }
+    CHECK_EQ(f.cid, SF_CID_DPT_REC);
+    CHECK_EQ(f.len, CALIB_EVT_REC_LEN);
+    CHECK_EQ(f.payload[0], CALIB_REC_VER);
+    CHECK_EQ(f.payload[1], CALIB_SRC_DFLASH);
+    for (i = 0u; i < CALIB_REC_WHEELS; i++)
+    {
+        CHECK_EQ(f.payload[2u + i], rec.pos[i]);
+        CHECK_EQ((int8_t)f.payload[6u + i], rec.invert[i]);
+    }
+    CHECK_EQ(CALIBREC_getI16(&f.payload[10]), 843);
+    CHECK_EQ(CALIBREC_getI16(&f.payload[12]), 65);
+    CHECK_EQ(f.payload[14], 1u);
+}
+
+/* The DFlash blob is 20 B inside one 8 B-page-organised sector; a torn write
+ * or a bit flip must degrade to the defaults, never to a half-trusted sign. */
+static void test_calib_record_blob(void)
+{
+    uint8_t      blob[CALIB_REC_BLOB_LEN];
+    CalibRecord  rec;
+    CalibRecord  back;
+    uint8_t      i;
+
+    CALIBREC_fillDefaults(&rec);
+    rec.invert[0]    = -1;
+    rec.invert[3]    = -1;
+    rec.pos[2]       = CALIB_POS_FRONT_RIGHT;
+    rec.fullScaleMmS = 1234;
+    rec.wheelDiaMm   = 66;
+    rec.src          = CALIB_SRC_DFLASH;
+
+    CALIBREC_encode(&rec, blob);
+    CHECK_EQ(CALIBREC_decode(blob, &back), 1u);
+    CHECK(back.src == CALIB_SRC_DFLASH);
+    CHECK(memcmp(back.invert, rec.invert, sizeof(rec.invert)) == 0);
+    CHECK(memcmp(back.pos, rec.pos, sizeof(rec.pos)) == 0);
+    CHECK_EQ(back.fullScaleMmS, 1234);
+    CHECK_EQ(back.wheelDiaMm, 66);
+
+    /* erased sector: no magic, no record */
+    memset(blob, 0xFF, sizeof(blob));
+    CALIBREC_fillDefaults(&rec);
+    rec.invert[1] = -1;                      /* anything non-default */
+    CHECK_EQ(CALIBREC_decode(blob, &back), 0u);
+    CHECK(back.invert[1] == 1);              /* defaults came back    */
+    CHECK(back.src == CALIB_SRC_DEFAULT);
+
+    /* one flipped data bit: CRC catches it */
+    CALIBREC_encode(&rec, blob);
+    blob[15] ^= 0x01u;
+    CHECK_EQ(CALIBREC_decode(blob, &back), 0u);
+    CHECK(back.src == CALIB_SRC_DEFAULT);
+
+    /* CRC-correct but illegal contents: range check must reject (a sign of 0
+     * or an out-of-band full scale would poison the 1 kHz loop) */
+    CALIBREC_encode(&rec, blob);
+    blob[11] = 0u;                           /* invert[1] = 0 */
+    CHECK_EQ(CALIBREC_decode(blob, &back), 0u);
+
+    CALIBREC_encode(&rec, blob);
+    blob[14] = 0x00u;                        /* fullScale = 0, low byte */
+    blob[15] = 0x00u;
+    SF_putU16(&blob[18], SF_crc16(blob, 18u));   /* repair the CRC over the lie */
+    CHECK_EQ(CALIBREC_decode(blob, &back), 0u);
+
+    /* unknown layout version refuses without reading the body */
+    CALIBREC_encode(&rec, blob);
+    blob[4] = (uint8_t)(CALIB_REC_VER + 1u);
+    SF_putU16(&blob[18], SF_crc16(blob, 18u));
+    CHECK_EQ(CALIBREC_decode(blob, &back), 0u);
+
+    /* every legal full-scale/diameter pair survives (range edges included) */
+    {
+        static const int16_t fullScales[] = { 100, 5000, 1000 };
+        static const int16_t dias[]       = { 30, 200, 65 };
+
+        for (i = 0u; i < 3u; i++)
+        {
+            CALIBREC_fillDefaults(&rec);
+            rec.fullScaleMmS = fullScales[i];
+            rec.wheelDiaMm   = dias[i];
+            CALIBREC_encode(&rec, blob);
+            CHECK_EQ(CALIBREC_decode(blob, &back), 1u);
+            CHECK_EQ(back.fullScaleMmS, fullScales[i]);
+            CHECK_EQ(back.wheelDiaMm, dias[i]);
+        }
+    }
+}
+
+/* Inbound command bodies: the receivers must clamp and reject by length, not
+ * by trusting the sender. */
+static void test_dpt_command_bodies(void)
+{
+    uint8_t     body[CALIB_REC_SET_LEN];
+    uint8_t     motor;
+    int16_t     duty;
+    CalibRecord rec;
+    uint8_t     i;
+
+    /* 0x71 MOTOR_JOG {motor u8, duty i16}: out-of-range motor rejected,
+     * duty clamped to the +-500 bench limit */
+    body[0] = 3u;
+    CALIBREC_putI16(&body[1], 900);
+    CHECK_EQ(CALIBREC_jogDecode(body, &motor, &duty), 1u);
+    CHECK_EQ(motor, 3u);
+    CHECK_EQ(duty, CALIB_JOG_DUTY_MAX);
+    CALIBREC_putI16(&body[1], -900);
+    CHECK_EQ(CALIBREC_jogDecode(body, &motor, &duty), 1u);
+    CHECK_EQ(duty, -CALIB_JOG_DUTY_MAX);
+    body[0] = 4u;
+    CHECK_EQ(CALIBREC_jogDecode(body, &motor, &duty), 0u);
+
+    /* 0x73 REC_SET {pos x4, invert x4, fullScale, wheelDia} */
+    for (i = 0u; i < 4u; i++)
+    {
+        body[i]      = (uint8_t)(3u - i);
+        body[4u + i] = (uint8_t)((i & 1u) ? 0xFFu : 1u);   /* -1 / +1 */
+    }
+    CALIBREC_putI16(&body[8], 1500);
+    CALIBREC_putI16(&body[10], 72);
+    CALIBREC_fillDefaults(&rec);
+    CHECK_EQ(CALIBREC_recSetDecode(body, CALIB_REC_SET_LEN, &rec), 1u);
+    CHECK_EQ(rec.invert[1], -1);
+    CHECK_EQ(rec.fullScaleMmS, 1500);
+    CHECK_EQ(rec.wheelDiaMm, 72);
+
+    /* wrong length, illegal sign, illegal position, illegal full scale */
+    CHECK_EQ(CALIBREC_recSetDecode(body, CALIB_REC_SET_LEN - 1u, &rec), 0u);
+    body[4] = 0u;
+    CHECK_EQ(CALIBREC_recSetDecode(body, CALIB_REC_SET_LEN, &rec), 0u);
+    body[4] = 0xFFu;
+    body[0] = 4u;
+    CHECK_EQ(CALIBREC_recSetDecode(body, CALIB_REC_SET_LEN, &rec), 0u);
+    body[0] = 0u;
+    CALIBREC_putI16(&body[8], 90);
+    CHECK_EQ(CALIBREC_recSetDecode(body, CALIB_REC_SET_LEN, &rec), 0u);
+}
+
 /* ---------------- memory safety under a byte storm ---------------- */
 #define GUARD_BYTES 64u
 #define GUARD_BYTE  0xA5u
@@ -588,6 +813,9 @@ int main(void)
     test_seq_window();
     test_seq_relock();
     test_residual_timeout();
+    test_evt_dpt_round_trip();
+    test_calib_record_blob();
+    test_dpt_command_bodies();
     storm(2000000u, 0u);
     storm(2000000u, 1u);
 

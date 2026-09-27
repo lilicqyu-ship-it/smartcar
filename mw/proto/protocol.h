@@ -26,11 +26,18 @@
 #define PROTO_CMD_CLEAR_FAULT     0x31
 #define PROTO_CMD_EMERGENCY_STOP  0x32
 
-/* Production-test command (DPT channel, doc 21 SS6.2 / 23 SS8.4): CPU1 runs
- * the automated wheel-direction pulse test - WHEELS OFF THE GROUND, ~1.4 s,
- * result on the console log. Arrives as SF CMD/DPT op 0x70, which link.c
- * forwards verbatim; the phone UI has no button for it, a WS/test client does. */
+/* Production-test commands (DPT channel, doc 21 SS6.2 / 23 SS8.4 / 34 SS9):
+ * CPU1 runs the automated wheel-direction pulse test - WHEELS OFF THE GROUND,
+ * ~1.4 s, result on the console log AND on EVT 0x22. 0x71 jogs one motor open
+ * loop from the bench; 0x72/0x73/0x74 read, write and clear the calibration
+ * record in DFlash (doc 34 SS8), echoed on EVT 0x23. They arrive as SF CMD/DPT
+ * ops, which link.c forwards verbatim; the phone UI reaches them through the
+ * calibration page (c6_car doc 17). */
 #define PROTO_CMD_DPT_CAL_DIR     0x70
+#define PROTO_CMD_DPT_MOTOR_JOG   0x71
+#define PROTO_CMD_DPT_REC_GET     0x72
+#define PROTO_CMD_DPT_REC_SET     0x73
+#define PROTO_CMD_DPT_REC_CLEAR   0x74
 
 /* Response: same CMD echoed back, DATA carries result */
 #define PROTO_CMD_STATUS_REPLY    0x40

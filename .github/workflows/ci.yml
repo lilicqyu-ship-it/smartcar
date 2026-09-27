@@ -37,7 +37,7 @@ jobs:
         run: |
           mkdir -p test/host/out
           gcc -std=c99 -Wall -Wextra -Werror -O2 -I . \
-              test/host/test_sf.c mw/sf/sf_frame.c \
+              test/host/test_sf.c mw/sf/sf_frame.c mw/calib/calib_record.c \
               -o test/host/out/test_sf
           test/host/out/test_sf
 

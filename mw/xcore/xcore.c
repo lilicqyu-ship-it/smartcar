@@ -52,6 +52,22 @@ static volatile boolean g_estopReq;
  * by CPU1 so repeated 0x70 commands while a run is in flight do not queue up */
 static boolean g_calibReq;
 
+/* CPU1 -> CPU0 calibration result, one block per run (doc 34 SS3.2) */
+static XcoreCalibResult g_calibResult;
+
+/* CPU0 -> CPU1 per-motor jog duties + change counter (doc 34 SS9.3) */
+static sint16  g_jogDuty[CALIB_REC_WHEELS];
+static uint32  g_jogSeq;
+
+/* CPU0 -> CPU1/CPU2 live calibration record (doc 34 SS8/SS9.2) */
+static XcoreRecordLive g_recordLive;
+
+/* CPU0 -> CPU2 event frame outbox (doc 34 SS9.4); same ring discipline as the
+ * command queue, head written by CPU0, tail by CPU2. */
+static XcoreEvtFrame g_evtQueue[XCORE_EVT_QUEUE_LEN];
+static uint32        g_evtHead;                /* writer: CPU0 */
+static uint32        g_evtTail;                /* reader: CPU2 */
+
 /* CPU1 -> telemetry: battery VIN in mV (bsp/adc EMA-filtered). Single writer
  * CPU1, readers CPU0/CPU2; 0 until the first sample lands. */
 static uint16 g_battMv;
@@ -89,12 +105,19 @@ void XCORE_init(void)
     memset((void *)&g_status, 0, sizeof(g_status));
     memset((void *)&g_cmdQueue, 0, sizeof(g_cmdQueue));
     memset((void *)g_logRing, 0, sizeof(g_logRing));
+    memset((void *)&g_calibResult, 0, sizeof(g_calibResult));
+    memset((void *)g_jogDuty, 0, sizeof(g_jogDuty));
+    memset((void *)&g_recordLive, 0, sizeof(g_recordLive));
+    memset((void *)g_evtQueue, 0, sizeof(g_evtQueue));
     g_lock     = 0;
     g_estopReq = FALSE;
     g_calibReq = FALSE;
     g_battMv   = 0u;
     g_logWr    = 0;
     g_logRd    = 0;
+    g_jogSeq   = 0u;
+    g_evtHead  = 0u;
+    g_evtTail  = 0u;
     __dsync();
 }
 
@@ -203,6 +226,144 @@ boolean XCORE_dirCalibConsume(void)
     g_calibReq = FALSE;
     XCORE_unlock();
     return req;
+}
+
+void XCORE_calibResultPublish(const XcoreCalibResult *res)
+{
+    if (res == NULL_PTR)
+    {
+        return;
+    }
+
+    XCORE_lock();
+    g_calibResult           = *res;
+    g_calibResult.pending   = TRUE;
+    __dsync();
+    XCORE_unlock();
+}
+
+boolean XCORE_calibResultTake(XcoreCalibResult *res)
+{
+    boolean had;
+
+    XCORE_lock();
+    had = g_calibResult.pending;
+    if (had != FALSE)
+    {
+        *res = g_calibResult;
+        g_calibResult.pending = FALSE;
+    }
+    XCORE_unlock();
+    return had;
+}
+
+void XCORE_jogSet(uint8 motor, sint16 duty)
+{
+    if (motor >= CALIB_REC_WHEELS)
+    {
+        return;
+    }
+
+    XCORE_lock();
+    g_jogDuty[motor] = duty;
+    g_jogSeq++;
+    __dsync();
+    XCORE_unlock();
+}
+
+uint32 XCORE_jogGet(XcoreJog *jog)
+{
+    uint32 seq;
+    uint8  i;
+
+    XCORE_lock();
+    for (i = 0u; i < CALIB_REC_WHEELS; i++)
+    {
+        jog->duty[i] = g_jogDuty[i];
+    }
+    seq         = g_jogSeq;
+    jog->jogSeq = seq;
+    XCORE_unlock();
+    return seq;
+}
+
+void XCORE_jogClear(void)
+{
+    uint8 i;
+
+    XCORE_lock();
+    for (i = 0u; i < CALIB_REC_WHEELS; i++)
+    {
+        g_jogDuty[i] = 0;
+    }
+    __dsync();
+    XCORE_unlock();
+}
+
+void XCORE_recordGet(XcoreRecordLive *out)
+{
+    XCORE_lock();
+    *out = g_recordLive;
+    XCORE_unlock();
+}
+
+void XCORE_recordSet(const CalibRecord *rec)
+{
+    if (rec == NULL_PTR)
+    {
+        return;
+    }
+
+    XCORE_lock();
+    g_recordLive.rec     = *rec;
+    g_recordLive.version = (uint8)(g_recordLive.version + 1u);
+    __dsync();
+    XCORE_unlock();
+}
+
+boolean XCORE_evtPush(const XcoreEvtFrame *frame)
+{
+    boolean ok = FALSE;
+
+    if ((frame == NULL_PTR) || (frame->len > XCORE_EVT_MAX_PAYLOAD))
+    {
+        return FALSE;
+    }
+
+    XCORE_lock();
+    if ((g_evtHead - g_evtTail) < XCORE_EVT_QUEUE_LEN)
+    {
+        g_evtQueue[g_evtHead % XCORE_EVT_QUEUE_LEN] = *frame;
+        g_evtHead++;
+        __dsync();
+        ok = TRUE;
+    }
+    XCORE_unlock();
+    return ok;
+}
+
+boolean XCORE_evtPeek(XcoreEvtFrame *frame)
+{
+    boolean had = FALSE;
+
+    XCORE_lock();
+    if (g_evtHead != g_evtTail)
+    {
+        *frame = g_evtQueue[g_evtTail % XCORE_EVT_QUEUE_LEN];
+        had    = TRUE;
+    }
+    XCORE_unlock();
+    return had;
+}
+
+void XCORE_evtPop(void)
+{
+    XCORE_lock();
+    if (g_evtHead != g_evtTail)
+    {
+        g_evtTail++;
+    }
+    XCORE_unlock();
 }
 
 void XCORE_battSetMv(uint16 mv)

@@ -14,8 +14,14 @@
 
 /* Measured wheel speed that maps to percent*10 = 1000 in the telemetry domain.
  * Default assumes ~1000 mm/s at full command; recalibrate on the bench
- * (doc/20-design/21-software-design.md section 15.3 speed calibration). */
+ * (doc/20-design/21-software-design.md section 15.3 speed calibration). Since
+ * doc 34 SS8.2 this is a runtime variable (0x73 REC_SET / DFlash record), the
+ * macro is only its default - the conversion formulas stay untouched. */
 #define ENCODER_FULL_SCALE_MM_S    1000
+
+/* Wheel tyre diameter in mm, second runtime speed-conversion parameter
+ * (doc 34 SS8.2); the encoder.c constant it replaces was 65.0f. */
+#define ENCODER_WHEEL_DIA_MM       65
 
 /* A side is E1+E2 (motors A+B), right side is E3+E4 (motors C+D) - same split
  * as the motor algorithm. */
@@ -38,5 +44,15 @@ boolean ENCODER_isAlive(void);                /* edges seen within the alive win
  * without a rebuild; CPU1-only writer, applied by the ISRs immediately. */
 void    ENCODER_setInvert(uint8 enc, sint8 sign);
 sint8   ENCODER_getInvert(uint8 enc);
+
+/* Speed-conversion parameters (doc 34 SS8.2): runtime-writable so the
+ * calibration record can retune the percent and mm/s domains without a
+ * rebuild. CPU1-only writer (the record apply path in motor_algo); setters
+ * clamp illegal values back to the macro defaults - a DFlash bit flip must
+ * never carry a zero divisor into the 1 kHz loop. */
+void ENCODER_setFullScaleMmS(sint32 mmS);
+sint32 ENCODER_getFullScaleMmS(void);
+void ENCODER_setWheelDiaMm(sint32 mm);
+sint32 ENCODER_getWheelDiaMm(void);
 
 #endif /* ENCODER_H */

@@ -127,7 +127,11 @@ static boolean link_snapshot(void)
  *                                            still lives on CPU1 (motor targets
  *                                            from CPU0 are percent x 10).
  *   SF_CID_DIAG   {u8 op, ...}               op 0x53 / 0x42, no consumer yet
- *   SF_CID_DPT    {u8 op, ...}               op 0x70..0x79,产测 not implemented
+ *   SF_CID_DPT    {u8 op, ...}               op 0x70..0x79, the bench
+ *                                            calibration/DFlash-record family
+ *                                            (doc 34 SS9); results and record
+ *                                            echoes come back as TYPE_EVT CIDs
+ *                                            0x22 / 0x23 on the event outbox
  * The last two go to CPU0 as op + remaining bytes, which is what the demo path
  * did over UART; CPU0's switch ignores codes it does not know, and the counters
  * here say what was seen.

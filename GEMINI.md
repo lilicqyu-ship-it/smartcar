@@ -11,7 +11,7 @@ If there is no `.codegraph/` directory, skip CodeGraph entirely — indexing is 
 
 ## AI 作业前必读
 
-本仓库为 **Infineon TC275 三核 + ESP32-C6** 的智能小车 TC275 侧固件。在改任何代码前，先读 **[doc/30-tc275/33-ai-codebase-guide.md](doc/30-tc275/33-ai-codebase-guide.md)**（AI 协作指南）：代码地图、跨核数据流与单位域、三条高频改动路径的正确改法、安全机制现状、验证命令、9 条红线速查、硬件事实速查。
+本仓库为 **Infineon TC275 三核 + ESP32-C6** 的智能小车 TC275 侧固件。在改任何代码前，先读 **[doc/30-tc275/33-ai-codebase-guide.md](doc/30-tc275/33-ai-codebase-guide.md)**（AI 协作指南）：代码地图、跨核数据流与单位域、三条高频改动路径的正确改法、安全机制现状、验证命令、10 条红线速查、硬件事实速查。
 
 几条最关键的红线（详见指南）：
 - 三核分工固定：**CPU0=FreeRTOS，CPU1/CPU2=裸机（禁用任何 FreeRTOS API）**；核间只走 `mw/xcore` 共享内存。

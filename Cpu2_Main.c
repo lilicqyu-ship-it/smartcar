@@ -45,7 +45,6 @@
 #ifdef USE_SPI_LINK
 #include "com/link.h"
 #include "mw/xcore/xcore.h"
-#include "rt/encoder.h"
 #include "bsp/adc.h"
 #include <string.h>
 
@@ -74,10 +73,11 @@
  *                  absolute accumulators, so the average is the distance the
  *                  chassis covered, straight or curved.
  *   vTargetL/R   - the CPU0 command (percent*10) converted to mm/s through
- *                  ENCODER_FULL_SCALE_MM_S, the same constant that defines
- *                  the percent domain of vMeas, so both columns share one
- *                  calibration (SDD SS5.2 servo landed 2026-09-27; before
- *                  that the target was a raw percent and stayed 0 here).
+ *                  the calibration record's fullScaleMmS (doc 34 SS8.2), the
+ *                  same number CPU1 divides the measured speed by, so both
+ *                  columns share one calibration and follow a REC_SET at once
+ *                  (SDD SS5.2 servo landed 2026-09-27; before that the
+ *                  target was a raw percent and stayed 0 here).
  *   batteryMv/Pct- VIN from CPU1's VADC (D24A J6-1 divider on AN4/X2-23,
  *                  EMA-filtered, through the xcore battery block). Pct is
  *                  derived with ADC_BATT_CELLS, an assumption until the cell
@@ -99,13 +99,16 @@ static uint32 link_sessionOdoMm(const XcoreEncoder *enc)
 }
 
 /* CPU0's target is percent*10 of full scale; the telemetry field is mm/s.
- * The conversion is the full-scale calibration constant, so until the bench
- * tune of doc 21 SS15.3 pins ENCODER_FULL_SCALE_MM_S down, both target and
- * measured columns carry the same "assumed 1000 mm/s at full command" caveat
- * - a consistent pair, not two independent guesses. */
+ * The conversion is the calibration record's full-scale value (doc 34 SS8.2:
+ * the same number CPU1 divides the measured speed by, so both columns stay
+ * one consistent pair even after a REC_SET changed it). */
 static sint16 link_targetToMmS(sint16 pct10)
 {
-    sint32 mmS = ((sint32)pct10 * (sint32)ENCODER_FULL_SCALE_MM_S) / 1000;
+    XcoreRecordLive live;
+    sint32          mmS;
+
+    XCORE_recordGet(&live);
+    mmS = ((sint32)pct10 * (sint32)live.rec.fullScaleMmS) / 1000;
 
     if (mmS > 32767)
     {
@@ -116,6 +119,26 @@ static sint16 link_targetToMmS(sint16 pct10)
         mmS = -32768;
     }
     return (sint16)mmS;
+}
+
+/* Event outbox drain (doc 34 SS3.4 / SS9.4): CPU0 pushes the DPT frames,
+ * this core owns the TX path. peek + pop-around-send means a full TX queue
+ * retries the SAME frame on the next tick instead of dropping it, so one
+ * calibration produces exactly one frame. */
+static void link_sendPendingEvents(void)
+{
+    XcoreEvtFrame frame;
+    uint8         sent = 0u;
+
+    while ((sent < XCORE_EVT_QUEUE_LEN) && (XCORE_evtPeek(&frame) != FALSE))
+    {
+        if (LINK_send(frame.type, frame.cid, frame.payload, frame.len) == FALSE)
+        {
+            break;                  /* backpressure: keep it pending          */
+        }
+        XCORE_evtPop();
+        sent++;
+    }
 }
 
 static void link_sendTelemetry(void)
@@ -256,6 +279,7 @@ void core2_main(void)
         {
             nextTelMs += LINK_TELEMETRY_PERIOD_MS;
             link_sendTelemetry();          /* keeps WRDMA traffic flowing for G5 */
+            link_sendPendingEvents();      /* DPT event frames queued by CPU0    */
         }
 
         if ((sint32)(STIME_nowMs() - nextDiagMs) >= 0)

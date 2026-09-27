@@ -31,8 +31,10 @@
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
 #include "IfxPort.h"
+#include "bsp/stime.h"
 #include "bsp/uart.h"
 #include "bsp/wdg.h"
+#include "mw/calib/calib_store.h"
 #include "mw/xcore/xcore.h"
 #include "mw/proto/protocol.h"
 #include "app/robot.h"
@@ -88,6 +90,13 @@ static void vRobotControlTask(void *pvParameters)
         }
 
         ROBOT_task();
+
+        /* DPT result mailbox + deferred calibration saves (doc 34 SS8.3).
+         * A save masks this core's interrupts for tens of ms; the 10 ms feed
+         * above and the one below bound the gap well inside the ~0.5 s CPU
+         * watchdog window. */
+        CALIB_tick();
+        WDG_serviceCpu();
 
         {
             ProtocolStatus status;
@@ -151,13 +160,24 @@ void core0_main(void)
     /* Shared memory must be initialized before any core leaves the sync event */
     XCORE_init();
 
+    /* Calibration record from DFlash (doc 34 SS8.3), loaded and published
+     * while CPU1/CPU2 are still held at the sync event - the motor core then
+     * starts on the stored signs and speed parameters instead of the
+     * compile-time defaults. A DFlash read is memory-mapped: no stall. */
+    STIME_init();
+    /* CALIB_init() logs its load outcome over ASCLIN0, so the UART must be
+     * up first; a print against the un-initialised driver traps (bus error
+     * on the ASCLIN0 SFR at 0xF0030000, whose clock is still gated). */
+    UART_init();
+    CALIB_init();
+
     /* Wait for CPU sync event */
     IfxCpu_emitEvent(&cpuSyncEvent);
     IfxCpu_waitEvent(&cpuSyncEvent, 1);
 
 #if defined(__TASKING__)
-    /* Initialize UART for serial printing */
-    UART_init();
+    /* UART was brought up before CALIB_init above; say so now that the
+     * scheduler-free init phase is done. */
     UART_println("UART initialized");
 
 

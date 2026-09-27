@@ -27,7 +27,18 @@
  * checked, g_encInvert flipped, result on the console log ("ENCCAL="). This
  * is doc 23 SS8.4 step 2 automated (doc 21 SS15.3 产测自动判向) and REQUIRES
  * THE WHEELS OFF THE GROUND: for ~1.4 s every wheel is commanded in turn
- * regardless of the CPU0 targets. */
+ * regardless of the CPU0 targets.
+ *
+ * Doc 34 additions, all bench-only:
+ *  - the calibration outcome is also published cross-core
+ *    (XCORE_calibResultPublish) so CPU0 can answer EVT 0x22 and persist it;
+ *    a request while a run is in progress is refused (CALIB_STATUS_BUSY),
+ *    never restarted.
+ *  - PROTO 0x71 (via XCORE_jogGet) drives one motor open loop, bypassing the
+ *    servo, until the command stream goes stale for MOTOR_JOG_TIMEOUT_MS.
+ *  - the live calibration record (XCORE_recordGet) feeds rt/encoder's
+ *    full-scale and wheel-diameter variables on a version edge.
+ * Output ownership priority: e-stop > calibration > jog > servo. */
 
 #define MOTOR_ALGO_PERIOD_MS     1       /* algorithm loop period */
 #define MOTOR_ALGO_MAX_STEP      2       /* max speed change per ms (0..1000 in 0.5 s) */

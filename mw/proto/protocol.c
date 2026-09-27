@@ -7,6 +7,7 @@
  *    called from the 10 ms control task with the xcore queue drained. */
 #include "mw/proto/protocol.h"
 #include "app/robot.h"
+#include "mw/calib/calib_store.h"
 #include "mw/xcore/xcore.h"
 #include "com/wifi_at.h"
 
@@ -109,10 +110,46 @@ void PROTO_handleCommand(uint8 cmd, const uint8 *data, uint8 len)
 
     case PROTO_CMD_DPT_CAL_DIR:
         /* Bench-only (wheels off ground): latch the request, CPU1's 1 kHz
-         * loop picks it up and answers on the console log. Not a driving
-         * command, so no heartbeat and no fault gating - an e-stop on CPU1
-         * aborts the run from its own branch anyway. */
+         * loop picks it up and answers on the console log AND on EVT 0x22.
+         * Not a driving command, so no heartbeat and no fault gating - an
+         * e-stop on CPU1 aborts the run from its own branch anyway. */
         XCORE_dirCalibRequest();
+        break;
+
+    case PROTO_CMD_DPT_MOTOR_JOG:
+    {
+        uint8  motor;
+        sint16 duty;
+
+        /* Driving-class bench tool (doc 34 SS9.1): fault-latched or e-stopped
+         * it is refused, and it never feeds the heartbeat, so a jog stream on
+         * its own cannot keep the drive alive. CPU1 owns the 300 ms freshness
+         * timeout and the duty clamp lives here. */
+        if ((len != CALIB_JOG_LEN) ||
+            (CALIBREC_jogDecode(data, &motor, &duty) == 0u))
+        {
+            XCORE_logln("JOG rejected (bad payload)");
+            break;
+        }
+        if ((ROBOT_getFaultCode() != 0u) || ROBOT_isEmergencyStop())
+        {
+            XCORE_logln("JOG rejected (fault)");
+            break;
+        }
+        XCORE_jogSet(motor, duty);
+        break;
+    }
+
+    case PROTO_CMD_DPT_REC_GET:
+        CALIB_sendRecord();
+        break;
+
+    case PROTO_CMD_DPT_REC_SET:
+        CALIB_recordSet(data, len);
+        break;
+
+    case PROTO_CMD_DPT_REC_CLEAR:
+        CALIB_recordClear();
         break;
 
     default:

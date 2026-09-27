@@ -4,7 +4,7 @@
 |---|---|
 | 文档编号 | 32 |
 | 域 | TC275（本仓库固件工程） |
-| 版本 | V1.7（2026-09-27：**电池电压采集随 21 V1.9 同步**——§8 排障表新增 `batteryMv` 读数异常一行，验收动作=万用表量 X2-15 基准与电池电压（`23 §5.5`）。V1.6 = 2026-09-27：**CPU0/CPU1 硬件看门狗启用随 21 V1.8 同步**——§3 调试期约定从"看门狗已关"翻转为"现在是开的，跑着复位先查喂狗断流"，§8 排障表"跑一段时间后复位"改口径并新增"打印 `FATAL: stack overflow in task:` 后复位"一行；栈溢出钩子不再静默空转。V1.5 = 2026-09-27：**CPU1 速度闭环 + 判向自动化随 21 V1.7 同步**——§8 排障表新增 `SRV=`/`ENCCAL` 两行与"闭环不振荡"口径；判向首选 `0x70` 自动版。V1.4 = 2026-09-27：**链路泵简化随 `com/link.c` `ae10aac` 同步**——§1 单测断言数 2855→2873（`test_seq_relock`）并补 GitHub Actions 一句；§8 排障表"寄存器读回不稳"行改按单读快照新口径（`regUnstable` 计数器已随泵简化移除），新增"满载断连"历史故障行。V1.3 = 2026-09-26：**UART 板间链路弃用的构建口径**——§1 改为"两个 TASKING 配置都已定义 `USE_SPI_LINK`，构建只产出 SPI；GCC 配置无此符号"，§3 CPU2 行同步；§4 步骤 5 补 IRQ 无外部上拉、判活只看 `SF_ALIVE`（`23 §9.3`）。V1.2 = 目录重排同步：仓库已按 SDD §3.4 目标态布局组织（`app/ rt/ com/ mw/ bsp/`），include 为工程根限定路径；§1 主机单测命令、§3 任务地图、§5/§7/§8 路径同步；TC275 IDE 构建链接闭合已达成（Debug 0 错误）。V1.1 = SPI 链路契约回写（主机单测命令与排障表）） |
+| 版本 | V1.8（2026-09-27：**台架标定/DPT 落地随 34/21 V1.10 同步**——§1 单测命令 ① 的源列表加 `mw/calib/calib_record.c`（`.github/workflows/ci.yml` 同改，否则 CI 链接失败）、断言数 2873→**2948**；§8 排障表新增三行：开机 `CALIBREC` 一行怎么看、`0x71` jog 不动、DFlash 保存失败/`SAVED=2`；§5 补"写 DFlash 只允许 CPU0 且必须喂狗+关中断"。V1.7（2026-09-27）= **电池电压采集随 21 V1.9 同步**——§8 排障表新增 `batteryMv` 读数异常一行，验收动作=万用表量 X2-15 基准与电池电压（`23 §5.5`）。V1.6 = 2026-09-27：**CPU0/CPU1 硬件看门狗启用随 21 V1.8 同步**——§3 调试期约定从"看门狗已关"翻转为"现在是开的，跑着复位先查喂狗断流"，§8 排障表"跑一段时间后复位"改口径并新增"打印 `FATAL: stack overflow in task:` 后复位"一行；栈溢出钩子不再静默空转。V1.5 = 2026-09-27：**CPU1 速度闭环 + 判向自动化随 21 V1.7 同步**——§8 排障表新增 `SRV=`/`ENCCAL` 两行与"闭环不振荡"口径；判向首选 `0x70` 自动版。V1.4 = 2026-09-27：**链路泵简化随 `com/link.c` `ae10aac` 同步**——§1 单测断言数 2855→2873（`test_seq_relock`）并补 GitHub Actions 一句；§8 排障表"寄存器读回不稳"行改按单读快照新口径（`regUnstable` 计数器已随泵简化移除），新增"满载断连"历史故障行。V1.3 = 2026-09-26：**UART 板间链路弃用的构建口径**——§1 改为"两个 TASKING 配置都已定义 `USE_SPI_LINK`，构建只产出 SPI；GCC 配置无此符号"，§3 CPU2 行同步；§4 步骤 5 补 IRQ 无外部上拉、判活只看 `SF_ALIVE`（`23 §9.3`）。V1.2 = 目录重排同步：仓库已按 SDD §3.4 目标态布局组织（`app/ rt/ com/ mw/ bsp/`），include 为工程根限定路径；§1 主机单测命令、§3 任务地图、§5/§7/§8 路径同步；TC275 IDE 构建链接闭合已达成（Debug 0 错误）。V1.1 = SPI 链路契约回写（主机单测命令与排障表）） |
 | 前置阅读 | `21 §18`（工程级实现约束，**动手前必读**）、`23`（接线真源） |
 | 与 31 的分工 | 31 描述"现在代码是什么样"，本文描述"要加东西该按什么步骤动、去哪验证" |
 
@@ -29,9 +29,10 @@
 **SF 层的主机单测**（不需要 TriCore 工具链，**改过 `mw/sf/` 或 `c6_car/components/c6_sf|c6_proto` 必须跑**）。本机用 MSYS2/MinGW gcc（若在 Git Bash 里报共享库错误，先 `export PATH="/c/msys64/mingw64/bin:$PATH"`），在**仓库根目录**执行：
 
 ```bash
-# ① 帧编解码（2873 断言，含 400 万随机字节风暴与 SEQ 越窗重锁 test_seq_relock）
+# ① 帧编解码（2948 断言，含 400 万随机字节风暴、SEQ 越窗重锁 test_seq_relock，
+#    以及 34 号标定/DPT 的 0x22/0x23 事件与 20 B 记录 blob 往返）
 gcc -std=c99 -Wall -Wextra -Werror -O2 -I . \
-    test/host/test_sf.c mw/sf/sf_frame.c \
+    test/host/test_sf.c mw/sf/sf_frame.c mw/calib/calib_record.c \
     -o test/host/out/test_sf.exe && ./test/host/out/test_sf.exe
 
 # ② 38 B 遥测布局（跨侧模式 154 断言；不带交叉为 116 项）—— 加 -DC6_CROSS_CHECK 会把**从机自己的**
@@ -63,7 +64,7 @@ gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
 | 核 | 形态 | 代码 | 加东西时的落点 |
 |---|---|---|---|
 | CPU0 | FreeRTOS | `Cpu0_Main.c` + `app/robot.c` | 新任务 = 在 `Cpu0_Main.c` 建任务；控制类逻辑进 `robot.c` 的 10 ms 拍。**CPU0 看门狗已开**：常驻任务若会长期占住 CPU，需自行喂狗或提高 robot 任务优先级，否则 0.3~0.5 s 内整机复位 |
-| CPU1 | 裸机 1 kHz | `Cpu1_Main.c` + `rt/motor_algo.c` + `rt/servo.c` + `rt/encoder.c` | 算法进 `motor_algo.c`（斜坡/闭环/失联看门狗/判向）+ `servo.c`（速度 PI），**不许阻塞、不许打印**（打印走日志环，§6）；编码器 ISR 属 `encoder.c`，优先级 16~23 见 `21 §18 C2`。**CPU1 看门狗已开**，喂狗点在 `MOTOR_ALGO_run()` 环内 |
+| CPU1 | 裸机 1 kHz | `Cpu1_Main.c` + `rt/motor_algo.c` + `rt/servo.c` + `rt/encoder.c` | 算法进 `motor_algo.c`（斜坡/闭环/失联看门狗/判向 `0x70`/直驱 jog `0x71`）+ `servo.c`（速度 PI），**不许阻塞、不许打印**（打印走日志环，§6）；`rt/encoder.c` 的满量程/轮径是**运行时变量**（`g_fullScaleMmS`/`g_wheelDiaMm`，由 `mw/calib` 生效记录写入，公式不许动，`34 §8.2`）；编码器 ISR 属 `encoder.c`，优先级 16~23 见 `21 §18 C2`。**CPU1 看门狗已开**，喂狗点在 `MOTOR_ALGO_run()` 环内 |
 | CPU2 | 裸机超循环 | **构建只产出 SPI**：`Cpu2_Main.c` + `com/{link,spi_hal_pins}.c` + `mw/sf/`（`USE_SPI_LINK` 已在两个 TASKING 配置定义，§1）；UART 分支（`Cpu2_Main.c` + `com/wifi_at.c`）已弃用，删符号才编 | 链路层改动进 `com/`；SF 帧格式改动要同时改 `21 §6.1a`、`22 §5` 与 C6 侧 `c6_sf`（两处独立实现，靠文档对齐） |
 
 命名与风格（照现有代码，勿另立）：文件名小写下划线、模块前缀大写 `MODULE_`（`ROBOT_task` / `MOTOR_ALGO_run` / `PROTO_feedByte` / `XCORE_estopRequest` / `WIFI_sendRaw`）；头文件守卫 `MODULE_H`；**代码注释用英文，文档与 commit message 用中文**。
@@ -90,6 +91,10 @@ gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
 2. 实现里：`acquireMutex` → 拷贝 → `releaseMutex` → `__dsync()`；队列满时的策略要么"丢弃 + 记日志"，要么"覆盖最新"，**不允许阻塞**（CPU1 是 1 kHz 硬节拍）。
 3. 需要"失联可判"的通道带 `seq` 计数（参考电机目标通道：CPU1 用它做 150 ms 失联看门狗）。
 4. 同步更新：`31 §4` 通道表 + `21 §5.5`（量产 xcore v2 目标态）。
+
+**"发布过没有"要判边沿的通道用版本计数，不靠数据本身**：`XCORE_init()` 会把共享 RAM 整片清零，而"全零"常常是一组**合法值**（清零的 `CalibRecord` 看着就是合理参数），于是"从未发布"与"发布了默认值"不可区分——参考 `XcoreRecordLive{version, rec}` 与 `XcoreJog{jogSeq}`，消费者按边沿取用（`MOTOR_ALGO_applyRecord`，`34 §9.4`）。纯**信箱**（`CalibResult.pending`，取走即清）用 0/1 标志没这个问题，它的零态就是"没有结果"。
+
+**擦写 Flash 只允许 CPU0、且只在控制任务里**：三核共抢一个 FMU，序列必须 `WDG_serviceCpu()` → `__disable()` → 擦/逐页写 → 回读 → `__enable()` → 再喂一次（`mw/calib/calib_store.c`，`34 §8.2`）。**禁止**用 `IfxScuWdt_serviceCpuWatchdog`（它带 ENDINIT 保护动作，绕过 `bsp/wdg.h` 的统一封装）。CPU1/CPU2 在这几十毫秒里只是 stall，不会复位——前提是链接脚本没把任何代码/常量放进 DF0（当前 `Lcf_*.lsl` 只在 memory 段声明 `dfls0`，属实，改链接脚本要复核）。
 
 **急停类语义不要走普通队列**：需要"不等控制拍"的动作，参考 `XCORE_estopRequest()` 的旁路位模式（`21 §5.3`、`31 §10`）。
 
@@ -133,6 +138,9 @@ CPU1/CPU2 打印 = 整行拷进日志环（1 KB，满则整行丢弃），由 CP
 | 闭环行为不对（震荡/响应弱/爬行） | `rt/servo` 增益是**待标定初值**（Kp=0.8 / Ki=0.01/ms / FF=1.0，`21 §5.2`） | 看 CPU0 控制台 1 Hz `SRV=` 行（左/右各 目标/实测/duty，percent×10），按 §15.3 台架整定；**禁止无数据拍脑袋改**。电机不转先看 `SRV=` 里 duty 是否非 0（0 = 目标为 0，或编码器无效时的开环回退路径没把 duty 送出） |
 | 某轮"前进却倒转"、闭环越推越快（正反馈） | 该轮 `g_encInvert` 符号与实际相反——闭环的正反馈形态，**先停**再判向 | 四轮离地，发 `0x70` 自动判向：CPU1 逐轮脉冲并翻转符号表，控制台看 `ENCCAL=` 行（invert[0..3] + delta[0..3]，delta=0 = 编码器没计数，查接线）；手动版见 `23 §8.4` 步骤 2 |
 | 遥测 `batteryMv` 恒 0 / 读数与万用表对不上 | ① D24A J6-1 → X2-23 线未接（mV 停在 0，块初值）② 基准不符：`ADC_BATT_VAREF_MV=3300` 与 X2-15 实测不符 ③ 节数假设错（`batteryPct` 偏差大但 mV 对） | 万用表三步：量电池 VIN、量 J6-1（应 ≈ VIN/11）、量 kit X2-15（应 ≈3300 mV）；常数集中在 `bsp/adc.h`，改完只重编（`23 §5.5`） |
+| 开机没有 `CALIBREC loaded from DFLASH`，而是 `CALIBREC invalid, defaults` | 扇区 15 是空的（首次/擦过）或 blob 的 magic/CRC/范围三关没过（`34 §8.1`）——**这不是故障**，固件按默认值继续跑 | 发 `0x72`，看 EVT `0x23` 的 `src` 与 `crcOk`：默认态 `src=0,crcOk=0`；再发一次 `0x70`（判向成功会自动持久化）或 `0x73`，静止后重启，应当变成 `loaded from DFLASH` |
+| `0x70`/`0x73` 之后参数**当场生效但重启就没了** | DFlash 写是**延后**的：目标速度、jog duty、实测轮速三者全为 0 且静止 500 ms 后才真正擦写（`34 §8.3`）；或写入失败——EVT `0x22` 的 `saved` 字节（payload[22]）才是判据：`0` 无需保存 / `1` 已写入 / `2` 失败并会安静重试 | 台架把轮子停稳再等 ≥1 s，看 `0x22` 的 `saved`；持续 `2` 时先怀疑扇区地址与 FMU 状态（`CALIB_SECTOR_ADDR`，`34 §11.4 C1/C2`——DF0 容量 16 扇区还是 48 扇区未定论，且 `Libraries/iLLD/Flash` 在 `.cproject` 里被排除） |
+| 发 `0x71` jog 电机不转 | ① 只在 300 ms 内有效，单发一帧必然立刻超时（控制台有 `JOG timeout`，需**持续续约**）② FAULT 或急停生效会拒收 ③ duty 被钳到 ±500（percent×10 = ±50%） | 看 CPU0 控制台 `JOG timeout` 是否刷屏；`SRV=` 行的 duty 列就是实际施加的 jog 值（目标列为 0）；`22 §5.5` 的 DPT 白名单没放行也表现为"发了没反应" |
 
 ## 9. 提交前自检（文档同步义务）
 

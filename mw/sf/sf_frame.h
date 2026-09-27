@@ -90,6 +90,11 @@ extern "C" {
  * C6 side decodes exactly that (c6_link/link.c:sf_to_v2). */
 #define SF_CID_ERROR          0x20u                /* TYPE_EVT                     */
 #define SF_CID_STATE          0x21u                /* TYPE_EVT                     */
+/* DPT bench events, TC275 -> C6 (doc 34 SS3.1 / SS9.1). Payload shapes are
+ * built by mw/calib/calib_record.c; C6 tunnels them unchanged through its SF
+ * DIAG bridge and turns them into UI events in c6_bridge/bridge.c. */
+#define SF_CID_DPT_RESULT     0x22u                /* TYPE_EVT, 23 B calib result  */
+#define SF_CID_DPT_REC        0x23u                /* TYPE_EVT, 15 B record echo   */
 #define SF_EVT_KIND_PAIR_REPLY 0x01u               /* TYPE_EVT / CID_STATE byte 0  */
 #define SF_CID_OTA_BEGIN      0x30u                /* TYPE_OTA_DATA {u32 total, u32 crc32} */
 #define SF_CID_OTA_CHUNK      0x31u                /* TYPE_OTA_DATA {u16 idx, data<=240}   */

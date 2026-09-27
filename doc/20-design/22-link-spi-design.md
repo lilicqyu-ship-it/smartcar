@@ -3,11 +3,11 @@
 | 项 | 内容 |
 |---|---|
 | 文档编号 | **22**（域：设计·硬件）· 定位：21（SDD）§3.7/§6 的 LINK 段展开 · 上级索引 [00-index.md](../00-index.md) |
-| 文档版本 | **V1.6**（2026-09-27 **链路泵简化**，`com/link.c` 提交 `ae10aac` 的文档回写：§4.2 寄存器快照从"连读两次比对"改为**单读 + 消费端钳位容错**（双读比对在从机随时改写寄存器的实况下是"空载正常、满载断连"的根因）；**失联判定只由 `SF_ALIVE` 500 ms 承担**，READY 魔数错改为静默 `LINK_DOWN` 自愈；§4.3 `RESET_LINK` 降级为台架/诊断入口，READY 沿的重同步握手移除；§5.3/§5.4 SEQ 新增**连续 8 帧越窗即丢窗重锁**（`SF_SEQ_RELOCK_RUN`）；§7.2/§8 断言数同步 2873。V1.2 = C6 已烧录 SPI 固件后完善 TC275 侧的回写：E13/E14 证据、SF 常量对齐、三层白名单、38 B 遥测硬契约；**V1.3 = 2026-09-26 目录重排与构建闭合**：TC275 侧代码随 SDD V1.3 由 `Middleware/{com,sf}/` 迁至目标态 `com/`、`mw/sf/`（§7.2 表内路径已同步），**TASKING IDE 构建链接闭合达成**（Debug 0 错误，顺带修复 `rt/encoder.c` 的 `int32`→`sint32` 类型错，该文件此前从未被 TriCore 编译过），§11 第 1 问的 IDE 构建前置已销项。**V1.4 = 2026-09-26 电气形态确认**：两板之间所有连线均为杜邦线直连、**无任何外部元件**（无外部上拉/端接/电平转换），IRQ 高电平仅由 TC275 片内上拉提供——§3 待确认项 ① 随之销项，§3.1 表、§3.2、§5.4、§9 R11 同步；真源与 coding 后果见 [23-wiring.md](../20-design/23-wiring.md) §9.3。实施仍待 G1 台架门禁通过，未拍板项见 §11。**V1.5 = 2026-09-26 UART 板间链路弃用**（用户决策）：`USE_SPI_LINK` 定义进 `.cproject` 的 Debug 与 Release 两个 TASKING 配置，SPI 成为唯一被构建出来的板间链路，UART/AT 分支降为"删符号才编得出"的 G1 应急返修 + C6 调试控制台；§7.2 两行、§9 R7 退路代价、§11 状态同步；口径真源 SDD V1.5 §5.6 末条） |
+| 文档版本 | **V1.7**（2026-09-27 **标定/DPT 通道落地**，真源 [34-calib-dpt.md](../30-tc275/34-calib-dpt.md)：§5.2 EVT 登记 **0x22 标定结果(23 B)/0x23 标定记录回显(15 B)**，两条都由 **CPU0 组帧**（`saved` 字节只有写 flash 的 CPU0 知道）经 xcore EVT 出站队列交给 CPU2 发，**发送失败留在队头重试**；DPT `op` 已定义清单从 0x70 扩到 0x70~0x74；§5.5 产测行同步。载荷 ≤ `PROTO_MAX_PAYLOAD`(16) 不变，最长命令体 = REC_SET 的 12 B，**分派层零改动**。§7.2 `.cproject` 行登记同批构建配置改动（Debug 解除 Flash 排除 + 加 `mw/calib` include），并记下一项**新暴露的既有缺口**：Release (TASKING) 与 GCC 配置的 include 列表缺 `com/rt/mw/sf/mw/calib`，Release 自 SF 落地起从未与源码同步（34 §12 Q4）。V1.6 = 2026-09-27 **链路泵简化**，`com/link.c` 提交 `ae10aac` 的文档回写：§4.2 寄存器快照从"连读两次比对"改为**单读 + 消费端钳位容错**（双读比对在从机随时改写寄存器的实况下是"空载正常、满载断连"的根因）；**失联判定只由 `SF_ALIVE` 500 ms 承担**，READY 魔数错改为静默 `LINK_DOWN` 自愈；§4.3 `RESET_LINK` 降级为台架/诊断入口，READY 沿的重同步握手移除；§5.3/§5.4 SEQ 新增**连续 8 帧越窗即丢窗重锁**（`SF_SEQ_RELOCK_RUN`）；§7.2/§8 断言数同步 2873。V1.2 = C6 已烧录 SPI 固件后完善 TC275 侧的回写：E13/E14 证据、SF 常量对齐、三层白名单、38 B 遥测硬契约；**V1.3 = 2026-09-26 目录重排与构建闭合**：TC275 侧代码随 SDD V1.3 由 `Middleware/{com,sf}/` 迁至目标态 `com/`、`mw/sf/`（§7.2 表内路径已同步），**TASKING IDE 构建链接闭合达成**（Debug 0 错误，顺带修复 `rt/encoder.c` 的 `int32`→`sint32` 类型错，该文件此前从未被 TriCore 编译过），§11 第 1 问的 IDE 构建前置已销项。**V1.4 = 2026-09-26 电气形态确认**：两板之间所有连线均为杜邦线直连、**无任何外部元件**（无外部上拉/端接/电平转换），IRQ 高电平仅由 TC275 片内上拉提供——§3 待确认项 ① 随之销项，§3.1 表、§3.2、§5.4、§9 R11 同步；真源与 coding 后果见 [23-wiring.md](../20-design/23-wiring.md) §9.3。实施仍待 G1 台架门禁通过，未拍板项见 §11。**V1.5 = 2026-09-26 UART 板间链路弃用**（用户决策）：`USE_SPI_LINK` 定义进 `.cproject` 的 Debug 与 Release 两个 TASKING 配置，SPI 成为唯一被构建出来的板间链路，UART/AT 分支降为"删符号才编得出"的 G1 应急返修 + C6 调试控制台；§7.2 两行、§9 R7 退路代价、§11 状态同步；口径真源 SDD V1.5 §5.6 末条） |
 | 日期 | 2026-09-27 |
 | 参考体例 | [21-software-design.md](../20-design/21-software-design.md) §3.7（板间通信选型）、§6（协议）、§16（风险） |
 | 决策范围 | C6↔TC275 主链路物理层 = **SPI**；帧协议 = **新定 SPI 专用 SF 帧**；拓扑 = **TC275 QSPI3 主机 ↔ ESP32-C6 SPI2 从机（`spi_slave_hd`）+ 1 根握手线** |
-| 交付状态 | **设计 + 两侧固件代码 + 文档回写均已落地**：C6 侧见 `c6_car` `22e15f2`（§7.1），TC275 侧见 `com/`+`mw/sf/`（§7.2，2026-09-26 随 SDD V1.3 目录重排迁入目标态目录）。**2026-09-27 链路泵已按台架故障根因简化**（V1.6 §4.2/§5.4：单读快照 + ALIVE 唯一判活 + SEQ 越窗重锁）。SDD **V1.6**、23-wiring.md **V1.11**。主机单测：帧层 2873 断言 + 遥测层 154 断言（跨侧模式；无跨侧 116 项；后者**把从机 `proto_frames.c` 编进同一可执行文件**做双向交叉）。**TASKING IDE 构建链接已闭合**（2026-09-26，Debug 配置 0 错误）。**未做**：G1 台架波形验证、整车通电联调。**接线形态已确认**：两板之间全部杜邦线直连、无外部元件（含 IRQ 无外部上拉），见 23 §9.3。**UART 板间链路已弃用**（2026-09-26）：Debug/Release 两个 TASKING 配置都定义 `USE_SPI_LINK`，日常构建只产出 SPI 路径 |
+| 交付状态 | **设计 + 两侧固件代码 + 文档回写均已落地**：C6 侧见 `c6_car` `22e15f2`（§7.1），TC275 侧见 `com/`+`mw/sf/`（§7.2，2026-09-26 随 SDD V1.3 目录重排迁入目标态目录）。**2026-09-27 链路泵已按台架故障根因简化**（V1.6 §4.2/§5.4：单读快照 + ALIVE 唯一判活 + SEQ 越窗重锁）。SDD **V1.6**、23-wiring.md **V1.11**。主机单测：帧层 2948 断言 + 遥测层 154 断言（跨侧模式；无跨侧 116 项；后者**把从机 `proto_frames.c` 编进同一可执行文件**做双向交叉）。**V1.7 的 DPT 落地（`mw/calib/`、xcore 四块、0x71~0x74 / EVT 0x22/0x23）只过了主机单测，尚未经过 TASKING 构建，也没有台架证据**（34 §11.5）。**TASKING IDE 构建链接已闭合**（2026-09-26，Debug 配置 0 错误）。**未做**：G1 台架波形验证、整车通电联调。**接线形态已确认**：两板之间全部杜邦线直连、无外部元件（含 IRQ 无外部上拉），见 23 §9.3。**UART 板间链路已弃用**（2026-09-26）：Debug/Release 两个 TASKING 配置都定义 `USE_SPI_LINK`，日常构建只产出 SPI 路径 |
 | 前提变化 | ① C6 改为自研固件（`c6_car` 工程），不再受 esp-at 约束；② `c6_car` 的 proto v2 与 myCar 的 demo 异或 CRC 帧**本来就不兼容**，链路换向时一并按 SPI 特性重定帧，成本最低 |
 
 ---
@@ -187,7 +187,7 @@ loop:
 | 0x02 | TEL | TC275→C6 | 0x10 遥测 | 遥测类**丢旧留新**（SDD §5.5 策略） |
 | 0x03 | ACK | 双向 | 被确认帧的 TYPE | 携带被确认 SEQ；OTA/产测命令必需 |
 | 0x04 | HBT | 双向 | — | 心跳，兼作链路 RTT 测量（主机在事务边界取时间戳，比 UART 时代更准） |
-| 0x05 | EVT | TC275→C6 | 0x20 错误 / 0x21 状态迁移 | 错误码/状态变化即时上报 |
+| 0x05 | EVT | TC275→C6 | 0x20 错误 / 0x21 状态迁移 / **0x22 标定结果（23 B）/ 0x23 标定记录回显（15 B）** | 错误码/状态变化即时上报。0x22/0x23 的载荷表与语义真源见 [34-calib-dpt.md](../30-tc275/34-calib-dpt.md) §3/§9；两者由 **CPU0 组帧**（只有 CPU0 知道是否已写进 DFlash），经 xcore EVT 出站队列由 CPU2 发送，**队列满则同一帧重试到发出去为止**（V1.7，丢帧=标定结果永久丢失） |
 | 0x06/0x07 | OTA_D / OTA_C | 双向 | `0x06`：0x30 BEGIN / 0x31 CHUNK / 0x35 ABORT；`0x07`：0x32 ACK / 0x33 STATUS / 0x34 SWAP | SDD §9 的 OTA 通道。CID **不是**连续的 0x30..0x34：`ABORT=0x35` 挂在数据 TYPE 上，`ACK/STATUS/SWAP` 挂在控制 TYPE 上（E13，与从机 `sf_frame.h:70-75` 同值） |
 | 0x08 | DBG | TC275→C6 | 0x40 日志环快照 | 诊断导出用，可丢 |
 | 0x0F | VND | 双向 | — | 厂商/保留 |
@@ -198,7 +198,7 @@ loop:
 |---|---|---|---|
 | 0x01 | DRIVE | `{u8 op, i16 v, i16 w}` | **是**（v2 命令码，§5.5） |
 | 0x03 | DIAG | `{u8 op, ...}`，`op` = 0x53 DIAG / 0x42 LINK_STATE | **是** |
-| 0x04 | DPT | `{u8 op, ...}`，`op` = 0x70..0x79 | **是** |
+| 0x04 | DPT | `{u8 op, ...}`，`op` = 0x70..0x79（已定义 0x70 判向 / 0x71 逐电机 jog / 0x72 读记录 / 0x73 写记录(12 B) / 0x74 清记录，真源 [34](../30-tc275/34-calib-dpt.md) §9） | **是** |
 | 0x02 | CFG | v2 `0x52` 载荷**原样**（`{k, v...}`） | **不是**——从机已把 op 剥掉 |
 | 0x05 | PAIR | v2 `0x51` 载荷**原样**（`token[16]`） | **不是**——同上 |
 
@@ -236,7 +236,7 @@ loop:
 | 0x41 遥测 | 0x02/0x10 | **38 B 逐字节不变**（从机用 v2 解码器解，不复建表）；字段名保留 `linkErrRate`，语义换成 SPI 口径 = `(crcErr+seqErr)` / 已收帧，单位 0.1% |
 | 0x44 BAUD REQ/ACK | **删除** | 时钟档位改由 `GEN` 事务 + 产测/诊断命令控制，不再运行时自适应 |
 | 0x60..0x6F OTA | 0x06/0x07 | CHUNK 载荷上限由 62 B 提到 **240 B**（SF LEN ≤248）→ 1 MB 镜像分片数从 16k 降到 4.3k |
-| 0x70..0x7F 产测 | 0x01/0x04 | 不变 |
+| 0x70..0x7F 产测 | 0x01/0x04 | 不变（`op` 容器原样转发；本轮在其下新增 0x71~0x74 与 EVT 0x22/0x23，见 §5.2 与 34 号） |
 
 **TC275 侧已实现的分派规则**（`com/link.c:link_dispatch`，2026-09-26 按已烧录从机固件重写）：**不存在"payload[0] 就是命令字节"这一条通用约定**——上一版文档这么写，而 §5.2 表里 `CFG`/`PAIR` 两个通道的首字节并不是命令码，照那句话实现就会把配置键号或配对 token 当成命令执行。现行规则是**三层白名单，任何一层不过就整帧拒收并计数，绝不按偏移猜**：
 
@@ -305,12 +305,12 @@ loop:
 
 | 文件 | 动作 | 实测状态 |
 |---|---|---|
-| `mw/sf/sf_frame.c/.h` | SF 帧编解码（纯 C99，无 OS/iLLD 依赖，TriCore/RISC-V/主机三目标同份源码） | **已完成**：`test/host/test_sf.c` **2873** 项断言 0 失败（含 0..248 全长度往返、段内多帧、乱字节重同步、SEQ 窗口与回绕、**SEQ 越窗 8 帧重锁 `test_seq_relock`（2026-09-27 新增）**、残帧超时、400 万字节随机风暴 + 金库哨兵未越界）→ **门禁 G2 的帧层部分已过**。本轮按 E13 把 `FLAGS`/OTA CID 与从机对齐，并删掉零引用、从机也没有的 `SF_FLAG_RESYNC 0x04` |
+| `mw/sf/sf_frame.c/.h` | SF 帧编解码（纯 C99，无 OS/iLLD 依赖，TriCore/RISC-V/主机三目标同份源码） | **已完成**：`test/host/test_sf.c` **2948** 项断言 0 失败（含 0..248 全长度往返、段内多帧、乱字节重同步、SEQ 窗口与回绕、**SEQ 越窗 8 帧重锁 `test_seq_relock`（2026-09-27 新增）**、残帧超时、400 万字节随机风暴 + 金库哨兵未越界，以及 V1.7 的 **EVT 0x22/0x23 逐字节往返 + 20 B 记录 blob 编解码 + DPT 命令体长度**，故 ① 的编译单元已加入 `mw/calib/calib_record.c`，`.github/workflows/ci.yml` 同改）→ **门禁 G2 的帧层部分已过**。本轮按 E13 把 `FLAGS`/OTA CID 与从机对齐，并删掉零引用、从机也没有的 `SF_FLAG_RESYNC 0x04` |
 | `mw/sf/sf_telemetry.c/.h`（新增） | 38 B 遥测载荷 codec（纯 C99、显式小端、不做结构体强转——TriCore 大端） | **已完成并验证**：`test/host/test_sf_telemetry.c` 把**从机自己的 `proto_frames.c` 编进同一可执行文件**做双向交叉（我编→从机解 / 从机编→我解，含"短于 38 B 必须拒解"），`154 断言 / 0 失败`，`-Wall -Wextra -Werror` 干净。全表仅此一条测试直接证明"两侧字节一致"，其余都是源码比对 |
 | `com/spi_hal_pins.c/.h` | QSPI3 主机：E7 符号集中、§4.4 前导模拟、时钟档位表、一次裸事务。**ISR 声明在 0 号向量表**（SDD §18 C1），优先级 **TX=6 / RX=9 / ER=10**（C2 表中 CPU2 空档，避开 ASCLIN1 的 5/7/13） | 已完成，**已随 2026-09-26 IDE 构建闭合通过 TriCore 编译**。已核对：`channelBasedCs=disabled` + `mode=short` 下 iLLD 全程保持 CS 有效（"begin stream" BACON + 末字 LAST=1，`deactivateSlso()` 仅在 `rx.remaining==0` 时执行）→ 前导与数据在同一次片选内 |
 | `com/link.c/.h` | §4.2 泵：**寄存器单读快照 + 消费端钳位**（V1.6；原"连读两次取稳定快照（重试 3 次）"已移除，是"空载正常、满载断连"的根因）、`SF_READY` 魔数错静默 `LINK_DOWN` 自愈、`TX_PENDING` 门控 RDDMA 突发 + `INT0` 收尾、`RX_ROOM` 门控 WRDMA 突发 + `WR_END` 收尾、**`SF_ALIVE` 500 ms 唯一判活**、P23.0 **电平轮询 + 2 ms 保活**（原稿"IOM 中断"作废，E11）、§5.5 命令入队；另有 `LINK_gen()`/`LINK_setClock()`（§4.3 + E14）、`LINK_sendTelemetry()`、按 TYPE/CID 白名单的 `link_dispatch`、1 Hz 档台架诊断行 `LINK_diagPrint()` | 已完成（主机 `-Wall -Wextra -Werror` 语法干净，**已通过 TriCore 编译与链接**）；`Link_Health` 作为 G1/G5 的观测点（CPU2 无可打印串口，见 SDD §18 C3）。**2026-09-27 泵简化（V1.6/`ae10aac`）**：① 快照改单读 + 钳位（`RX_ROOM` 新增 `LINK_RX_ROOM_MAX=1024` 钳位），撕裂读不再升级成失联急停；② LOST 只由 ALIVE 判定；③ READY 沿仅 `SF_parserInit` 重锁 RX、移除 `GEN RESET_LINK` 重同步握手（原重试路径可把泵无限占住——"复位后无法连接"的第二根因）；④ 本机 TX SEQ 保持连续，从机按 §5.3 重锁自愈。**此前修掉的自身缺陷**：① 分派不看 CID（会把 `CFG`/`PAIR` 首字节当命令执行，§5.2）；② `txFrames` 按"段"而非"帧"计数，G5 的吞吐判据会虚高；③ `ERRSTAT` 位表臆造（E13）；④ 遥测 6 B（E13/§5.5）。观测计数器：`cmdBadLen`/`cmdUnsupportedCid`/`cmdUnsupportedOp`/`unhandledType`/`genWrites`/`genNoAck`，G1 台架上这几个**必须全 0 或可解释** |
 | `Cpu2_Main.c` | 挂载 `LINK_init(SPIHAL_CLK_1M)` + `LINK_main()` 超循环 + 20 ms 遥测发送 | 已完成，**且已是两个 TASKING 构建配置的默认路径**（`USE_SPI_LINK` 定义进 Debug 与 Release，2026-09-26 UART 链路弃用，见 SDD §5.6 末条）。遥测已改填完整 `SF_Telemetry`：**有真源的**有 `seq`/`uptimeMs`/`state`/`faultCode`/`fwVer`(0x00010200)/`linkErrRate`/`v_meas`/`odo_session`（2026-09-27 起），**`v_target`（percent×10 经 `ENCODER_FULL_SCALE_MM_S` 换算，SDD §5.2 伺服落地）与 `battery_mv/pct`（CPU1 VADC，D24A J6-1 分压 → X2-23/AN4，SDD V1.9）也已转 ✅**；**其余仍显式填 0 并在代码里逐条注明缺什么**——`odo_total` 缺 DFlash 持久化（§4.3）、`linkRttMs` 缺 HBT 打点、`hwRev` 缺板级标识来源。手机页面据此显示 0 是**如实**，不是丢包。另有 1 Hz `SPD=` 台架行（`XCORE_logi`，左/右 mm/s + 本次里程 + alive），无手机也可在 CPU0 控制台核对车速 |
-| `.cproject` | 两个 TASKING 配置解除 `Libraries/iLLD/TC27D/Tricore/Qspi{,/.Std,.SpiMaster}` 与 `Dma{,/.Dma,.Std}` 排除项（`Qspi/SpiSlave` 仍排除）；`test/` 加入排除（主机单测不得进 TriCore 构建）；V1.3 又随目录重排把 `App/Bsp/Middleware{,/com,/sf}` include 项换成 `app/bsp/mw{,/xcore,/proto}/com/mw/sf` | 已完成，**IDE 构建链接闭合已于 2026-09-26 达成**（Debug 配置 0 错误；`IfxQspi_SpiMaster.c` 即使 `useDma=FALSE` 也引用三个非内联 `IfxDma_Dma_*`，故 Dma 必须一并放开——构建结果证实该判断） |
+| `.cproject` | 两个 TASKING 配置解除 `Libraries/iLLD/TC27D/Tricore/Qspi{,/.Std,.SpiMaster}` 与 `Dma{,/.Dma,.Std}` 排除项（`Qspi/SpiSlave` 仍排除）；`test/` 加入排除（主机单测不得进 TriCore 构建）；V1.3 又随目录重排把 `App/Bsp/Middleware{,/com,/sf}` include 项换成 `app/bsp/mw{,/xcore,/proto}/com/mw/sf` | 已完成，**IDE 构建链接闭合已于 2026-09-26 达成**（Debug 配置 0 错误；`IfxQspi_SpiMaster.c` 即使 `useDma=FALSE` 也引用三个非内联 `IfxDma_Dma_*`，故 Dma 必须一并放开——构建结果证实该判断）。**V1.7 追加（2026-09-27，随 34 号落地）**：**只在 `TriCore Debug (TASKING)`** 解除 `Libraries/iLLD/TC27D/Tricore/Flash{,/Std}` 排除并加两条 include 项，另加 `mw/calib` include 项。**Release (TASKING) 与两个 GCC 配置的 include 列表至今缺 `com`/`rt`/`mw/sf`/`mw/calib`**（它们定义了 `USE_SPI_LINK` 却找不到 `com/link.h`），即 **Release 从 SF 落地那次起就与源码脱节、从未被构建验证过**——要用 Release 出镜像先补这批配置（真源 34 §11.4 C7 / §12 Q4） |
 | `com/wifi_at.c`（原 `Middleware/wifi_at.c`） | 量产构建默认关闭（`USE_WIFI_AT`），保留为 G1 失败回退与产线返工通道 | **2026-09-26 已弃用 UART 板间链路**（用户决策）：`USE_SPI_LINK` 定义进 Debug 与 Release 两个 TASKING 配置，UART/AT 分支只在手动删除该符号时才编译，功能上等同"默认关闭"。**剩余的差最后一步**：把开关极性翻正为 `USE_WIFI_AT`（SDD §5.6 末条），排在 G1 之后做，届时同步改本行与 SDD 该条口径 |
 | `mw/proto/protocol.c`（原 `Middleware/protocol.c`） | 不再是 LINK 帧真源；命令语义迁移进 `mw/sf` | 保持不动：命令**码表**仍是唯一真源（`link.c` 把白名单通道 `CMD/DRIVE·DIAG·DPT` 的 op 字节直接当 `PROTO_CMD_*` 用，`CFG`/`PAIR` 不参与，§5.2/§5.5），被取代的只是 UART 时代的 `AA 55` 容器 |
 | [23-wiring.md](../20-design/23-wiring.md) §9、§2 | §9 标题从"预研方案，待拍板"改"V1.0 选定"；§2 标注 UART 降级为调试/回退通道 | 已随 V1.4 接线更新完成；V1.5 再按本文 E11/E12 改握手与 §9.2 落地状态 |
@@ -325,7 +325,7 @@ loop:
 
 ## 8. 验证计划与门禁（逐档，不可跳级）
 
-> **执行状态（2026-09-26 第三轮）**：**G2 的"主机单测"子项已过两件事**——① SF 编解码（`test/host/test_sf.c`，**2873** 断言 / 400 万随机字节，含 2026-09-27 新增的 SEQ 越窗重锁 `test_seq_relock`）；② 38 B 遥测布局（`test/host/test_sf_telemetry.c`，154 断言，且是把从机 `proto_frames.c` 编进来做双向交叉，这条才算跨侧证据）。**TC275 侧 TASKING IDE 构建链接闭合也已达成**（2026-09-26，Debug 0 错误，QSPI+DMA 链接证实闭合；顺带修复 `rt/encoder.c` 的 `int32` 类型错——该文件此前从未被 TriCore 编译过）。**剩余门禁全部未执行**：G1 波形兼容是下一步唯一入口。G4 的注入手段在软件侧不再欠账。
+> **执行状态（2026-09-27 第四轮）**：**G2 的"主机单测"子项已过两件事**——① SF 编解码（`test/host/test_sf.c`，**2948** 断言 / 400 万随机字节，含 2026-09-27 新增的 SEQ 越窗重锁 `test_seq_relock` 与 V1.7 的 EVT 0x22/0x23 逐字节往返）；② 38 B 遥测布局（`test/host/test_sf_telemetry.c`，154 断言，且是把从机 `proto_frames.c` 编进来做双向交叉，这条才算跨侧证据）。**0x22/0x23 的载荷表没有跨侧单测**：从机侧解码器（`c6_bridge`）按偏移读，TC275 侧只证自己的编解码，**跨侧字节一致仍是源码比对**，与遥测层不同档。**TC275 侧 TASKING IDE 构建链接闭合也已达成**（2026-09-26，Debug 0 错误，QSPI+DMA 链接证实闭合；顺带修复 `rt/encoder.c` 的 `int32` 类型错——该文件此前从未被 TriCore 编译过；**V1.7 之后的 `mw/calib/`+xcore 新块尚未经过任何构建**）。**剩余门禁全部未执行**：G1 波形兼容是下一步唯一入口。G4 的注入手段在软件侧不再欠账。
 
 | 门禁 | 内容 | 通过判据 | 失败动作 |
 |---|---|---|---|
