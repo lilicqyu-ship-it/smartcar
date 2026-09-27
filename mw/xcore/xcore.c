@@ -48,6 +48,10 @@ static XcoreEncoder g_encoderStatus;
 /* CPU2 -> CPU1 fast e-stop bypass (cleared by CPU0 on fault clear/reset) */
 static volatile boolean g_estopReq;
 
+/* CPU0 -> CPU1 bench direction-calibration request, test-and-clear consumed
+ * by CPU1 so repeated 0x70 commands while a run is in flight do not queue up */
+static boolean g_calibReq;
+
 /* CPU0 -> CPU2 robot status mirror */
 static ProtocolStatus g_status;
 
@@ -83,6 +87,7 @@ void XCORE_init(void)
     memset((void *)g_logRing, 0, sizeof(g_logRing));
     g_lock     = 0;
     g_estopReq = FALSE;
+    g_calibReq = FALSE;
     g_logWr    = 0;
     g_logRd    = 0;
     __dsync();
@@ -174,6 +179,25 @@ void XCORE_estopClear(void)
 boolean XCORE_estopIsActive(void)
 {
     return g_estopReq;
+}
+
+void XCORE_dirCalibRequest(void)
+{
+    XCORE_lock();
+    g_calibReq = TRUE;
+    __dsync();
+    XCORE_unlock();
+}
+
+boolean XCORE_dirCalibConsume(void)
+{
+    boolean req;
+
+    XCORE_lock();
+    req        = g_calibReq;
+    g_calibReq = FALSE;
+    XCORE_unlock();
+    return req;
 }
 
 void XCORE_statusPublish(const ProtocolStatus *status)

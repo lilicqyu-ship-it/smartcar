@@ -32,4 +32,11 @@ void    ENCODER_getRawCounts(sint32 c[4]);     /* E1..E4 signed x4 counts       
 void    ENCODER_getOdometer(uint32 m[2]);     /* left/right side, mm               */
 boolean ENCODER_isAlive(void);                /* edges seen within the alive window */
 
+/* Direction calibration of one wheel's count sign (doc 23 section 8.4):
+ * +1 = counts increase when the wheel turns "chassis forward". Runtime-
+ * writable so the bench pulse test (0x70 -> motor_algo) flips a wheel
+ * without a rebuild; CPU1-only writer, applied by the ISRs immediately. */
+void    ENCODER_setInvert(uint8 enc, sint8 sign);
+sint8   ENCODER_getInvert(uint8 enc);
+
 #endif /* ENCODER_H */

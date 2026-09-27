@@ -54,6 +54,14 @@ void XCORE_estopRequest(void);
 void XCORE_estopClear(void);
 boolean XCORE_estopIsActive(void);
 
+/* Bench wheel-direction calibration request (doc 23 section 8.4): CPU0
+ * latches it on PROTO 0x70, CPU1 consumes it once and runs the per-wheel
+ * pulse test on the same core that owns the motors. The result is reported
+ * on the console log ("ENCCAL=..."), not back through shared memory - the
+ * audience is a human on the bench, not another task. */
+void    XCORE_dirCalibRequest(void);          /* CPU0: latch one request     */
+boolean XCORE_dirCalibConsume(void);          /* CPU1: TRUE once, then clear */
+
 /* Robot status block: CPU0 publishes every 10 ms, CPU2 answers GET_STATUS / HTTP */
 void XCORE_statusPublish(const ProtocolStatus *status);
 void XCORE_statusGet(ProtocolStatus *status);

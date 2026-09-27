@@ -55,9 +55,11 @@ static const IfxGtm_Tim_TinMap *const g_tinPins[8] = {
 };
 
 /* +1 = counted counts increase when the wheel drives the robot forward.
- * Mirrored gearboxes mean the raw signs differ per side; confirmed on the
- * bench with the production test's direction check (doc 21 section 15.3). */
-static const sint8 g_encInvert[ENCODER_COUNT] = { +1, +1, +1, +1 };
+ * Mirrored gearboxes mean the raw signs differ per wheel; the values are
+ * runtime-writable so the bench direction calibration (doc 23 section 8.4,
+ * automated by the 0x70 pulse test in motor_algo.c) can flip a wheel without
+ * a rebuild - ENCODER_setInvert() is the only writer, the ISR only reads. */
+static sint8 g_encInvert[ENCODER_COUNT] = { +1, +1, +1, +1 };
 
 static volatile sint32  g_count[ENCODER_COUNT];   /* x4 decoded, signed        */
 static volatile uint32 g_lastEdgeMs[ENCODER_COUNT];
@@ -316,6 +318,24 @@ void ENCODER_getOdometer(uint32 m[2])
 boolean ENCODER_isAlive(void)
 {
     return g_alive;
+}
+
+/* Bench direction calibration entry (doc 23 section 8.4 step 2). sign is
+ * clamped to +-1; 0 is refused - "no direction" is not a calibration, it is
+ * the bug this call exists to fix. Called from the motor_algo calibration
+ * task (CPU1, same core as the ISRs), never from another core. */
+void ENCODER_setInvert(uint8 enc, sint8 sign)
+{
+    if ((enc >= ENCODER_COUNT) || (sign == 0))
+    {
+        return;
+    }
+    g_encInvert[enc] = (sign > 0) ? (sint8)+1 : (sint8)-1;
+}
+
+sint8 ENCODER_getInvert(uint8 enc)
+{
+    return (enc < ENCODER_COUNT) ? g_encInvert[enc] : (sint8)0;
 }
 
 /* The mm/s figures ride a sint16 across xcore; the physical top speed of this

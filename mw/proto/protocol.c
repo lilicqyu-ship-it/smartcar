@@ -107,6 +107,14 @@ void PROTO_handleCommand(uint8 cmd, const uint8 *data, uint8 len)
         ROBOT_cmdEmergencyStop();
         break;
 
+    case PROTO_CMD_DPT_CAL_DIR:
+        /* Bench-only (wheels off ground): latch the request, CPU1's 1 kHz
+         * loop picks it up and answers on the console log. Not a driving
+         * command, so no heartbeat and no fault gating - an e-stop on CPU1
+         * aborts the run from its own branch anyway. */
+        XCORE_dirCalibRequest();
+        break;
+
     default:
         break;
     }

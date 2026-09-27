@@ -45,6 +45,7 @@
 #ifdef USE_SPI_LINK
 #include "com/link.h"
 #include "mw/xcore/xcore.h"
+#include "rt/encoder.h"
 #include <string.h>
 
 /* 22 SS6: telemetry is aggregated at 20 ms. */
@@ -71,9 +72,11 @@
  *   odoSessionMm - overflow-free average of the two side odometries; both are
  *                  absolute accumulators, so the average is the distance the
  *                  chassis covered, straight or curved.
- *   vTargetL/R   - stays 0 per doc 21 SS6.3 until SS5.2 servo gives targets in
- *                  mm/s; this build's targets are percent, and a percent in an
- *                  mm/s field is a lie, not a placeholder.
+ *   vTargetL/R   - the CPU0 command (percent*10) converted to mm/s through
+ *                  ENCODER_FULL_SCALE_MM_S, the same constant that defines
+ *                  the percent domain of vMeas, so both columns share one
+ *                  calibration (SDD SS5.2 servo landed 2026-09-27; before
+ *                  that the target was a raw percent and stayed 0 here).
  *   batteryMv/Pct- no ADC channel is wired up in this build.
  *   odoTotalMm   - needs DFlash persistence (doc 21 SS4.3) on top of the encoder.
  *   linkRttMs    - needs the HBT transaction the RTT measurement rides on.
@@ -88,6 +91,26 @@ static uint32 link_sessionOdoMm(const XcoreEncoder *enc)
 {
     return (enc->odoLeftMm / 2u) + (enc->odoRightMm / 2u)
          + ((enc->odoLeftMm & 1u) & (enc->odoRightMm & 1u));
+}
+
+/* CPU0's target is percent*10 of full scale; the telemetry field is mm/s.
+ * The conversion is the full-scale calibration constant, so until the bench
+ * tune of doc 21 SS15.3 pins ENCODER_FULL_SCALE_MM_S down, both target and
+ * measured columns carry the same "assumed 1000 mm/s at full command" caveat
+ * - a consistent pair, not two independent guesses. */
+static sint16 link_targetToMmS(sint16 pct10)
+{
+    sint32 mmS = ((sint32)pct10 * (sint32)ENCODER_FULL_SCALE_MM_S) / 1000;
+
+    if (mmS > 32767)
+    {
+        mmS = 32767;
+    }
+    if (mmS < -32768)
+    {
+        mmS = -32768;
+    }
+    return (sint16)mmS;
 }
 
 static void link_sendTelemetry(void)
@@ -112,6 +135,18 @@ static void link_sendTelemetry(void)
     tel.vMeasLeft  = enc.vMeasLeftMmS;
     tel.vMeasRight = enc.vMeasRightMmS;
     tel.odoSessionMm = link_sessionOdoMm(&enc);
+
+    /* The command the drive is currently asked to follow (the CPU0 -> CPU1
+     * target, before the servo loop acts on it). CPU0 is the block's only
+     * writer, so reading it here is a plain shared-memory peek. */
+    {
+        sint16  tgtL, tgtR;
+        boolean tgtEstop;
+
+        (void)XCORE_motorGetTarget(&tgtL, &tgtR, &tgtEstop);
+        tel.vTargetLeft  = link_targetToMmS(tgtL);
+        tel.vTargetRight = link_targetToMmS(tgtR);
+    }
 
     /* SDD SS6.1c / 22 SS5.5: linkErrRate keeps its meaning but changes source -
      * frames this core's codec rejected, over frames it saw, in units of 0.1%

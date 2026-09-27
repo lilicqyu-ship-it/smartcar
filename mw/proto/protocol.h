@@ -26,6 +26,12 @@
 #define PROTO_CMD_CLEAR_FAULT     0x31
 #define PROTO_CMD_EMERGENCY_STOP  0x32
 
+/* Production-test command (DPT channel, doc 21 SS6.2 / 23 SS8.4): CPU1 runs
+ * the automated wheel-direction pulse test - WHEELS OFF THE GROUND, ~1.4 s,
+ * result on the console log. Arrives as SF CMD/DPT op 0x70, which link.c
+ * forwards verbatim; the phone UI has no button for it, a WS/test client does. */
+#define PROTO_CMD_DPT_CAL_DIR     0x70
+
 /* Response: same CMD echoed back, DATA carries result */
 #define PROTO_CMD_STATUS_REPLY    0x40
 
