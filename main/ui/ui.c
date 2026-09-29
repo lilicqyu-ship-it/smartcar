@@ -9,6 +9,7 @@
 #include "ui_theme.h"
 #include "ui_home.h"
 #include "ui_pages.h"
+#include "ui_service.h"
 #include "ui_alert.h"
 
 #include "../app_state.h"
@@ -96,7 +97,9 @@ void ui_nav_open(ui_page_t p)
     lv_obj_remove_flag(s_pages[p], LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_pages[p]);
     lv_obj_move_foreground(s_toast);
+    ui_service_on_leave(s_cur);
     s_cur = p;
+    ui_service_on_enter(p);
 
     /* stale-data guard: a page never shows values captured before it opened
      * (spec 106) - every visible page is re-painted from the next tick on */
@@ -210,6 +213,9 @@ static void ui_timer_cb(lv_timer_t *t)
         case UI_PAGE_SETTINGS: ui_pages_settings_refresh(&st); break;
         case UI_PAGE_PAIR:     ui_pages_pair_refresh(&st);     break;
         case UI_PAGE_EVENTS:   ui_pages_events_refresh(&st);   break;
+        case UI_PAGE_FW:       ui_service_fw_refresh(&st);     break;
+        case UI_PAGE_CALIB:    ui_service_calib_refresh(&st);  break;
+        case UI_PAGE_FDIAG:    ui_service_fdiag_refresh(&st);  break;
         default: break;
     }
 }
@@ -233,6 +239,9 @@ void ui_init(void)
     s_pages[UI_PAGE_SETTINGS] = lv_obj_create(s_scr_main);
     s_pages[UI_PAGE_PAIR]     = lv_obj_create(s_scr_main);
     s_pages[UI_PAGE_EVENTS]   = lv_obj_create(s_scr_main);
+    s_pages[UI_PAGE_FW]       = lv_obj_create(s_scr_main);
+    s_pages[UI_PAGE_CALIB]    = lv_obj_create(s_scr_main);
+    s_pages[UI_PAGE_FDIAG]    = lv_obj_create(s_scr_main);
 
     for (int i = 0; i < UI_PAGE_COUNT; i++) {
         lv_obj_t *p = s_pages[i];
@@ -249,6 +258,7 @@ void ui_init(void)
     ui_pages_create(s_pages[UI_PAGE_VEHICLE], s_pages[UI_PAGE_RADIO],
                     s_pages[UI_PAGE_DIAG], s_pages[UI_PAGE_SETTINGS],
                     s_pages[UI_PAGE_PAIR], s_pages[UI_PAGE_EVENTS]);
+    ui_service_create(s_pages[UI_PAGE_FW], s_pages[UI_PAGE_CALIB], s_pages[UI_PAGE_FDIAG]);
     ui_alert_create(s_scr_main);
 
     /* toast on the top layer so every page can show feedback */

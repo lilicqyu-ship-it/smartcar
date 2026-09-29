@@ -20,6 +20,9 @@ typedef enum {
     UI_PAGE_SETTINGS,
     UI_PAGE_PAIR,
     UI_PAGE_EVENTS,
+    UI_PAGE_FW,         /* firmware update C6 / TC275 (doc/08 §4)  */
+    UI_PAGE_CALIB,      /* TC275 calibration (doc/08 §5)           */
+    UI_PAGE_FDIAG,      /* C6 + TC275 fault diagnostics (doc/08 §6) */
     UI_PAGE_COUNT,
 } ui_page_t;
 

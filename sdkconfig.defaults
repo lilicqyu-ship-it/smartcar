@@ -91,7 +91,9 @@ CONFIG_LV_FONT_MONTSERRAT_28=y
 CONFIG_LV_FONT_MONTSERRAT_48=y
 # 10 pages with several hundred styled objects far exceed the builtin 64 KB
 # pool (real-board panic: lv_realloc NULL -> LoadProhibited in lv_obj_add_style).
-# Map LVGL malloc onto the C library / ESP system heap: internal RAM first,
-# PSRAM spill. (LV_USE_STDLIB_MALLOC is a derived int symbol - the user-facing
-# knob is the "Malloc functions source" choice.)
-CONFIG_LV_USE_CLIB_MALLOC=y
+# LVGL heap = PSRAM first (main/lv_mem_psram.c).  The C-library allocator put
+# every widget in internal RAM first; with the service pages it drained
+# internal RAM to 0 and esp_wifi_init() aborted (NO_MEM reboot loop).
+# (LV_USE_STDLIB_MALLOC is a derived int symbol - the user-facing knob is the
+# "Malloc functions source" choice.)
+CONFIG_LV_USE_CUSTOM_MALLOC=y

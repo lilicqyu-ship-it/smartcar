@@ -16,6 +16,7 @@
 #include "../app_state.h"
 #include "../scr_settings.h"
 #include "../scr_link.h"
+#include "../scr_svc.h"
 #include "../proto/proto_frames.h"
 
 /* ---- shared page scaffolding ---------------------------------------------------*/
@@ -30,6 +31,9 @@ typedef enum {
     SUB_NAV_PAIR,   /* jumps to the Pairing page   */
     SUB_NAV_DIAG,   /* jumps to Diagnostics        */
     SUB_NAV_EVENTS, /* jumps to the Event log      */
+    SUB_NAV_FW,     /* jumps to FIRMWARE (doc/08)  */
+    SUB_NAV_CALIB,  /* jumps to CALIBRATE          */
+    SUB_NAV_FDIAG,  /* jumps to DIAGNOSE           */
 } sub_t;
 
 static void set_open_sub(sub_t s);
@@ -423,8 +427,11 @@ typedef struct {
     lv_obj_t *core_q;           /* quality word under the number      */
     lv_obj_t *chip[3];          /* LINK / CAR / CTRL status chips     */
     lv_obj_t *foot;             /* uptime + firmware line             */
-    lv_obj_t *tile_sub[SUB_NAV_EVENTS + 1];  /* live subtitle per module */
-    /* about sub */
+    lv_obj_t *tile_sub[SUB_NAV_FDIAG + 1];   /* live subtitle per module */
+    /* about sub: system topology */
+    lv_obj_t *ab_ver[3], *ab_st[3], *ab_dot[3];
+    lv_obj_t *ab_wire[2], *ab_wlbl[2];
+    lv_obj_t *ab_up, *ab_heap, *ab_psram, *ab_rtt;
     lv_obj_t *fw_val;
     int fw_taps;
     int64_t fw_first_tap;
@@ -452,6 +459,18 @@ static void list_row_cb(lv_event_t *e)
     }
     if (s == SUB_NAV_EVENTS) {
         ui_nav_open(UI_PAGE_EVENTS);
+        return;
+    }
+    if (s == SUB_NAV_FW) {
+        ui_nav_open(UI_PAGE_FW);
+        return;
+    }
+    if (s == SUB_NAV_CALIB) {
+        ui_nav_open(UI_PAGE_CALIB);
+        return;
+    }
+    if (s == SUB_NAV_FDIAG) {
+        ui_nav_open(UI_PAGE_FDIAG);
         return;
     }
     set_open_sub(s);
@@ -793,18 +812,21 @@ void ui_pages_create_settings(lv_obj_t *root)
     lv_obj_set_scrollbar_mode(items, LV_SCROLLBAR_MODE_OFF);
 
     int idx = 1;
-    module_tile(items, idx++, LV_SYMBOL_SHUFFLE, "CONTROL", SUB_CONTROL);
+    module_tile(items, idx++, LV_SYMBOL_GPS,     "CONTROL", SUB_CONTROL);
     module_tile(items, idx++, LV_SYMBOL_WIFI,    "RADIO",   SUB_RADIO);
-    module_tile(items, idx++, LV_SYMBOL_EYE_OPEN, "DISPLAY", SUB_DISPLAY);
     module_tile(items, idx++, LV_SYMBOL_BLUETOOTH, "PAIRING", SUB_NAV_PAIR);
-    module_tile(items, idx++, LV_SYMBOL_LIST,    "ABOUT",   SUB_ABOUT);
+    module_tile(items, idx++, LV_SYMBOL_LIST,    "SYSTEM",  SUB_ABOUT);
+    module_tile(items, idx++, LV_SYMBOL_UPLOAD,  "FIRMWARE", SUB_NAV_FW);
+    module_tile(items, idx++, LV_SYMBOL_SHUFFLE, "CALIBRATE", SUB_NAV_CALIB);
+    module_tile(items, idx++, LV_SYMBOL_WARNING, "DIAGNOSE", SUB_NAV_FDIAG);
     if (ui_engineer_mode()) {
         module_tile(items, idx++, LV_SYMBOL_SETTINGS, "DIAG",   SUB_NAV_DIAG);
         module_tile(items, idx++, LV_SYMBOL_FILE,     "EVENTS", SUB_NAV_EVENTS);
     }
     /* static tile subtitles; live ones are written by the refresh */
-    ui_label_set_text(s_set.tile_sub[SUB_DISPLAY], "Dark HUD / always on");
     ui_label_set_text(s_set.tile_sub[SUB_NAV_PAIR], "Bind to a car");
+    ui_label_set_text(s_set.tile_sub[SUB_NAV_CALIB], "TC275 encoders / jog");
+    ui_label_set_text(s_set.tile_sub[SUB_NAV_FDIAG], "C6 + TC275 health");
     if (s_set.tile_sub[SUB_NAV_DIAG]) {
         ui_label_set_text(s_set.tile_sub[SUB_NAV_DIAG], "Link + vehicle internals");
         ui_label_set_text(s_set.tile_sub[SUB_NAV_EVENTS], "Event log");
@@ -919,28 +941,130 @@ void ui_pages_create_settings(lv_obj_t *root)
     lv_obj_set_width(dnote, LV_PCT(100));
     lv_label_set_long_mode(dnote, LV_LABEL_LONG_WRAP);
 
-    /* ---- About sub (spec 45 + engineer trigger) ---- */
+    /* ---- About = SYSTEM topology (spec 45 + engineer trigger) ----
+     * Not a spec sheet: the page draws the real chain S3 -> C6 -> TC275 as
+     * three nodes joined by the two live links, each node with its running
+     * firmware and state, each link coloured by its health.  Every label sets
+     * its colour explicitly - the old page inherited the default (dark) text
+     * colour and was unreadable on the dark HUD. */
     s_set.subs[SUB_ABOUT] = make_sub(root);
-    ui_header(s_set.subs[SUB_ABOUT], "ABOUT", sub_back_cb);
-    lv_obj_t *b4 = kv_body(s_set.subs[SUB_ABOUT]);
+    lv_obj_t *ab = s_set.subs[SUB_ABOUT];
+    ui_header(ab, "SYSTEM", sub_back_cb);
 
-    lv_obj_t *prod = lv_label_create(b4);
-    ui_label_set_text(prod, "SMART CAR REMOTE");
-    lv_obj_set_style_text_font(prod, F_LG, 0);
-    ui_kv_row(b4, "Controller", NULL);
-    lv_obj_t *cv = lv_obj_get_child(lv_obj_get_child(b4, -1), 1);
-    ui_label_set_text(cv, "ESP32-S3");
-    ui_kv_row(b4, "Radio", NULL);
-    lv_obj_t *rv = lv_obj_get_child(lv_obj_get_child(b4, -1), 1);
-    ui_label_set_text(rv, "WiFi -> C6, proto v2");
-    ui_kv_row(b4, "Vehicle", NULL);
-    lv_obj_t *vv = lv_obj_get_child(lv_obj_get_child(b4, -1), 1);
-    ui_label_set_text(vv, "TC275 via C6");
-    ui_kv_row(b4, "Firmware", &s_set.fw_val);
+    lv_obj_t *brand = lv_label_create(ab);
+    lv_label_set_text(brand, "SMART CAR");
+    lv_obj_set_style_text_font(brand, F_XXL, 0);
+    lv_obj_set_style_text_color(brand, lv_color_hex(UI_COL_TXT), 0);
+    lv_obj_set_style_text_letter_space(brand, 10, 0);
+    lv_obj_align(brand, LV_ALIGN_TOP_MID, 0, 66);
+    lv_obj_t *tag = lv_label_create(ab);
+    lv_label_set_text(tag, "REMOTE  //  C6 GATEWAY  //  TC275 VEHICLE");
+    lv_obj_set_style_text_font(tag, F_SM, 0);
+    lv_obj_set_style_text_color(tag, lv_color_hex(UI_COL_ACCENT), 0);
+    lv_obj_set_style_text_letter_space(tag, 3, 0);
+    lv_obj_align(tag, LV_ALIGN_TOP_MID, 0, 128);
+
+    static const char *const nname[3] = { "ESP32-S3", "ESP32-C6", "TC275" };
+    static const char *const nrole[3] = { "REMOTE / HMI", "GATEWAY / AP", "VEHICLE MCU" };
+    static const char *const nicon[3] = { LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, LV_SYMBOL_DRIVE };
+    const int NW = 200, NH = 150, NY = 164, GAP = (800 - 3 * NW) / 4;
+    for (int i = 0; i < 3; i++) {
+        int x = GAP + i * (NW + GAP);
+        lv_obj_t *n = ui_card(ab);
+        lv_obj_set_size(n, NW, NH);
+        lv_obj_set_pos(n, x, NY);
+        lv_obj_set_style_pad_all(n, 10, 0);
+        lv_obj_t *ic = lv_label_create(n);
+        lv_label_set_text(ic, nicon[i]);
+        lv_obj_set_style_text_font(ic, F_XL, 0);
+        lv_obj_set_style_text_color(ic, lv_color_hex(UI_COL_ACCENT), 0);
+        lv_obj_align(ic, LV_ALIGN_TOP_LEFT, 0, 0);
+        s_set.ab_dot[i] = lv_obj_create(n);
+        lv_obj_set_size(s_set.ab_dot[i], 12, 12);
+        lv_obj_set_style_radius(s_set.ab_dot[i], LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_border_width(s_set.ab_dot[i], 0, 0);
+        lv_obj_set_style_bg_color(s_set.ab_dot[i], lv_color_hex(UI_COL_DIM), 0);
+        lv_obj_set_style_bg_opa(s_set.ab_dot[i], LV_OPA_COVER, 0);
+        lv_obj_remove_flag(s_set.ab_dot[i], LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_align(s_set.ab_dot[i], LV_ALIGN_TOP_RIGHT, 0, 6);
+        lv_obj_t *nm = lv_label_create(n);
+        lv_label_set_text(nm, nname[i]);
+        lv_obj_set_style_text_font(nm, F_LG, 0);
+        lv_obj_set_style_text_color(nm, lv_color_hex(UI_COL_TXT), 0);
+        lv_obj_set_style_text_letter_space(nm, 2, 0);
+        lv_obj_align(nm, LV_ALIGN_TOP_LEFT, 0, 40);
+        lv_obj_t *rl = lv_label_create(n);
+        lv_label_set_text(rl, nrole[i]);
+        lv_obj_set_style_text_font(rl, F_SM, 0);
+        lv_obj_set_style_text_color(rl, lv_color_hex(UI_COL_DIM), 0);
+        lv_obj_align(rl, LV_ALIGN_TOP_LEFT, 0, 66);
+        s_set.ab_ver[i] = lv_label_create(n);
+        lv_label_set_text(s_set.ab_ver[i], "--");
+        lv_obj_set_style_text_font(s_set.ab_ver[i], F_MD, 0);
+        lv_obj_set_style_text_color(s_set.ab_ver[i], lv_color_hex(UI_COL_TXT), 0);
+        lv_obj_set_size(s_set.ab_ver[i], NW - 20, lv_font_get_line_height(F_MD));
+        lv_label_set_long_mode(s_set.ab_ver[i], LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_align(s_set.ab_ver[i], LV_ALIGN_BOTTOM_LEFT, 0, -20);
+        s_set.ab_st[i] = lv_label_create(n);
+        lv_label_set_text(s_set.ab_st[i], "--");
+        lv_obj_set_style_text_font(s_set.ab_st[i], F_SM, 0);
+        lv_obj_set_style_text_color(s_set.ab_st[i], lv_color_hex(UI_COL_DIM), 0);
+        lv_obj_set_style_text_letter_space(s_set.ab_st[i], 2, 0);
+        lv_obj_align(s_set.ab_st[i], LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        if (i == 0) {
+            /* 7 taps on the S3 version still unlock engineer mode */
+            s_set.fw_val = s_set.ab_ver[0];
+            lv_obj_add_flag(n, LV_OBJ_FLAG_CLICKABLE);
+            lv_obj_add_event_cb(n, fw_tap_cb, LV_EVENT_CLICKED, NULL);
+        }
+        if (i < 2) {
+            /* live link between node i and i+1 */
+            s_set.ab_wire[i] = lv_obj_create(ab);
+            lv_obj_set_size(s_set.ab_wire[i], GAP, 3);
+            lv_obj_set_pos(s_set.ab_wire[i], x + NW, NY + NH / 2 - 1);
+            lv_obj_set_style_radius(s_set.ab_wire[i], 0, 0);
+            lv_obj_set_style_border_width(s_set.ab_wire[i], 0, 0);
+            lv_obj_set_style_bg_color(s_set.ab_wire[i], lv_color_hex(UI_COL_LINE), 0);
+            lv_obj_set_style_bg_opa(s_set.ab_wire[i], LV_OPA_COVER, 0);
+            lv_obj_remove_flag(s_set.ab_wire[i], LV_OBJ_FLAG_CLICKABLE);
+            s_set.ab_wlbl[i] = lv_label_create(ab);
+            lv_label_set_text(s_set.ab_wlbl[i], i == 0 ? "WS" : "SPI");
+            lv_obj_set_style_text_font(s_set.ab_wlbl[i], F_SM, 0);
+            lv_obj_set_style_text_color(s_set.ab_wlbl[i], lv_color_hex(UI_COL_DIM), 0);
+            lv_obj_set_width(s_set.ab_wlbl[i], GAP);
+            lv_obj_set_style_text_align(s_set.ab_wlbl[i], LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_pos(s_set.ab_wlbl[i], x + NW, NY + NH / 2 - 24);
+        }
+    }
+
+    /* live telemetry strip */
+    static const char *const tk[4] = { "UPTIME", "INTERNAL RAM", "PSRAM", "LINK RTT" };
+    lv_obj_t **tvals[4] = { &s_set.ab_up, &s_set.ab_heap, &s_set.ab_psram, &s_set.ab_rtt };
+    lv_obj_t *strip = ui_card(ab);
+    lv_obj_set_size(strip, 800 - 2 * GAP, 104);
+    lv_obj_set_pos(strip, GAP, 330);
+    lv_obj_set_style_pad_all(strip, 12, 0);
+    for (int i = 0; i < 4; i++) {
+        int cw = (800 - 2 * GAP - 24) / 4;
+        lv_obj_t *k = lv_label_create(strip);
+        lv_label_set_text(k, tk[i]);
+        lv_obj_set_style_text_font(k, F_SM, 0);
+        lv_obj_set_style_text_color(k, lv_color_hex(UI_COL_ACCENT), 0);
+        lv_obj_set_style_text_letter_space(k, 2, 0);
+        lv_obj_set_pos(k, i * cw, 4);
+        *tvals[i] = lv_label_create(strip);
+        lv_label_set_text(*tvals[i], "--");
+        lv_obj_set_style_text_font(*tvals[i], F_XL, 0);
+        lv_obj_set_style_text_color(*tvals[i], lv_color_hex(UI_COL_TXT), 0);
+        lv_obj_set_pos(*tvals[i], i * cw, 34);
+    }
     const esp_app_desc_t *app = esp_app_get_description();
-    ui_label_set_fmt(s_set.fw_val, "v%s", app->version);
-    lv_obj_add_flag(s_set.fw_val, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(s_set.fw_val, fw_tap_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *build = lv_label_create(ab);
+    lv_label_set_text_fmt(build, "BUILD %s %s  /  IDF %s  /  TAP S3 x7 FOR ENGINEER MODE",
+                          app->date, app->time, app->idf_ver);
+    lv_obj_set_style_text_font(build, F_SM, 0);
+    lv_obj_set_style_text_color(build, lv_color_hex(UI_COL_DIM), 0);
+    lv_obj_align(build, LV_ALIGN_BOTTOM_MID, 0, -12);
 }
 
 /* pairing and diagnostics live in their own pages; map the list rows to nav */
@@ -1071,7 +1195,67 @@ static void deck_refresh(const scr_state_t *st)
     ui_label_set_fmt(s_set.tile_sub[SUB_CONTROL], "%s  /  DZ %u%%",
                      mtxt[set.mode <= 2 ? set.mode : 1], set.deadzone_pct);
     ui_label_set_fmt(s_set.tile_sub[SUB_RADIO], "%s", set.ssid[0] ? set.ssid : "not set");
-    ui_label_set_fmt(s_set.tile_sub[SUB_ABOUT], "Firmware v%s", app->version);
+    ui_label_set_fmt(s_set.tile_sub[SUB_ABOUT], "Topology  /  v%s", app->version);
+    static const char *const sst[3] = { "empty", "invalid", "ready" };
+    svc_stage_t c6s, tcs;
+    scr_svc_get_stage(SVC_FW_C6, &c6s);
+    scr_svc_get_stage(SVC_FW_TC, &tcs);
+    ui_label_set_fmt(s_set.tile_sub[SUB_NAV_FW], "C6 %s / TC %s", sst[c6s.state], sst[tcs.state]);
+}
+
+static void node_set(int i, const char *ver, const char *state, uint32_t col)
+{
+    ui_label_set_text(s_set.ab_ver[i], ver);
+    ui_label_set_text(s_set.ab_st[i], state);
+    ui_label_set_color(s_set.ab_st[i], lv_color_hex(col));
+    if (!lv_color_eq(lv_obj_get_style_bg_color(s_set.ab_dot[i], 0), lv_color_hex(col))) {
+        lv_obj_set_style_bg_color(s_set.ab_dot[i], lv_color_hex(col), 0);
+    }
+}
+
+static void wire_set(int i, bool up, const char *txt)
+{
+    uint32_t c = up ? UI_COL_ACCENT : UI_COL_LINE;
+    if (!lv_color_eq(lv_obj_get_style_bg_color(s_set.ab_wire[i], 0), lv_color_hex(c))) {
+        lv_obj_set_style_bg_color(s_set.ab_wire[i], lv_color_hex(c), 0);
+    }
+    ui_label_set_text(s_set.ab_wlbl[i], txt);
+    ui_label_set_color(s_set.ab_wlbl[i], lv_color_hex(up ? UI_COL_ACCENT : UI_COL_DIM));
+}
+
+static void about_refresh(const scr_state_t *st)
+{
+    const esp_app_desc_t *app = esp_app_get_description();
+    char v[48];
+    snprintf(v, sizeof(v), "v%s", app->version);
+    node_set(0, v, st->ctrl_role ? "ONLINE  CTRL" : "ONLINE", UI_COL_OK);
+    bool ws = st->conn == SCR_CONN_CONNECTED;
+    node_set(1, st->c6_fw[0] ? st->c6_fw : "--", ws ? "ONLINE" : "UNREACHABLE",
+             ws ? UI_COL_OK : UI_COL_CRIT);
+    if (st->tele_fresh) {
+        snprintf(v, sizeof(v), "v%u.%u.%u  hw%u", (unsigned)((st->tc_fw_ver >> 16) & 0xFF),
+                 (unsigned)((st->tc_fw_ver >> 8) & 0xFF), (unsigned)(st->tc_fw_ver & 0xFF),
+                 st->hw_rev);
+        node_set(2, v, st->fault_code ? "FAULT" : "ONLINE",
+                 st->fault_code ? UI_COL_CRIT : UI_COL_OK);
+    } else {
+        node_set(2, "--", st->tc_on ? "STALE" : "OFFLINE", st->tc_on ? UI_COL_WARN : UI_COL_DIM);
+    }
+    wire_set(0, ws, ws ? "WS  LIVE" : "WS  DOWN");
+    wire_set(1, ws && st->tc_on, ws && st->tc_on ? "SPI  LIVE" : "SPI  DOWN");
+
+    uint32_t up = st->uptime_ms / 1000u;
+    ui_label_set_fmt(s_set.ab_up, "%02lu:%02lu:%02lu", (unsigned long)(up / 3600u),
+                     (unsigned long)(up / 60u % 60u), (unsigned long)(up % 60u));
+    ui_label_set_fmt(s_set.ab_heap, "%u KB",
+                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024u));
+    ui_label_set_fmt(s_set.ab_psram, "%u MB",
+                     (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / (1024u * 1024u)));
+    if (ws) {
+        ui_label_set_fmt(s_set.ab_rtt, "%u ms", st->lat_ms);
+    } else {
+        ui_label_set_text(s_set.ab_rtt, "--");
+    }
 }
 
 void ui_pages_settings_refresh(const scr_state_t *st)
@@ -1080,6 +1264,8 @@ void ui_pages_settings_refresh(const scr_state_t *st)
      * (sub_sync_values) so a 10 Hz repaint can never fight the keyboard */
     if (s_set.cur == SUB_NONE) {
         deck_refresh(st);
+    } else if (s_set.cur == SUB_ABOUT) {
+        about_refresh(st);
     }
     if (s_set.cur == SUB_RADIO) {
         ui_label_set_text(s_set.pair_status_lbl,
