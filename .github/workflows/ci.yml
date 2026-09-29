@@ -24,11 +24,15 @@ jobs:
 
       - name: Build (ESP-IDF v6.1, esp32s3)
         run: |
+          # Job-container steps run via docker exec and skip the image
+          # entrypoint, so the IDF environment has to be sourced per step.
+          . /opt/esp/idf/export.sh
           idf.py set-target esp32s3
           idf.py build
 
       - name: Firmware size & resource margins
         run: |
+          . /opt/esp/idf/export.sh
           python scripts/ci_size_report.py \
             --map build/smartcar_remote.map \
             --bin build/smartcar_remote.bin \

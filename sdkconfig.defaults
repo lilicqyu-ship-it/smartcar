@@ -65,6 +65,18 @@ CONFIG_BSP_DISPLAY_LVGL_DIRECT_MODE=y
 # rate for more headroom under Wi-Fi load.
 CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_MODE=y
 CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_HEIGHT=20
+# RESTART_IN_VSYNC (R-11): the RGB panel scans a PSRAM framebuffer out through a
+# small 20-line bounce buffer fed by GDMA.  When PSRAM bandwidth is contended -
+# the Wi-Fi driver on core 0 hammering PSRAM, plus the reconnect retry storm -
+# GDMA momentarily fails to deliver pixels as fast as the panel consumes them
+# and the DMA<->panel pipeline PERMANENTLY desyncs: a fixed horizontal split
+# that appears even at boot/init loading (static content, no joystick) and never
+# self-heals.  The IDF driver's default desync heuristic only reacts after the
+# fact and is unreliable; this option force-restarts the GDMA channel every
+# VBlank so any desync is corrected within one frame.  ESP32-S3 only (we are).
+# This is the true fix for "boot-time tearing" - the R-10 buffer bump only
+# addresses partial-redraw stale regions, not the DMA-starvation permanent tear.
+CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
 
 # ---- LVGL fonts used by the UI hierarchy (spec 54) ---------------------------------
 CONFIG_LV_FONT_MONTSERRAT_14=y
