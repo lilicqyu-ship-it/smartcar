@@ -18,6 +18,11 @@ CONFIG_SPIRAM_SPEED_80M=y
 # the panel drifts / shows snow.
 CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 CONFIG_SPIRAM_USE_MALLOC=y
+# Wi-Fi driver must not persist its config to NVS: it rewrites flash on every
+# (re)connect, and each flash write disturbs the RGB bounce-buffer scan-out
+# (glitch / pink frame during link flaps).  The STA config is set from
+# scr_settings on every boot anyway.
+# CONFIG_ESP_WIFI_NVS_ENABLED is not set
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
