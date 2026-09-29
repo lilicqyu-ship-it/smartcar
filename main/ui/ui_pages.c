@@ -586,28 +586,37 @@ void ui_pages_create_settings(lv_obj_t *root)
     s_set.root = root;
     s_set.cur = SUB_NONE;
 
-    /* main list */
+    /* main list: a header with a back-to-Home button, like every other page -
+     * without it the Settings root was a dead end (no way back to the stick).
+     * The header lives inside the list container so it hides together with the
+     * list when a sub-page opens (each sub has its own back-to-list header). */
     s_set.list = lv_obj_create(root);
-    lv_obj_set_size(s_set.list, LV_PCT(100), bsp_display_get_v_res() - 16);
-    lv_obj_align(s_set.list, LV_ALIGN_TOP_MID, 0, 8);
+    lv_obj_set_size(s_set.list, LV_PCT(100), bsp_display_get_v_res());
+    lv_obj_align(s_set.list, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_opa(s_set.list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_set.list, 0, 0);
-    lv_obj_set_style_pad_hor(s_set.list, 8, 0);
-    lv_obj_set_flex_flow(s_set.list, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_scroll_dir(s_set.list, LV_DIR_VER);
+    lv_obj_set_style_pad_all(s_set.list, 0, 0);
+    lv_obj_remove_flag(s_set.list, LV_OBJ_FLAG_SCROLLABLE);
 
-    lv_obj_t *hdr = lv_label_create(s_set.list);
-    ui_label_set_text(hdr, "SETTINGS");
-    lv_obj_set_style_text_font(hdr, F_LG, 0);
+    ui_header(s_set.list, "SETTINGS", nav_home_cb);
 
-    list_btn(s_set.list, "Control", SUB_CONTROL);
-    list_btn(s_set.list, "Radio", SUB_RADIO);
-    list_btn(s_set.list, "Display", SUB_DISPLAY);
-    list_btn(s_set.list, "Pairing", SUB_NAV_PAIR);
-    list_btn(s_set.list, "About", SUB_ABOUT);
+    lv_obj_t *items = lv_obj_create(s_set.list);
+    lv_obj_set_size(items, LV_PCT(100), bsp_display_get_v_res() - 66);
+    lv_obj_align(items, LV_ALIGN_TOP_MID, 0, 58);
+    lv_obj_set_style_bg_opa(items, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(items, 0, 0);
+    lv_obj_set_style_pad_hor(items, 8, 0);
+    lv_obj_set_flex_flow(items, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_scroll_dir(items, LV_DIR_VER);
+
+    list_btn(items, "Control", SUB_CONTROL);
+    list_btn(items, "Radio", SUB_RADIO);
+    list_btn(items, "Display", SUB_DISPLAY);
+    list_btn(items, "Pairing", SUB_NAV_PAIR);
+    list_btn(items, "About", SUB_ABOUT);
     if (ui_engineer_mode()) {
-        list_btn(s_set.list, "Diagnostics (eng)", SUB_NAV_DIAG);
-        list_btn(s_set.list, "Event log (eng)", SUB_NAV_EVENTS);
+        list_btn(items, "Diagnostics (eng)", SUB_NAV_DIAG);
+        list_btn(items, "Event log (eng)", SUB_NAV_EVENTS);
     }
 
     /* ---- Control sub (spec 32/33) ---- */
