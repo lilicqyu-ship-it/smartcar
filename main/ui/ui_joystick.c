@@ -78,6 +78,7 @@ static void joy_release(void)
     lv_anim_start(&a);
 
     app_state_set_joy(0, 0);
+    scr_ctrl_kick();        /* stop now, not on the next tick */
 }
 
 static void joy_pressing(lv_event_t *e)
@@ -137,6 +138,14 @@ static void joy_pressing(lv_event_t *e)
         w = (int16_t)(-dx / r * scale * SCR_DRIVE_W_MAX);   /* right = right turn */
     }
     app_state_set_joy(v, w);
+    /* only a changed command wakes the ctrl task (sub-dead-zone jitter and
+     * the 2 px hysteresis never generate extra frames) */
+    static int16_t last_v, last_w;
+    if (v != last_v || w != last_w) {
+        last_v = v;
+        last_w = w;
+        scr_ctrl_kick();
+    }
 }
 
 static void joy_pressed(lv_event_t *e)

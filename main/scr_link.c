@@ -24,12 +24,15 @@
 #include "esp_http_client.h"
 #include "esp_websocket_client.h"
 #include "cJSON.h"
+#include "lwip/sockets.h"
+#include "lwip/ip4_addr.h"
 #include "sdkconfig.h"
 
 #include "app_state.h"
 #include "scr_settings.h"
 #include "scr_link.h"
 #include "scr_ctrl.h"
+#include "scr_svc.h"
 #include "proto/proto_frames.h"
 
 #define MON_PERIOD_MS       250     /* monitor task tick            */
@@ -46,6 +49,8 @@ typedef struct {
     proto_parser_t parser;
 
     uint8_t seq;                        /* per-session frame counter    */
+    volatile int sock;                  /* TCP socket to the C6, -1 = none */
+    uint32_t tx_skip;                   /* frames skipped: socket full  */
 
     int64_t last_rx_ms;
     int64_t ping_sent_ms;
@@ -187,6 +192,13 @@ static void ws_handle_text(const char *data, int len)
                 }
                 s_link.ping_pending = false;
             }
+        } else if (strcmp(t->valuestring, "cal") == 0 ||
+                   strcmp(t->valuestring, "rec") == 0 ||
+                   strcmp(t->valuestring, "otastatus") == 0 ||
+                   strcmp(t->valuestring, "otaswap") == 0 ||
+                   strcmp(t->valuestring, "otaerror") == 0) {
+            /* calibration results / OTA progress: owned by the service module */
+            scr_svc_on_ws_json(t->valuestring, root);
         } else if (strcmp(t->valuestring, "err") == 0) {
             const cJSON *e = cJSON_GetObjectItem(root, "e");
             if (cJSON_IsString(e) && strcmp(e->valuestring, "auth") == 0) {
@@ -224,6 +236,32 @@ static void ws_handle_telemetry(const uint8_t *data, int len)
     app_state_set_telemetry(&t);
 }
 
+/* ---- latency: disable Nagle on the C6 connection ------------------------------------
+ * A browser sets TCP_NODELAY on its WebSocket; esp_websocket_client does not.
+ * With Nagle on, each 12-byte DRIVE frame waits for the ACK of the previous
+ * one, and lwIP on the C6 delays ACKs up to one TCP timer tick - a joystick
+ * move then reaches the car 100-200 ms late (the "S3 feels laggy vs the phone"
+ * symptom).  The client exposes no socket getter, so walk the lwIP socket table
+ * and mark every TCP socket whose peer is the C6. */
+static void link_set_nodelay(void)
+{
+    struct sockaddr_in peer;
+    ip4_addr_t c6;
+    if (!ip4addr_aton(CONFIG_SCR_C6_IP, &c6)) {
+        return;
+    }
+    s_link.sock = -1;
+    for (int fd = LWIP_SOCKET_OFFSET; fd < LWIP_SOCKET_OFFSET + CONFIG_LWIP_MAX_SOCKETS; fd++) {
+        socklen_t len = sizeof(peer);
+        if (getpeername(fd, (struct sockaddr *)&peer, &len) == 0 &&
+            peer.sin_family == AF_INET && peer.sin_addr.s_addr == c6.addr) {
+            int one = 1;
+            (void)setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof(one));
+            s_link.sock = fd;
+        }
+    }
+}
+
 static void ws_event_handler(void *arg, esp_event_base_t base,
                              int32_t id, void *data)
 {
@@ -231,6 +269,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base,
 
     switch (id) {
         case WEBSOCKET_EVENT_CONNECTED: {
+            link_set_nodelay();
             s_link.ws_running = true;
             s_link.last_rx_ms = now_ms();
             app_state_set_conn(SCR_CONN_CONNECTED);
@@ -246,11 +285,13 @@ static void ws_event_handler(void *arg, esp_event_base_t base,
         }
         case WEBSOCKET_EVENT_DISCONNECTED:
             s_link.ws_running = false;
+            s_link.sock = -1;
             s_link.had_ctrl = false;
             app_state_set_conn(SCR_CONN_NONE);
             app_state_set_ctrl_role(false);
             app_state_set_owner(SCR_OWNER_NONE);
             app_state_set_tc(false);
+            scr_svc_on_ws_down();
             app_state_log(SCR_LOG_WARN, "WS disconnected");
             break;
         case WEBSOCKET_EVENT_DATA:
@@ -297,6 +338,10 @@ static void ws_start(void)
         .network_timeout_ms = 5000,
         .reconnect_timeout_ms = 3000,
         .task_stack = 6144,
+        /* doc/08 §2: network work stays on core 0 (core 1 = ctrl + LVGL) */
+        .task_prio = 5,
+        .task_core_id_set = true,
+        .task_core_id = 0,
     };
     s_link.ws = esp_websocket_client_init(&cfg);
     if (s_link.ws == NULL) {
@@ -421,6 +466,11 @@ static void housekeeping_1hz(void)
         scr_link_send_text("{\"t\":\"ping\"}");
     }
 
+    if (s_link.tx_skip) {
+        ESP_LOGW(TAG, "skipped %lu frame(s): socket busy", (unsigned long)s_link.tx_skip);
+        s_link.tx_skip = 0;
+    }
+
     /* rates + loss over the past second (spec 28) */
     uint16_t tx = (uint16_t)s_link.tx_cnt;
     uint16_t rx = (uint16_t)s_link.rx_cnt;
@@ -479,12 +529,32 @@ static void link_monitor_task(void *arg)
 void scr_link_start(void)
 {
     memset(&s_link, 0, sizeof(s_link));
+    s_link.sock = -1;
     proto_parser_init(&s_link.parser);
     wifi_init();
 
-    if (xTaskCreate(link_monitor_task, "scr_link", 6144, NULL, 4, NULL) != pdPASS) {
+    if (xTaskCreatePinnedToCore(link_monitor_task, "scr_link", 6144, NULL, 4, NULL, 0) != pdPASS) {
         app_state_log(SCR_LOG_CRIT, "link task create failed");
     }
+}
+
+/* Zero-wait "can this frame go out now?".  esp_websocket_client treats a
+ * write that cannot complete within its timeout as a transport error and
+ * ABORTS the connection ("transport_poll_write(0)" -> RADIO LOST).  With
+ * TCP_NODELAY and event-driven DRIVE the send buffer can be momentarily full
+ * during a Wi-Fi retry burst; skipping one frame (the next one is <=33 ms away
+ * and carries the newer stick value) is harmless, dropping the link is not. */
+static bool sock_writable(void)
+{
+    int fd = s_link.sock;
+    if (fd < 0) {
+        return true;        /* unknown socket: let the client decide */
+    }
+    fd_set w;
+    FD_ZERO(&w);
+    FD_SET(fd, &w);
+    struct timeval tv = { 0, 0 };
+    return select(fd + 1, NULL, &w, NULL, &tv) > 0 && FD_ISSET(fd, &w);
 }
 
 bool scr_link_send_bin(const uint8_t *data, size_t len)
@@ -502,6 +572,10 @@ bool scr_link_send_bin(const uint8_t *data, size_t len)
      * text, library PING/PONG), so a short wait turns the periodic collision
      * into a sub-ms delay instead of a dropped DRIVE + error log line, while
      * still never parking the ctrl task on a stalled socket. */
+    if (!sock_writable()) {
+        s_link.tx_skip++;
+        return false;
+    }
     int r = esp_websocket_client_send_bin(s_link.ws, (const char *)data,
                                           (int)len, pdMS_TO_TICKS(5));
     if (r > 0) {
@@ -523,6 +597,9 @@ bool scr_link_send_text(const char *text)
      * ("Could not lock ws-client within 0 timeout"), the pong never came and
      * the RTT/loss readout jumped - and each miss printed an error line from
      * the send path.  20 ms stays far below the ctrl period of the C6 side. */
+    if (!sock_writable()) {
+        return false;       /* ping/pair retried by their callers */
+    }
     int r = esp_websocket_client_send_text(s_link.ws, text,
                                            (int)strlen(text), pdMS_TO_TICKS(20));
     return r > 0;

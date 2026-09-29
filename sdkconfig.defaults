@@ -36,6 +36,9 @@ CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
 CONFIG_ESP32S3_DATA_CACHE_64KB=y
 CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 CONFIG_FREERTOS_HZ=1000
+# doc/08 §2: core 0 = comms/service, core 1 = ctrl + LVGL only.  lwIP must not
+# float onto core 1 where it would preempt the LVGL/bounce-buffer feed.
+CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU0=y
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 
 # ---- watchdogs / panic -------------------------------------------------------------

@@ -22,6 +22,8 @@
 #include "scr_settings.h"
 #include "scr_link.h"
 #include "scr_ctrl.h"
+#include "scr_svc.h"
+#include "esp_heap_caps.h"
 #include "ui/ui.h"
 
 static const char *TAG = "scr_main";
@@ -62,16 +64,29 @@ void app_main(void)
     app_state_boot_mark_lcd();
     app_state_boot_mark_touch();
 
+    /* radio + control FIRST (spec 74/95.8/95.9): the Wi-Fi driver needs ~50 KB
+     * of internal RAM at init.  Building the UI first let LVGL's small objects
+     * take that RAM (all pages together) and esp_wifi_init() failed with
+     * ESP_ERR_NO_MEM -> abort -> reboot loop (seen as endless screen flashes).
+     * Started before the UI, the radio gets internal RAM and the UI spills to
+     * PSRAM once internal RAM runs out (SPIRAM_USE_MALLOC). */
+#if !CONFIG_SCR_BENCH_DISP_ONLY
+    scr_link_start();
+    scr_ctrl_start();
+    scr_svc_start();        /* core 0: OTA / diag / calibration (doc/08) */
+#endif
+
     /* UI runs in the LVGL task context: take the display lock while building */
     bsp_display_lock(0);
     ui_init();
     bsp_display_unlock();
 
-    /* radio + control; both are independent tasks (spec 74/95.8/95.9) */
-#if !CONFIG_SCR_BENCH_DISP_ONLY
-    scr_link_start();
-    scr_ctrl_start();
-#else
+    ESP_LOGI(TAG, "heap after init: internal %u KB (min block %u KB), psram %u KB",
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL) / 1024),
+             (unsigned)(heap_caps_get_free_size(MALLOC_CAP_SPIRAM) / 1024));
+
+#if CONFIG_SCR_BENCH_DISP_ONLY
     /* display bring-up experiment: P0 needs all four marks to advance */
     app_state_boot_mark_radio();
     app_state_log(SCR_LOG_INFO, "Bench display-only mode");

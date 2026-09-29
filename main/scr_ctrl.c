@@ -25,6 +25,39 @@ typedef struct {
 
 static ctrl_flags_t s_flags;
 
+/* calibration jog request, written by the UI, read by the ctrl task */
+static volatile int     s_jog_motor = -1;
+static volatile int16_t s_jog_duty;
+static volatile bool    s_jog_stop_pending;
+static volatile int     s_jog_last;
+
+void scr_ctrl_set_jog(int motor, int16_t duty)
+{
+    if (duty > 500) duty = 500;
+    if (duty < -500) duty = -500;
+    if (motor < 0 || motor > 3) {
+        if (s_jog_motor >= 0) {
+            s_jog_stop_pending = true;
+        }
+        s_jog_motor = -1;
+        return;
+    }
+    s_jog_duty = duty;
+    s_jog_last = motor;
+    s_jog_motor = motor;
+}
+
+static void send_jog(int motor, int16_t duty)
+{
+    uint8_t d[3] = { (uint8_t)motor, (uint8_t)(duty & 0xFF), (uint8_t)((uint16_t)duty >> 8) };
+    uint8_t frame[PROTO_MAX_FRAME];
+    size_t n = proto_build(PROTO_CMD_DPT_MOTOR_JOG, scr_link_next_seq(), d, sizeof(d),
+                           frame, sizeof(frame));
+    if (n > 0) {
+        scr_link_send_bin(frame, n);
+    }
+}
+
 static bool can_tx(void)
 {
     scr_state_t st;
@@ -149,13 +182,36 @@ static void safety_watch(const scr_state_t *st)
     }
 }
 
+static TaskHandle_t s_ctrl_task;
+
+/* Joystick moved: send now instead of waiting for the next 33 ms tick.  A
+ * browser page sends on every pointer event; a fixed-rate-only loop added up
+ * to one full period of lag to every stick change. */
+void scr_ctrl_kick(void)
+{
+    if (s_ctrl_task) {
+        xTaskNotifyGive(s_ctrl_task);
+    }
+}
+
 static void ctrl_task(void *arg)
 {
-    TickType_t last_wake = xTaskGetTickCount();
     const TickType_t period = pdMS_TO_TICKS(1000 / CONFIG_SCR_CTRL_RATE_HZ);
+    const TickType_t min_gap = pdMS_TO_TICKS(20);      /* <= 50 frames/s: low
+                                                           airtime, no WS backlog */
+    TickType_t last_tx = xTaskGetTickCount();
 
     for (;;) {
-        vTaskDelayUntil(&last_wake, period);
+        /* wake on the heartbeat deadline or on a joystick kick, whichever is
+         * first; kicks closer than 20 ms to the last frame are coalesced */
+        TickType_t now = xTaskGetTickCount();
+        TickType_t due = last_tx + period;
+        (void)ulTaskNotifyTake(pdTRUE, (TickType_t)(due - now) <= period ? due - now : 0);
+        now = xTaskGetTickCount();
+        if (now - last_tx < min_gap) {
+            vTaskDelay(min_gap - (now - last_tx));
+        }
+        last_tx = xTaskGetTickCount();
 
         scr_state_t st;
         app_state_snapshot(&st);
@@ -184,6 +240,21 @@ static void ctrl_task(void *arg)
             send_drive(0, 0);
         }
         app_state_set_out(v, w);
+
+        /* calibration jog (doc/08 §5): only on a CTRL link, never while
+         * STOP/emergency is latched; a released button sends one duty 0 */
+        int jm = s_jog_motor;
+        if (st.conn == SCR_CONN_CONNECTED && st.ctrl_role) {
+            if (jm >= 0 && !st.stop_latch && !st.emerg_latch) {
+                send_jog(jm, s_jog_duty);
+            } else if (s_jog_stop_pending || (jm >= 0)) {
+                send_jog(jm >= 0 ? jm : s_jog_last, 0);
+                s_jog_stop_pending = false;
+                if (jm >= 0) {
+                    s_jog_motor = -1;   /* latch fired mid-jog: drop it */
+                }
+            }
+        }
     }
 }
 
@@ -193,7 +264,9 @@ void scr_ctrl_start(void)
     memset(&s_flags, 0, sizeof(s_flags));
     /* core 1: Wi-Fi/lwip own core 0; sharing core 1 with the LVGL task at a
      * higher prio keeps the 30 ms control cadence immune to UI load */
-    if (xTaskCreatePinnedToCore(ctrl_task, "scr_ctrl", 4096, NULL, 5, NULL, 1) != pdPASS) {
+    /* doc/08 §2: core 1 holds only ctrl (prio 6) + LVGL (prio 4); all network
+     * and flash work is on core 0, so this 30 Hz cadence is immune to both */
+    if (xTaskCreatePinnedToCore(ctrl_task, "scr_ctrl", 4096, NULL, 6, &s_ctrl_task, 1) != pdPASS) {
         app_state_log(SCR_LOG_CRIT, "ctrl task create failed");
     }
 }

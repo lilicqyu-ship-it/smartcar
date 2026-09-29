@@ -37,6 +37,17 @@ void scr_ctrl_joystick_touch(void);
  * this hook only latches a stop so nothing keeps driving. */
 void scr_ctrl_control_lost(void);
 
+/* Calibration page motor jog (DPT 0x71, doc/08 §5).  motor 0..3 = front-left,
+ * front-right, rear-left, rear-right; duty = percent x10 (+-500 max).  While
+ * set, the 30 Hz ctrl task sends 0x71 every tick next to the 0/0 heartbeat;
+ * motor < 0 stops (one duty-0 frame is sent).  The TC275 auto-stops after
+ * 300 ms without a jog frame, so a stalled UI can never leave a motor on. */
+void scr_ctrl_set_jog(int motor, int16_t duty);
+
+/* Joystick value changed: wake the ctrl task to send DRIVE immediately
+ * (coalesced to <= 50 Hz).  Safe from the LVGL task. */
+void scr_ctrl_kick(void);
+
 #ifdef __cplusplus
 }
 #endif
