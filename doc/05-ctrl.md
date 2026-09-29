@@ -46,7 +46,11 @@ STOP/急停的立即帧同样过闸，状态机任何路径都发不出未授权
 
 | 条件 | 动作 | 解除 |
 |---|---|---|
-| `!(conn==CONNECTED && tele_fresh)` | 覆盖层 `RADIO LOST / VEHICLE STOP`（CRITICAL）+ 事件 CRIT | 链路恢复且遥测新鲜 → 清覆盖层 + 事件 INFO "Radio recovered"（spec §82/102） |
+| `!(conn==CONNECTED && tele_fresh)` **持续 ≥1.2 s**（`SCR_ALERT_DEBOUNCE_MS`） | 覆盖层 `RADIO LOST / VEHICLE STOP`（CRITICAL）+ 事件 CRIT | 链路恢复且遥测新鲜 → 清覆盖层 + 事件 INFO "Radio recovered"（spec §82/102） |
+
+去抖只作用于**全屏覆盖层**：遥测过期的状态栏反应（STALE/"--"）仍是 600 ms
+即时生效（spec §101/§102 分层兑现）。车辆端启动 / C6 广播节奏造成的
+数百毫秒遥测缺口不再把整屏告警变成频闪（真机 R-8：90 s 内 31 次 → 0 次）。
 | `fault_code ≠ 0` | 覆盖层 `VEHICLE FAULT 0x####`（WARNING）+ 事件 | fault 归零 |
 | `batt ≤ CRIT` | 覆盖层 `CRITICAL BATTERY`（CRITICAL） | 电量回升至 LOW+5 |
 | `LOW < batt ≤ 20 %` | 覆盖层 `LOW BATTERY`（WARNING） | 同上（回差防抖动） |

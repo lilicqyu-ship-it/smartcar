@@ -80,6 +80,7 @@ proto 源文件与 c6_car **逐字节同源**，其 10⁷ 模糊测试结论直�
 | R-5 | 屏幕抖动（用户实测） | ① WS 重连期间 30 Hz 发送带 50 ms 锁等待阻塞核 1，饿死 LVGL 供帧；② bounce 高度 10 供帧裕量小；③ 10 Hz 对 ~15 个 label 无条件 setText 全量重绘 | ① `esp_websocket_client_is_connected()` 门控 + 发送超时 0（忙则丢帧，33 ms 后重发）；② bounce 高度 10→20（中断率减半）；③ `ui_label_set_text/fmt` 缓存写入，值不变不触碰对象；④ `CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK=y` 收发分离锁 |
 | R-6 | 仍抖 + 字体重叠 → 换防撕裂后"闪得更夸张" | ① 无防撕裂时 LVGL 局部重绘与 RGB 扫描相撞（撕裂=抖动/重影）；② 顶栏/信息卡多个绝对定位 label 落进 `LV_SIZE_CONTENT` 容器（内容高度只算单个子对象）→ 互相叠印 | ① 双帧缓冲防撕裂，**DIRECT_MODE**（FULL_REFRESH 会把每次小失效放大成整屏重绘，直接闪屏——实测否定）；② 显式容器高度 + 行对齐（信息卡两行、顶栏两行） |
 | R-7 | 抖动源鉴别 | 无法从日志判断是软件负载还是硬件供电 | `CONFIG_SCR_BENCH_DISP_ONLY=y` 鉴别构建（无 WiFi/控制）：**纯显示稳定** → 锁定软件负载（WiFi/PSRAM 竞争），排除供电/面板时序 |
+| R-8 | "闪烁非常严重"（车辆链路接通后） | 日志实锤：TC275 上线、遥测流启动后，**600 ms 遥测瞬时缺口（车辆启动/广播节奏）反复触发全屏 RADIO LOST 覆盖层弹出/消失——90 s 内 31 次全屏红/黑交替**；且覆盖层每 10 Hz 无条件 `move_foreground`（DIRECT 模式 = 整屏失效 ×10/s） | ① 告警去抖 `CONFIG_SCR_ALERT_DEBOUNCE_MS=1200`：持续丢失 1.2 s 才弹全屏，恢复即清；状态栏 STALE/"--"仍 600 ms 即时反应（spec 101/102 分层兑现）；② 覆盖层显隐/z-order 只在状态迁移时执行；③ 顺带修掉开机→主页 FADE 过渡（整屏双层混叠=一次全屏闪）与 ui.c 的 toast 反逻辑判断 |
 
 **修复后 3 分钟 soak（真机 + 真实 C6）**：0 panic；WiFi→WS→hello 全链路
 `WS connected` / `Control owner: S3`（C6 台架 bench 模式）/ `Vehicle link down`
