@@ -25,5 +25,7 @@
     "--query-driver=**",
     "--compile-commands-dir=/Users/kunlong/Documents/Code/Esp32/smartcar_remote/build"
   ],
-  "idf.currentSetup": "/Users/kunlong/.espressif/v6.1/esp-idf"
+  "idf.currentSetup": "/Users/kunlong/.espressif/v6.1/esp-idf",
+  "idf.port": "/dev/tty.usbmodem11201",
+  "idf.flashType": "UART"
 }
