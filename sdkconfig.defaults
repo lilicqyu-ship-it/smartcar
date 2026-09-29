@@ -12,11 +12,24 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
+# XIP_FROM_PSRAM (official esp-dev-kits lvgl_demos): code+rodata run from PSRAM so
+# flash writes (NVS, Wi-Fi PHY calibration) no longer disable the cache.  Without
+# it the RGB bounce ISR cannot read the PSRAM framebuffer during a flash op and
+# the panel drifts / shows snow.
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
 CONFIG_SPIRAM_USE_MALLOC=y
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+
 # ---- CPU / RTOS ------------------------------------------------------------------
-CONFIG_ESP_DEFAULT_CPU_FREQ_240=y
+# NOTE: symbol is ..._FREQ_MHZ_240 - the old "_FREQ_240" name was silently
+# ignored and the chip ran at 160 MHz, starving the RGB bounce-buffer ISR.
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+# 64 KB / 64 B data cache (Espressif LCD-EV-Board RGB config): PSRAM->bounce
+# buffer memcpy bandwidth.
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
 CONFIG_FREERTOS_HZ=1000
 CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
 
@@ -50,14 +63,7 @@ CONFIG_BSP_LCD_SUB_BOARD_800_480=y
 # DIRECT_MODE (not FULL_REFRESH): full refresh repaints the whole 800x480 for
 # every dirty pixel group - with a 10 Hz updater that strobes the panel.  Direct
 # mode redraws only the dirty regions into the vsync-synchronized buffer.
-# BUFFER_NUMS=3 (triple buffer): direct-mode avoid-tearing needs THREE frame
-# buffers to be artifact-free.  With only 2, LVGL flips between two FBs but the
-# back buffer still holds the frame from two frames ago, so any region not
-# redrawn this frame shows stale content - during a fast joystick drag (many
-# small dirty rects at 60 Hz) that stale region is exactly the visible screen
-# split/tear and the drag stutter.  A 3rd FB (~750 KB in the 8 MB octal PSRAM)
-# gives LVGL a clean back buffer that is always one frame behind, matching the
-# factory ESP32-S3-LCD-EV-Board anti-tear config.
+# BUFFER_NUMS=3: matches the official esp-dev-kits lvgl_demos config.
 CONFIG_BSP_LCD_RGB_BUFFER_NUMS=3
 CONFIG_BSP_DISPLAY_LVGL_AVOID_TEAR=y
 CONFIG_BSP_DISPLAY_LVGL_DIRECT_MODE=y
@@ -65,18 +71,9 @@ CONFIG_BSP_DISPLAY_LVGL_DIRECT_MODE=y
 # rate for more headroom under Wi-Fi load.
 CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_MODE=y
 CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_HEIGHT=20
-# RESTART_IN_VSYNC (R-11): the RGB panel scans a PSRAM framebuffer out through a
-# small 20-line bounce buffer fed by GDMA.  When PSRAM bandwidth is contended -
-# the Wi-Fi driver on core 0 hammering PSRAM, plus the reconnect retry storm -
-# GDMA momentarily fails to deliver pixels as fast as the panel consumes them
-# and the DMA<->panel pipeline PERMANENTLY desyncs: a fixed horizontal split
-# that appears even at boot/init loading (static content, no joystick) and never
-# self-heals.  The IDF driver's default desync heuristic only reacts after the
-# fact and is unreliable; this option force-restarts the GDMA channel every
-# VBlank so any desync is corrected within one frame.  ESP32-S3 only (we are).
-# This is the true fix for "boot-time tearing" - the R-10 buffer bump only
-# addresses partial-redraw stale regions, not the DMA-starvation permanent tear.
-CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
+# Do NOT enable CONFIG_LCD_RGB_RESTART_IN_VSYNC (R-11, reverted): forcing a
+# GDMA/FIFO reset every VBlank in bounce-buffer mode produced snow/garbage
+# pixels on this board (real-hardware test 2026-09-29).
 
 # ---- LVGL fonts used by the UI hierarchy (spec 54) ---------------------------------
 CONFIG_LV_FONT_MONTSERRAT_14=y
