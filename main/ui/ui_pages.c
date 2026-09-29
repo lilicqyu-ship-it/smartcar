@@ -601,9 +601,13 @@ static lv_obj_t *status_chip(lv_obj_t *parent, const char *txt)
     lv_obj_t *c = lv_label_create(parent);
     ui_label_set_text(c, txt);
     lv_obj_set_style_text_font(c, F_SM, 0);
-    lv_obj_set_style_text_letter_space(c, 1, 0);
-    lv_obj_set_style_pad_hor(c, 8, 0);
-    lv_obj_set_style_pad_ver(c, 3, 0);
+    /* fixed third of the row: free-width chips with padding + letter spacing
+     * summed past the 246 px row and the outer two were cut off */
+    lv_obj_set_width(c, LV_PCT(32));
+    lv_label_set_long_mode(c, LV_LABEL_LONG_MODE_CLIP);
+    lv_obj_set_style_text_align(c, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_pad_hor(c, 0, 0);
+    lv_obj_set_style_pad_ver(c, 4, 0);
     lv_obj_set_style_radius(c, 4, 0);
     lv_obj_set_style_border_width(c, 1, 0);
     lv_obj_set_style_border_color(c, lv_color_hex(UI_COL_LINE), 0);
@@ -660,7 +664,10 @@ static void module_tile(lv_obj_t *grid, int idx, const char *icon,
 
     lv_obj_t *sub = lv_label_create(t);
     lv_label_set_text(sub, " ");
-    lv_obj_set_width(sub, LV_PCT(70));
+    /* DOTS only truncates with a FIXED height: with auto height a long value
+     * ("NORMAL - dead zone 10%") wraps to 2 lines and, bottom-aligned, grows
+     * up into the title (tiles 01/04 overlap). One line, dots at the end. */
+    lv_obj_set_size(sub, LV_PCT(66), lv_font_get_line_height(F_SM));
     lv_label_set_long_mode(sub, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_font(sub, F_SM, 0);
     lv_obj_set_style_text_color(sub, lv_color_hex(UI_COL_DIM), 0);
@@ -751,10 +758,10 @@ void ui_pages_create_settings(lv_obj_t *root)
     lv_obj_set_style_bg_opa(chips, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(chips, 0, 0);
     lv_obj_set_style_pad_all(chips, 0, 0);
-    lv_obj_set_style_pad_column(chips, 6, 0);
+    lv_obj_set_style_pad_column(chips, 0, 0);
     lv_obj_remove_flag(chips, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(chips, LV_FLEX_FLOW_ROW);
-    lv_obj_set_flex_align(chips, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+    lv_obj_set_flex_align(chips, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
                           LV_FLEX_ALIGN_CENTER);
     lv_obj_align(chips, LV_ALIGN_TOP_MID, 0, 262);
     s_set.chip[0] = status_chip(chips, "LINK --");
@@ -796,8 +803,8 @@ void ui_pages_create_settings(lv_obj_t *root)
         module_tile(items, idx++, LV_SYMBOL_FILE,     "EVENTS", SUB_NAV_EVENTS);
     }
     /* static tile subtitles; live ones are written by the refresh */
-    ui_label_set_text(s_set.tile_sub[SUB_DISPLAY], "Dark HUD  -  always on");
-    ui_label_set_text(s_set.tile_sub[SUB_NAV_PAIR], "Bind this remote to a car");
+    ui_label_set_text(s_set.tile_sub[SUB_DISPLAY], "Dark HUD / always on");
+    ui_label_set_text(s_set.tile_sub[SUB_NAV_PAIR], "Bind to a car");
     if (s_set.tile_sub[SUB_NAV_DIAG]) {
         ui_label_set_text(s_set.tile_sub[SUB_NAV_DIAG], "Link + vehicle internals");
         ui_label_set_text(s_set.tile_sub[SUB_NAV_EVENTS], "Event log");
@@ -1061,7 +1068,7 @@ static void deck_refresh(const scr_state_t *st)
     scr_settings_t set;
     scr_settings_get(&set);
     static const char * const mtxt[3] = { "ECO", "NORMAL", "SPORT" };
-    ui_label_set_fmt(s_set.tile_sub[SUB_CONTROL], "%s  -  dead zone %u%%",
+    ui_label_set_fmt(s_set.tile_sub[SUB_CONTROL], "%s  /  DZ %u%%",
                      mtxt[set.mode <= 2 ? set.mode : 1], set.deadzone_pct);
     ui_label_set_fmt(s_set.tile_sub[SUB_RADIO], "%s", set.ssid[0] ? set.ssid : "not set");
     ui_label_set_fmt(s_set.tile_sub[SUB_ABOUT], "Firmware v%s", app->version);

@@ -139,7 +139,8 @@ static lv_obj_t *info_cell(lv_obj_t *grid, const char *cap, lv_obj_t **cap_out)
     lv_obj_remove_flag(cell, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *c = mk_label(cell, cap, F_SM, lv_color_hex(UI_COL_DIM));
-    lv_obj_set_width(c, LV_PCT(100));
+    /* fixed one-line height: DOTS would otherwise wrap and overlap the value */
+    lv_obj_set_size(c, LV_PCT(100), lv_font_get_line_height(F_SM));
     lv_label_set_long_mode(c, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_align(c, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_set_style_text_letter_space(c, 1, 0);
@@ -149,7 +150,7 @@ static lv_obj_t *info_cell(lv_obj_t *grid, const char *cap, lv_obj_t **cap_out)
     }
 
     lv_obj_t *v = mk_label(cell, "--", F_MD, lv_color_hex(UI_COL_TXT));
-    lv_obj_set_width(v, LV_PCT(100));
+    lv_obj_set_size(v, LV_PCT(100), lv_font_get_line_height(F_MD));
     lv_label_set_long_mode(v, LV_LABEL_LONG_MODE_DOTS);
     lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(v, LV_ALIGN_BOTTOM_MID, 0, 0);
