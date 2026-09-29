@@ -1,5 +1,7 @@
 # smartcar_remote — SMART CAR REMOTE (ESP32-S3-LCD-EV-Board-2)
 
+[![CI](https://github.com/lilicqyu-ship-it/smartcar_remote/actions/workflows/ci.yml/badge.svg)](https://github.com/lilicqyu-ship-it/smartcar_remote/actions/workflows/ci.yml)
+
 远距离智能遥控器(主驾驶终端)固件。对标需求规格书
 [doc/ESP32-S3-LCD-EV-Board v1.5 远距离智能遥控器——LCD UI-UX 产品级需求规格书](doc/ESP32-S3-LCD-EV-Board%20v1.5%20远距离智能遥控器——LCD%20UI-UX%20产品级需求规格书.md),
 上行协议与 [`esp32c6_car`](../esp32c6_car)(C6 网关固件)完全对接。
@@ -99,6 +101,24 @@ make
 ```
 
 覆盖：CRC check 值 0x29B1（与 c6_car 主机单测同源断言）、DRIVE 帧编解码回环、遥测 38 B 编解码回环、垃圾字节再同步。
+
+## CI（编译门控 + 固件大小/资源余量）
+
+[`.github/workflows/ci.yml`](.github/workflows/ci.yml)，push/PR 触发两个 job：
+
+- **firmware**：`espressif/idf:v6.1` 容器内 `set-target esp32s3 + build`
+  （从 `sdkconfig.defaults` 全新生成配置，即门控的是仓库内配置），
+  随后 [`scripts/ci_size_report.py`](scripts/ci_size_report.py) 输出
+  app 分区 / 整片 flash / DIRAM·IRAM·RTC 的占用与**余量百分比**到
+  job Summary，并按阈值门控（app ≤90 %、静态 DIRAM ≤95 %，超限即红）。
+  产物（app/bootloader/partition-table bin + flasher_args）上传为
+  artifact 可直接下载烧录。
+- **host-tests**：`make -C test/host check`（G1 门）。
+
+要在 PR 上强制门控，在 GitHub → Settings → Branches 给 `main` 添加
+branch protection，将 `esp-idf build + size gates` 与 `host proto tests`
+设为 required status checks（注意：开启后直推 `main` 会被拦截，
+需走 PR 流程）。
 
 ## 未做 / 后续(按 spec 分阶段)
 

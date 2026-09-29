@@ -21,6 +21,8 @@ typedef struct {
     uint8_t     deadzone;   /* % of full radius, captured on press    */
     int         last_dx, last_dy;   /* knob offset at release, for snap-back */
     bool        enabled;    /* live input gate (conn + owner checked) */
+    int         drawn_dx, drawn_dy; /* last position painted (2 px hysteresis) */
+    bool        drawn_valid;
 } joy_t;
 
 static joy_t s_joy;
@@ -44,8 +46,6 @@ static void apply_dim(bool dim)
                               : lv_color_hex(UI_COL_ACCENT);
     lv_obj_set_style_border_color(s_joy.pad, pad_border, 0);
     lv_obj_set_style_bg_color(s_joy.knob, knob_col, 0);
-    lv_obj_set_style_shadow_color(s_joy.knob, knob_col, 0);
-    lv_obj_set_style_shadow_opa(s_joy.knob, dim ? LV_OPA_20 : LV_OPA_40, 0);
     lv_obj_set_style_text_color(s_joy.dot,
                                 dim ? lv_color_hex(UI_COL_SURFACE2)
                                     : lv_color_hex(UI_COL_DIM), 0);
@@ -60,6 +60,7 @@ static void snapback_anim(void *var, int32_t v)
 
 static void joy_release(void)
 {
+    s_joy.drawn_valid = false;
     /* visual snap back (spec 13: 视觉回弹) */
     lv_anim_t a;
     lv_anim_init(&a);
@@ -105,9 +106,16 @@ static void joy_pressing(lv_event_t *e)
         r = (float)s_joy.max_r;
     }
 
-    knob_to(s_joy.knob, (int)dx, (int)dy);
     s_joy.last_dx = (int)dx;
     s_joy.last_dy = (int)dy;
+    if (!s_joy.drawn_valid ||
+        (int)dx - s_joy.drawn_dx > 1 || s_joy.drawn_dx - (int)dx > 1 ||
+        (int)dy - s_joy.drawn_dy > 1 || s_joy.drawn_dy - (int)dy > 1) {
+        s_joy.drawn_dx = (int)dx;
+        s_joy.drawn_dy = (int)dy;
+        s_joy.drawn_valid = true;
+        knob_to(s_joy.knob, (int)dx, (int)dy);
+    }
 
     /* radial dead zone with linear remap from its edge (spec 15) */
     float dz = (float)s_joy.deadzone / 100.0f;
@@ -202,9 +210,7 @@ lv_obj_t *ui_joystick_create(lv_obj_t *parent, int size)
     lv_obj_set_style_bg_color(s_joy.knob, lv_color_hex(UI_COL_ACCENT), 0);
     lv_obj_set_style_bg_opa(s_joy.knob, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(s_joy.knob, 0, 0);
-    lv_obj_set_style_shadow_width(s_joy.knob, 30, 0);
-    lv_obj_set_style_shadow_color(s_joy.knob, lv_color_hex(UI_COL_ACCENT), 0);
-    lv_obj_set_style_shadow_opa(s_joy.knob, LV_OPA_40, 0);
+    lv_obj_set_style_border_width(s_joy.knob, 3, 0);
     lv_obj_remove_flag(s_joy.knob, LV_OBJ_FLAG_CLICKABLE);
     lv_obj_remove_flag(s_joy.knob, LV_OBJ_FLAG_SCROLLABLE);
     knob_center(s_joy.knob);
@@ -234,6 +240,7 @@ void ui_joystick_set_enabled(bool en)
     if (!en) {
         s_joy.last_dx = 0;
         s_joy.last_dy = 0;
+        s_joy.drawn_valid = false;
         knob_center(s_joy.knob);
         app_state_set_joy(0, 0);
     }
