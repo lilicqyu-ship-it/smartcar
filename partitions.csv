@@ -1,0 +1,9 @@
+# smartcar_remote - ESP32-S3-WROOM-1-N16R8, 16 MB flash
+# Single factory app: no A/B OTA on the remote (OTA is phone -> C6 -> TC275,
+# per doc/ESP32-S3-LCD-EV-Board v1.5 spec section 113/114).  Plenty of room
+# for LVGL assets later.
+# Name,     Type, SubType,  Offset,   Size,  Flags
+nvs,        data, nvs,      0x9000,   24K,
+phy_init,   data, phy,      0xf000,   4K,
+factory,    app,  factory, 0x10000,   6M,
+coredump,   data, coredump,0x610000, 64K,

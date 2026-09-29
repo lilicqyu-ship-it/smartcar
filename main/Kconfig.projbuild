@@ -1,0 +1,99 @@
+menu "smartcar_remote"
+
+    config SCR_BENCH_DISP_ONLY
+        bool "BENCH ONLY: display bring-up mode (no Wi-Fi / control tasks)"
+        default n
+        help
+            Diagnostic build to isolate screen jitter: boots the LCD/touch/LVGL
+            stack and the UI without starting the radio or control tasks.
+            If the screen is STILL unstable here, the cause is hardware
+            (power supply / panel timing), not software load.
+
+    config SCR_AP_SSID
+        string "C6 softAP SSID (default until NVS holds one)"
+        default "SD-DEV000"
+        help
+            Bench default from c6_car CONFIG_C6_FACTORY_DEV_OVERRIDE.
+            Production remotes pair with the real SSID printed on the car.
+
+    config SCR_AP_PASS
+        string "C6 softAP password (default until NVS holds one)"
+        default "sddev123456"
+
+    config SCR_C6_IP
+        string "C6 gateway IPv4"
+        default "192.168.4.1"
+
+    config SCR_CTRL_RATE_HZ
+        int "DRIVE frame rate in Hz (doubles as the TC275 heartbeat)"
+        default 30
+        range 5 100
+
+    config SCR_TELE_TIMEOUT_MS
+        int "Telemetry stale threshold in ms"
+        default 600
+        range 100 5000
+        help
+            50 Hz nominal chain; after this without a frame the UI shows "--"
+            instead of stale live data (spec 101).
+
+    config SCR_ALERT_DEBOUNCE_MS
+        int "Sustained radio loss before the full-screen alert, in ms"
+        default 1200
+        range 300 10000
+        help
+            Telemetry hiccups shorter than this keep the alert suppressed
+            (status bar still reacts immediately) so the overlay cannot
+            strobe on/off - a full-screen repaint storm shows as severe
+            flicker on the RGB panel.
+
+    config SCR_RX_WATCHDOG_MS
+        int "WebSocket silence before forced reconnect in ms"
+        default 10000
+        range 2000 60000
+
+    config SCR_RSSI_EXCELLENT
+        int "RSSI >= this dBm counts EXCELLENT"
+        default -60
+    config SCR_RSSI_GOOD
+        int "RSSI >= this dBm counts GOOD"
+        default -67
+    config SCR_RSSI_FAIR
+        int "RSSI >= this dBm counts FAIR"
+        default -75
+    config SCR_RSSI_WEAK
+        int "RSSI >= this dBm counts WEAK, below is CRITICAL"
+        default -85
+        help
+            Spec 26: thresholds are bench defaults and MUST be re-validated by
+            real distance tests (10/50/100/200/500 m) before production.
+
+    config SCR_EMERG_LONGPRESS_MS
+        int "STOP long-press duration that triggers EMERGENCY, in ms"
+        default 1200
+        range 500 5000
+
+    config SCR_MODE_ECO_PCT
+        int "ECO mode output scale, percent"
+        default 50
+        range 10 100
+    config SCR_MODE_NORMAL_PCT
+        int "NORMAL mode output scale, percent"
+        default 80
+        range 10 100
+    config SCR_MODE_SPORT_PCT
+        int "SPORT mode output scale, percent"
+        default 100
+        range 10 100
+        help
+            Spec 33: client-side limiters only; the real tuning happens on the
+            vehicle during test drives.
+
+    config SCR_BATT_LOW_PCT
+        int "Vehicle battery low warning, percent"
+        default 20
+    config SCR_BATT_CRIT_PCT
+        int "Vehicle battery critical, percent"
+        default 10
+
+endmenu

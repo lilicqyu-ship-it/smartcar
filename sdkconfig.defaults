@@ -1,0 +1,72 @@
+# ---- target / flash ----------------------------------------------------------
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# ---- partition table ----------------------------------------------------------
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# ---- PSRAM (N16R8 module, octal 8 MB) ------------------------------------------
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_USE_MALLOC=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+
+# ---- CPU / RTOS ------------------------------------------------------------------
+CONFIG_ESP_DEFAULT_CPU_FREQ_240=y
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+
+# ---- watchdogs / panic -------------------------------------------------------------
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+CONFIG_ESP_BROWNOUT_DET=y
+
+# ---- networking ---------------------------------------------------------------------
+CONFIG_LWIP_SO_REUSE=y
+CONFIG_ESP_WIFI_NVS_ENABLED=y
+CONFIG_ESP_WIFI_STA_DISCONNECTED_PM_ENABLE=y
+# Separate TX lock: the 30 Hz DRIVE writes must not serialize the client's
+# receive loop / keep-alive PONG responses (real-board log: PONG lock
+# timeouts while driving data flows).
+CONFIG_ESP_WS_CLIENT_SEPARATE_TX_LOCK=y
+CONFIG_ESP_WS_CLIENT_TX_LOCK_TIMEOUT_MS=100
+
+# ---- logging: INFO on the bench, screen stays clean (spec section 7) ---------------
+CONFIG_LOG_DEFAULT_LEVEL_INFO=y
+CONFIG_LOG_MAXIMUM_LEVEL_DEBUG=y
+
+# ---- BSP: ESP32-S3-LCD-EV-Board-2, sub board 3 = 4.3" 800x480 RGB (ST7262) --------
+# Hardware: ESP32-S3-LCD-EV-Board-2 kit (SUB3), GT1151 touch, N16R16V module.
+CONFIG_BSP_LCD_SUB_BOARD_800_480=y
+# Anti-tearing (Espressif factory_demo config for this board): two full frame
+# buffers in PSRAM + bounce buffers.  Without anti-tear, LVGL partial redraws
+# race the RGB scan-out and the picture visibly tears/shakes.
+# DIRECT_MODE (not FULL_REFRESH): full refresh repaints the whole 800x480 for
+# every dirty pixel group - with a 10 Hz updater that strobes the panel.  Direct
+# mode redraws only the dirty regions into the vsync-synchronized buffer.
+CONFIG_BSP_LCD_RGB_BUFFER_NUMS=2
+CONFIG_BSP_DISPLAY_LVGL_AVOID_TEAR=y
+CONFIG_BSP_DISPLAY_LVGL_DIRECT_MODE=y
+# Bounce buffer height 20 (BSP default 10): halves the bounce-feed interrupt
+# rate for more headroom under Wi-Fi load.
+CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_MODE=y
+CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_HEIGHT=20
+
+# ---- LVGL fonts used by the UI hierarchy (spec 54) ---------------------------------
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_20=y
+CONFIG_LV_FONT_MONTSERRAT_28=y
+CONFIG_LV_FONT_MONTSERRAT_48=y
+# 10 pages with several hundred styled objects far exceed the builtin 64 KB
+# pool (real-board panic: lv_realloc NULL -> LoadProhibited in lv_obj_add_style).
+# Map LVGL malloc onto the C library / ESP system heap: internal RAM first,
+# PSRAM spill. (LV_USE_STDLIB_MALLOC is a derived int symbol - the user-facing
+# knob is the "Malloc functions source" choice.)
+CONFIG_LV_USE_CLIB_MALLOC=y
