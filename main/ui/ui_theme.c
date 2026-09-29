@@ -18,9 +18,13 @@ lv_obj_t *ui_card(lv_obj_t *parent)
     lv_obj_t *c = lv_obj_create(parent);
     lv_obj_set_style_bg_color(c, lv_color_hex(UI_COL_SURFACE), 0);
     lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
-    lv_obj_set_style_border_width(c, 0, 0);
-    lv_obj_set_style_radius(c, 14, 0);
+    /* HUD frame: 1 px outline instead of shadows - static, so it costs
+     * nothing after the first paint (no per-frame blur on the RGB feed) */
+    lv_obj_set_style_border_width(c, 1, 0);
+    lv_obj_set_style_border_color(c, lv_color_hex(UI_COL_LINE), 0);
+    lv_obj_set_style_radius(c, 8, 0);
     lv_obj_set_style_pad_all(c, 8, 0);
+    lv_obj_remove_flag(c, LV_OBJ_FLAG_SCROLLABLE);
     return c;
 }
 
@@ -31,6 +35,10 @@ lv_obj_t *ui_header(lv_obj_t *parent, const char *title, lv_event_cb_t on_back)
     lv_obj_set_style_bg_color(bar, lv_color_hex(UI_COL_SURFACE), 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
     lv_obj_set_style_border_width(bar, 0, 0);
+    lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_width(bar, 2, 0);
+    lv_obj_set_style_border_color(bar, lv_color_hex(UI_COL_ACCENT), 0);
+    lv_obj_set_style_border_opa(bar, LV_OPA_60, 0);
     lv_obj_set_style_radius(bar, 0, 0);
     lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
@@ -78,7 +86,11 @@ lv_obj_t *ui_button(lv_obj_t *parent, const char *text, lv_color_t bg,
 {
     lv_obj_t *b = lv_button_create(parent);
     lv_obj_set_style_bg_color(b, bg, 0);
-    lv_obj_set_style_radius(b, 12, 0);
+    lv_obj_set_style_radius(b, 8, 0);
+    lv_obj_set_style_shadow_width(b, 0, 0);
+    lv_obj_set_style_border_width(b, 1, 0);
+    lv_obj_set_style_border_color(b, lv_color_hex(UI_COL_LINE), 0);
+    lv_obj_set_style_border_color(b, lv_color_hex(UI_COL_ACCENT), LV_STATE_PRESSED);
     lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *l = lv_label_create(b);

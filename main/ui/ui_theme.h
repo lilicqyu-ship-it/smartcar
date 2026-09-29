@@ -13,17 +13,19 @@
 extern "C" {
 #endif
 
-/* palette: dark background, bright digits, clear separation (spec 52) */
-#define UI_COL_BG      0x0E1116u   /* near-black blue               */
-#define UI_COL_SURFACE 0x1A2029u   /* cards / bars                  */
-#define UI_COL_SURFACE2 0x232B36u  /* nested elements               */
-#define UI_COL_TXT     0xE8ECF1u   /* primary text                  */
-#define UI_COL_DIM     0x8A94A3u   /* secondary text                */
-#define UI_COL_OK      0x34C77Bu   /* normal (green family)         */
-#define UI_COL_WARN    0xF5B944u   /* warning (amber family)        */
-#define UI_COL_CRIT    0xF5475Bu   /* severe (red family)           */
-#define UI_COL_INFO    0x4D9FFFu   /* information (blue family)     */
-#define UI_COL_ACCENT  0x2FA4FFu   /* interactive accent            */
+/* palette: HUD style - deep blue-black, cyan accent, thin glowing outlines
+ * (spec 52: dark background, bright digits, clear separation) */
+#define UI_COL_BG      0x060A12u   /* deep blue-black               */
+#define UI_COL_SURFACE 0x0D1520u   /* cards / bars                  */
+#define UI_COL_SURFACE2 0x16233Au  /* nested elements / tracks      */
+#define UI_COL_LINE    0x1C4466u   /* card outline / grid lines     */
+#define UI_COL_TXT     0xE6F4FFu   /* primary text (cool white)     */
+#define UI_COL_DIM     0x6F8BA6u   /* secondary text / captions     */
+#define UI_COL_OK      0x2EE59Du   /* normal (green family)         */
+#define UI_COL_WARN    0xFFB547u   /* warning (amber family)        */
+#define UI_COL_CRIT    0xFF4D6Au   /* severe (red family)           */
+#define UI_COL_INFO    0x4DA8FFu   /* information (blue family)     */
+#define UI_COL_ACCENT  0x00D4FFu   /* interactive accent (cyan)     */
 
 /* font hierarchy (spec 54): 1st speed/core state, 2nd secondary values,
  * 3rd descriptions, 4th diagnostics */

@@ -417,6 +417,13 @@ typedef struct {
     lv_obj_t *ssid_ta, *pass_ta, *kb;
     lv_timer_t *kb_hide;        /* delayed keyboard hide (defocus race) */
     lv_obj_t *pair_status_lbl;
+    /* command deck (settings root) */
+    lv_obj_t *core_arc;         /* radial link-quality gauge          */
+    lv_obj_t *core_val;         /* dBm in the gauge centre            */
+    lv_obj_t *core_q;           /* quality word under the number      */
+    lv_obj_t *chip[3];          /* LINK / CAR / CTRL status chips     */
+    lv_obj_t *foot;             /* uptime + firmware line             */
+    lv_obj_t *tile_sub[SUB_NAV_EVENTS + 1];  /* live subtitle per module */
     /* about sub */
     lv_obj_t *fw_val;
     int fw_taps;
@@ -565,19 +572,102 @@ static lv_obj_t *make_sub(lv_obj_t *root)
     return p;
 }
 
-static void list_btn(lv_obj_t *list, const char *txt, sub_t target)
+/* ---- command deck --------------------------------------------------------
+ * The settings root is not a list: it is a console.  Left: a live SYSTEM CORE
+ * gauge (link quality ring + status chips).  Right: numbered module tiles, each
+ * showing its current value, so the page answers "what is set right now"
+ * before anything is tapped.  All decoration is static outlines - the only
+ * things that repaint are values that actually change (cached setters). */
+
+/* HUD corner bracket: two thin bars forming an L at one corner of `parent` */
+static void hud_bracket(lv_obj_t *parent, lv_align_t al, int dx, int dy)
 {
-    lv_obj_t *b = lv_button_create(list);
-    lv_obj_set_size(b, LV_PCT(100), 48);
-    lv_obj_set_style_bg_color(b, lv_color_hex(UI_COL_SURFACE), 0);
-    lv_obj_add_event_cb(b, list_row_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)target);
-    lv_obj_t *l = lv_label_create(b);
-    ui_label_set_text(l, txt);
-    lv_obj_set_style_text_font(l, F_MD, 0);
-    lv_obj_align(l, LV_ALIGN_LEFT_MID, 8, 0);
-    lv_obj_t *arrow = lv_label_create(b);
-    ui_label_set_text(arrow, LV_SYMBOL_RIGHT);
-    lv_obj_align(arrow, LV_ALIGN_RIGHT_MID, -8, 0);
+    static const int L = 14, T = 2;
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *b = lv_obj_create(parent);
+        lv_obj_set_size(b, i ? T : L, i ? L : T);
+        lv_obj_set_style_bg_color(b, lv_color_hex(UI_COL_ACCENT), 0);
+        lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(b, 0, 0);
+        lv_obj_set_style_radius(b, 0, 0);
+        lv_obj_remove_flag(b, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(b, LV_OBJ_FLAG_IGNORE_LAYOUT);
+        lv_obj_align(b, al, dx, dy);
+    }
+}
+
+static lv_obj_t *status_chip(lv_obj_t *parent, const char *txt)
+{
+    lv_obj_t *c = lv_label_create(parent);
+    ui_label_set_text(c, txt);
+    lv_obj_set_style_text_font(c, F_SM, 0);
+    lv_obj_set_style_text_letter_space(c, 1, 0);
+    lv_obj_set_style_pad_hor(c, 8, 0);
+    lv_obj_set_style_pad_ver(c, 3, 0);
+    lv_obj_set_style_radius(c, 4, 0);
+    lv_obj_set_style_border_width(c, 1, 0);
+    lv_obj_set_style_border_color(c, lv_color_hex(UI_COL_LINE), 0);
+    lv_obj_set_style_bg_color(c, lv_color_hex(UI_COL_SURFACE2), 0);
+    lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+    return c;
+}
+
+/* numbered module tile: 01 index, icon, title, live subtitle, accent strip */
+static void module_tile(lv_obj_t *grid, int idx, const char *icon,
+                        const char *title, sub_t target)
+{
+    lv_obj_t *t = lv_button_create(grid);
+    lv_obj_set_size(t, LV_PCT(48), 88);
+    lv_obj_set_style_bg_color(t, lv_color_hex(UI_COL_SURFACE), 0);
+    lv_obj_set_style_bg_color(t, lv_color_hex(UI_COL_SURFACE2), LV_STATE_PRESSED);
+    lv_obj_set_style_radius(t, 6, 0);
+    lv_obj_set_style_shadow_width(t, 0, 0);
+    lv_obj_set_style_border_width(t, 1, 0);
+    lv_obj_set_style_border_color(t, lv_color_hex(UI_COL_LINE), 0);
+    lv_obj_set_style_border_color(t, lv_color_hex(UI_COL_ACCENT), LV_STATE_PRESSED);
+    lv_obj_set_style_pad_all(t, 0, 0);
+    lv_obj_add_event_cb(t, list_row_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)target);
+
+    lv_obj_t *strip = lv_obj_create(t);
+    lv_obj_set_size(strip, 3, 56);
+    lv_obj_set_style_bg_color(strip, lv_color_hex(UI_COL_ACCENT), 0);
+    lv_obj_set_style_bg_opa(strip, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(strip, 0, 0);
+    lv_obj_set_style_radius(strip, 0, 0);
+    lv_obj_remove_flag(strip, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(strip, LV_ALIGN_LEFT_MID, 0, 0);
+
+    lv_obj_t *n = lv_label_create(t);
+    lv_label_set_text_fmt(n, "%02d", idx);
+    lv_obj_set_style_text_font(n, F_SM, 0);
+    lv_obj_set_style_text_color(n, lv_color_hex(UI_COL_ACCENT), 0);
+    lv_obj_set_style_text_letter_space(n, 2, 0);
+    lv_obj_align(n, LV_ALIGN_TOP_LEFT, 14, 10);
+
+    lv_obj_t *ic = lv_label_create(t);
+    lv_label_set_text(ic, icon);
+    lv_obj_set_style_text_font(ic, F_XL, 0);
+    lv_obj_set_style_text_color(ic, lv_color_hex(UI_COL_LINE), 0);
+    lv_obj_set_style_text_color(ic, lv_color_hex(UI_COL_ACCENT), LV_STATE_PRESSED);
+    lv_obj_align(ic, LV_ALIGN_RIGHT_MID, -14, 0);
+
+    lv_obj_t *tt = lv_label_create(t);
+    lv_label_set_text(tt, title);
+    lv_obj_set_style_text_font(tt, F_LG, 0);
+    lv_obj_set_style_text_color(tt, lv_color_hex(UI_COL_TXT), 0);
+    lv_obj_set_style_text_letter_space(tt, 2, 0);
+    lv_obj_align(tt, LV_ALIGN_LEFT_MID, 14, 2);
+
+    lv_obj_t *sub = lv_label_create(t);
+    lv_label_set_text(sub, " ");
+    lv_obj_set_width(sub, LV_PCT(70));
+    lv_label_set_long_mode(sub, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_set_style_text_font(sub, F_SM, 0);
+    lv_obj_set_style_text_color(sub, lv_color_hex(UI_COL_DIM), 0);
+    lv_obj_align(sub, LV_ALIGN_BOTTOM_LEFT, 14, -10);
+    s_set.tile_sub[target] = sub;
+
+    hud_bracket(t, LV_ALIGN_TOP_RIGHT, 0, 0);
 }
 
 void ui_pages_create_settings(lv_obj_t *root)
@@ -586,37 +676,131 @@ void ui_pages_create_settings(lv_obj_t *root)
     s_set.root = root;
     s_set.cur = SUB_NONE;
 
-    /* main list: a header with a back-to-Home button, like every other page -
-     * without it the Settings root was a dead end (no way back to the stick).
-     * The header lives inside the list container so it hides together with the
-     * list when a sub-page opens (each sub has its own back-to-list header). */
+    /* command deck: header (back to Home - the root must never be a dead
+     * end) + SYSTEM CORE panel + module grid.  Everything lives inside
+     * s_set.list so it hides as one when a sub-page opens. */
+    int W = bsp_display_get_h_res(), H = bsp_display_get_v_res();
     s_set.list = lv_obj_create(root);
-    lv_obj_set_size(s_set.list, LV_PCT(100), bsp_display_get_v_res());
-    lv_obj_align(s_set.list, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_size(s_set.list, W, H);
+    lv_obj_align(s_set.list, LV_ALIGN_TOP_LEFT, 0, 0);
     lv_obj_set_style_bg_opa(s_set.list, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(s_set.list, 0, 0);
     lv_obj_set_style_pad_all(s_set.list, 0, 0);
     lv_obj_remove_flag(s_set.list, LV_OBJ_FLAG_SCROLLABLE);
 
-    ui_header(s_set.list, "SETTINGS", nav_home_cb);
+    ui_header(s_set.list, "COMMAND DECK", nav_home_cb);
 
+    /* ---- SYSTEM CORE (left) ---- */
+    int core_w = 262;
+    lv_obj_t *core = ui_card(s_set.list);
+    lv_obj_set_size(core, core_w, H - 58 - 8);
+    lv_obj_align(core, LV_ALIGN_TOP_LEFT, 8, 58);
+    lv_obj_set_style_pad_all(core, 0, 0);
+    hud_bracket(core, LV_ALIGN_TOP_LEFT, 0, 0);
+    hud_bracket(core, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+
+    lv_obj_t *ct = lv_label_create(core);
+    lv_label_set_text(ct, "SYSTEM CORE");
+    lv_obj_set_style_text_font(ct, F_SM, 0);
+    lv_obj_set_style_text_color(ct, lv_color_hex(UI_COL_ACCENT), 0);
+    lv_obj_set_style_text_letter_space(ct, 4, 0);
+    lv_obj_align(ct, LV_ALIGN_TOP_MID, 0, 12);
+
+    s_set.core_arc = lv_arc_create(core);
+    lv_obj_set_size(s_set.core_arc, 184, 184);
+    lv_arc_set_bg_angles(s_set.core_arc, 135, 45);     /* 270 deg sweep */
+    lv_arc_set_range(s_set.core_arc, 0, 100);
+    lv_arc_set_value(s_set.core_arc, 0);
+    lv_obj_remove_style(s_set.core_arc, NULL, LV_PART_KNOB);
+    lv_obj_remove_flag(s_set.core_arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_style_arc_width(s_set.core_arc, 10, 0);
+    lv_obj_set_style_arc_color(s_set.core_arc, lv_color_hex(UI_COL_SURFACE2), 0);
+    lv_obj_set_style_arc_width(s_set.core_arc, 10, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(s_set.core_arc, lv_color_hex(UI_COL_ACCENT), LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(s_set.core_arc, false, LV_PART_INDICATOR);
+    lv_obj_align(s_set.core_arc, LV_ALIGN_TOP_MID, 0, 38);
+
+    /* inner hairline ring: static depth cue */
+    lv_obj_t *inner = lv_obj_create(core);
+    lv_obj_set_size(inner, 136, 136);
+    lv_obj_set_style_radius(inner, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(inner, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(inner, 1, 0);
+    lv_obj_set_style_border_color(inner, lv_color_hex(UI_COL_LINE), 0);
+    lv_obj_remove_flag(inner, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align_to(inner, s_set.core_arc, LV_ALIGN_CENTER, 0, 0);
+
+    s_set.core_val = lv_label_create(core);
+    lv_label_set_text(s_set.core_val, "--");
+    lv_obj_set_style_text_font(s_set.core_val, F_XL, 0);
+    lv_obj_align_to(s_set.core_val, s_set.core_arc, LV_ALIGN_CENTER, 0, -8);
+    lv_obj_t *unit = lv_label_create(core);
+    lv_label_set_text(unit, "dBm");
+    lv_obj_set_style_text_font(unit, F_SM, 0);
+    lv_obj_set_style_text_color(unit, lv_color_hex(UI_COL_DIM), 0);
+    lv_obj_align_to(unit, s_set.core_arc, LV_ALIGN_CENTER, 0, 18);
+    s_set.core_q = lv_label_create(core);
+    lv_label_set_text(s_set.core_q, "NO SIGNAL");
+    lv_obj_set_style_text_font(s_set.core_q, F_SM, 0);
+    lv_obj_set_style_text_letter_space(s_set.core_q, 2, 0);
+    lv_obj_set_style_text_color(s_set.core_q, lv_color_hex(UI_COL_DIM), 0);
+    lv_obj_align_to(s_set.core_q, s_set.core_arc, LV_ALIGN_BOTTOM_MID, 0, 4);
+
+    lv_obj_t *chips = lv_obj_create(core);
+    lv_obj_set_size(chips, core_w - 16, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(chips, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(chips, 0, 0);
+    lv_obj_set_style_pad_all(chips, 0, 0);
+    lv_obj_set_style_pad_column(chips, 6, 0);
+    lv_obj_remove_flag(chips, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_flex_flow(chips, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(chips, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER,
+                          LV_FLEX_ALIGN_CENTER);
+    lv_obj_align(chips, LV_ALIGN_TOP_MID, 0, 262);
+    s_set.chip[0] = status_chip(chips, "LINK --");
+    s_set.chip[1] = status_chip(chips, "CAR --");
+    s_set.chip[2] = status_chip(chips, "CTRL --");
+
+    s_set.foot = lv_label_create(core);
+    lv_label_set_text(s_set.foot, " ");
+    lv_obj_set_width(s_set.foot, core_w - 20);
+    lv_label_set_long_mode(s_set.foot, LV_LABEL_LONG_MODE_WRAP);
+    lv_obj_set_style_text_align(s_set.foot, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(s_set.foot, F_SM, 0);
+    lv_obj_set_style_text_color(s_set.foot, lv_color_hex(UI_COL_DIM), 0);
+    lv_obj_set_style_text_line_space(s_set.foot, 4, 0);
+    lv_obj_align(s_set.foot, LV_ALIGN_BOTTOM_MID, 0, -14);
+
+    /* ---- module grid (right) ---- */
     lv_obj_t *items = lv_obj_create(s_set.list);
-    lv_obj_set_size(items, LV_PCT(100), bsp_display_get_v_res() - 66);
-    lv_obj_align(items, LV_ALIGN_TOP_MID, 0, 58);
+    lv_obj_set_size(items, W - core_w - 24, H - 58 - 8);
+    lv_obj_align(items, LV_ALIGN_TOP_RIGHT, -8, 58);
     lv_obj_set_style_bg_opa(items, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(items, 0, 0);
-    lv_obj_set_style_pad_hor(items, 8, 0);
-    lv_obj_set_flex_flow(items, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_all(items, 0, 0);
+    lv_obj_set_style_pad_row(items, 10, 0);
+    lv_obj_set_flex_flow(items, LV_FLEX_FLOW_ROW_WRAP);
+    lv_obj_set_flex_align(items, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
     lv_obj_set_scroll_dir(items, LV_DIR_VER);
+    lv_obj_set_scrollbar_mode(items, LV_SCROLLBAR_MODE_OFF);
 
-    list_btn(items, "Control", SUB_CONTROL);
-    list_btn(items, "Radio", SUB_RADIO);
-    list_btn(items, "Display", SUB_DISPLAY);
-    list_btn(items, "Pairing", SUB_NAV_PAIR);
-    list_btn(items, "About", SUB_ABOUT);
+    int idx = 1;
+    module_tile(items, idx++, LV_SYMBOL_SHUFFLE, "CONTROL", SUB_CONTROL);
+    module_tile(items, idx++, LV_SYMBOL_WIFI,    "RADIO",   SUB_RADIO);
+    module_tile(items, idx++, LV_SYMBOL_EYE_OPEN, "DISPLAY", SUB_DISPLAY);
+    module_tile(items, idx++, LV_SYMBOL_BLUETOOTH, "PAIRING", SUB_NAV_PAIR);
+    module_tile(items, idx++, LV_SYMBOL_LIST,    "ABOUT",   SUB_ABOUT);
     if (ui_engineer_mode()) {
-        list_btn(items, "Diagnostics (eng)", SUB_NAV_DIAG);
-        list_btn(items, "Event log (eng)", SUB_NAV_EVENTS);
+        module_tile(items, idx++, LV_SYMBOL_SETTINGS, "DIAG",   SUB_NAV_DIAG);
+        module_tile(items, idx++, LV_SYMBOL_FILE,     "EVENTS", SUB_NAV_EVENTS);
+    }
+    /* static tile subtitles; live ones are written by the refresh */
+    ui_label_set_text(s_set.tile_sub[SUB_DISPLAY], "Dark HUD  -  always on");
+    ui_label_set_text(s_set.tile_sub[SUB_NAV_PAIR], "Bind this remote to a car");
+    if (s_set.tile_sub[SUB_NAV_DIAG]) {
+        ui_label_set_text(s_set.tile_sub[SUB_NAV_DIAG], "Link + vehicle internals");
+        ui_label_set_text(s_set.tile_sub[SUB_NAV_EVENTS], "Event log");
     }
 
     /* ---- Control sub (spec 32/33) ---- */
@@ -816,10 +1000,80 @@ static void set_open_sub(sub_t s)
     sub_sync_values();
 }
 
+static void chip_set(lv_obj_t *c, const char *txt, lv_color_t col)
+{
+    ui_label_set_text(c, txt);
+    ui_label_set_color(c, col);
+    if (!lv_color_eq(lv_obj_get_style_border_color(c, 0), col)) {
+        lv_obj_set_style_border_color(c, col, 0);
+    }
+}
+
+static void deck_refresh(const scr_state_t *st)
+{
+    /* SYSTEM CORE: RSSI -> 0..100 % (-90 dBm = 0, -40 dBm = 100) */
+    static const char * const qtxt[6] = { "NO SIGNAL", "EXCELLENT", "GOOD",
+                                          "FAIR", "WEAK", "CRITICAL" };
+    lv_color_t qc;
+    if (st->rssi != 0) {
+        int pct = (st->rssi + 90) * 2;
+        pct = pct < 0 ? 0 : (pct > 100 ? 100 : pct);
+        if (lv_arc_get_value(s_set.core_arc) != pct) {
+            lv_arc_set_value(s_set.core_arc, pct);
+        }
+        qc = ui_col_for_state(st->quality >= SCR_QUAL_GOOD,
+                              st->quality == SCR_QUAL_FAIR || st->quality == SCR_QUAL_WEAK,
+                              st->quality == SCR_QUAL_CRITICAL);
+        ui_label_set_fmt(s_set.core_val, "%d", st->rssi);
+        ui_label_set_text(s_set.core_q, qtxt[st->quality <= 5 ? st->quality : 0]);
+    } else {
+        if (lv_arc_get_value(s_set.core_arc) != 0) {
+            lv_arc_set_value(s_set.core_arc, 0);
+        }
+        qc = lv_color_hex(UI_COL_DIM);
+        ui_label_set_text(s_set.core_val, "--");
+        ui_label_set_text(s_set.core_q, qtxt[0]);
+    }
+    ui_label_set_color(s_set.core_q, qc);
+    if (!lv_color_eq(lv_obj_get_style_arc_color(s_set.core_arc, LV_PART_INDICATOR), qc)) {
+        lv_obj_set_style_arc_color(s_set.core_arc, qc, LV_PART_INDICATOR);
+    }
+
+    chip_set(s_set.chip[0], st->conn == SCR_CONN_CONNECTED ? "LINK ON" :
+                            st->conn == SCR_CONN_CONNECTING ? "LINK ..." : "LINK OFF",
+             st->conn == SCR_CONN_CONNECTED ? lv_color_hex(UI_COL_OK) :
+             st->conn == SCR_CONN_CONNECTING ? lv_color_hex(UI_COL_WARN) : lv_color_hex(UI_COL_DIM));
+    chip_set(s_set.chip[1], st->tc_on ? "CAR ON" : "CAR OFF",
+             st->tc_on ? lv_color_hex(UI_COL_OK) : lv_color_hex(UI_COL_DIM));
+    chip_set(s_set.chip[2], st->owner == SCR_OWNER_S3 ? "CTRL S3" :
+                            st->owner == SCR_OWNER_WEB ? "CTRL WEB" : "CTRL --",
+             st->owner == SCR_OWNER_S3 ? lv_color_hex(UI_COL_OK) :
+             st->owner == SCR_OWNER_WEB ? lv_color_hex(UI_COL_INFO) : lv_color_hex(UI_COL_WARN));
+
+    uint32_t up = st->uptime_ms / 1000u;
+    const esp_app_desc_t *app = esp_app_get_description();
+    ui_label_set_fmt(s_set.foot, "UP %02lu:%02lu:%02lu   CH %u\nS3 v%s   C6 %s",
+                     (unsigned long)(up / 3600u), (unsigned long)(up / 60u % 60u),
+                     (unsigned long)(up % 60u), st->channel, app->version,
+                     st->c6_fw[0] ? st->c6_fw : "--");
+
+    /* live module subtitles */
+    scr_settings_t set;
+    scr_settings_get(&set);
+    static const char * const mtxt[3] = { "ECO", "NORMAL", "SPORT" };
+    ui_label_set_fmt(s_set.tile_sub[SUB_CONTROL], "%s  -  dead zone %u%%",
+                     mtxt[set.mode <= 2 ? set.mode : 1], set.deadzone_pct);
+    ui_label_set_fmt(s_set.tile_sub[SUB_RADIO], "%s", set.ssid[0] ? set.ssid : "not set");
+    ui_label_set_fmt(s_set.tile_sub[SUB_ABOUT], "Firmware v%s", app->version);
+}
+
 void ui_pages_settings_refresh(const scr_state_t *st)
 {
     /* live values only; user-editable widgets are populated once on open
      * (sub_sync_values) so a 10 Hz repaint can never fight the keyboard */
+    if (s_set.cur == SUB_NONE) {
+        deck_refresh(st);
+    }
     if (s_set.cur == SUB_RADIO) {
         ui_label_set_text(s_set.pair_status_lbl,
                           st->pair_status[0] ? st->pair_status : " ");

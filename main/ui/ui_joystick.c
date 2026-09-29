@@ -40,12 +40,18 @@ static void knob_center(lv_obj_t *knob)
 
 static void apply_dim(bool dim)
 {
-    lv_color_t pad_border = dim ? lv_color_hex(UI_COL_SURFACE)
-                                : lv_color_hex(UI_COL_SURFACE2);
-    lv_color_t knob_col = dim ? lv_color_hex(UI_COL_DIM)
+    /* HUD ring: cyan outline while live, dim grid line while locked - the
+     * state change is also carried by the knob colour and the header text */
+    lv_color_t pad_border = dim ? lv_color_hex(UI_COL_LINE)
+                                : lv_color_hex(UI_COL_ACCENT);
+    lv_color_t knob_col = dim ? lv_color_hex(UI_COL_SURFACE2)
                               : lv_color_hex(UI_COL_ACCENT);
     lv_obj_set_style_border_color(s_joy.pad, pad_border, 0);
+    lv_obj_set_style_border_opa(s_joy.pad, dim ? LV_OPA_COVER : LV_OPA_70, 0);
     lv_obj_set_style_bg_color(s_joy.knob, knob_col, 0);
+    lv_obj_set_style_border_color(s_joy.knob,
+                                  dim ? lv_color_hex(UI_COL_LINE)
+                                      : lv_color_hex(0xB8F3FF), 0);
     lv_obj_set_style_text_color(s_joy.dot,
                                 dim ? lv_color_hex(UI_COL_SURFACE2)
                                     : lv_color_hex(UI_COL_DIM), 0);
@@ -171,10 +177,22 @@ lv_obj_t *ui_joystick_create(lv_obj_t *parent, int size)
     lv_obj_set_style_bg_color(s_joy.pad, lv_color_hex(UI_COL_SURFACE), 0);
     lv_obj_set_style_bg_opa(s_joy.pad, LV_OPA_COVER, 0);
     lv_obj_set_style_border_color(s_joy.pad, lv_color_hex(UI_COL_SURFACE2), 0);
-    lv_obj_set_style_border_width(s_joy.pad, 4, 0);
+    lv_obj_set_style_border_width(s_joy.pad, 2, 0);
     lv_obj_set_style_pad_all(s_joy.pad, 0, 0);
     lv_obj_remove_flag(s_joy.pad, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(s_joy.pad, LV_OBJ_FLAG_CLICKABLE);
+
+    /* inner range ring (max deflection) - static, drawn once */
+    lv_obj_t *ring = lv_obj_create(s_joy.pad);
+    int rs = s_joy.max_r * 2;
+    lv_obj_set_size(ring, rs, rs);
+    lv_obj_set_style_radius(ring, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(ring, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(ring, 1, 0);
+    lv_obj_set_style_border_color(ring, lv_color_hex(UI_COL_LINE), 0);
+    lv_obj_align(ring, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_remove_flag(ring, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_remove_flag(ring, LV_OBJ_FLAG_SCROLLABLE);
 
     /* fine cross guides */
     static const char *marks[4] = { LV_SYMBOL_UP, LV_SYMBOL_DOWN,
