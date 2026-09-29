@@ -576,8 +576,14 @@ bool scr_link_send_bin(const uint8_t *data, size_t len)
         s_link.tx_skip++;
         return false;
     }
+    /* 150 ms: esp_websocket_client uses this timeout for the socket write as
+     * well as the lock, and ABORTS the connection when a write cannot finish
+     * in time.  5 ms is shorter than one Wi-Fi retransmission burst and caused
+     * a RADIO LOST every few minutes (soak 09-30: "Poll timeout ... 5 ms").
+     * Waiting only parks the ctrl task (it sleeps, LVGL keeps core 1); a
+     * socket stalled for >150 ms is a genuinely dead link. */
     int r = esp_websocket_client_send_bin(s_link.ws, (const char *)data,
-                                          (int)len, pdMS_TO_TICKS(5));
+                                          (int)len, pdMS_TO_TICKS(150));
     if (r > 0) {
         s_link.tx_cnt++;
         return true;
@@ -601,7 +607,7 @@ bool scr_link_send_text(const char *text)
         return false;       /* ping/pair retried by their callers */
     }
     int r = esp_websocket_client_send_text(s_link.ws, text,
-                                           (int)strlen(text), pdMS_TO_TICKS(20));
+                                           (int)strlen(text), pdMS_TO_TICKS(150));
     return r > 0;
 }
 
