@@ -498,8 +498,12 @@ bool scr_link_send_bin(const uint8_t *data, size_t len)
         !esp_websocket_client_is_connected(s_link.ws)) {
         return false;
     }
+    /* 5 ms: the TX lock is only ever held for one ~20 B frame write (ping
+     * text, library PING/PONG), so a short wait turns the periodic collision
+     * into a sub-ms delay instead of a dropped DRIVE + error log line, while
+     * still never parking the ctrl task on a stalled socket. */
     int r = esp_websocket_client_send_bin(s_link.ws, (const char *)data,
-                                          (int)len, 0);
+                                          (int)len, pdMS_TO_TICKS(5));
     if (r > 0) {
         s_link.tx_cnt++;
         return true;
@@ -513,8 +517,14 @@ bool scr_link_send_text(const char *text)
         !esp_websocket_client_is_connected(s_link.ws)) {
         return false;
     }
+    /* Only the 1 Hz monitor task sends text (ping/pair control), so it may
+     * wait briefly for the TX lock the 30 Hz DRIVE sender holds for a few
+     * hundred us.  With timeout 0 the ping lost that race every few seconds
+     * ("Could not lock ws-client within 0 timeout"), the pong never came and
+     * the RTT/loss readout jumped - and each miss printed an error line from
+     * the send path.  20 ms stays far below the ctrl period of the C6 side. */
     int r = esp_websocket_client_send_text(s_link.ws, text,
-                                           (int)strlen(text), 0);
+                                           (int)strlen(text), pdMS_TO_TICKS(20));
     return r > 0;
 }
 
