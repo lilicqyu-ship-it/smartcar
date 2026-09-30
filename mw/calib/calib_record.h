@@ -62,7 +62,7 @@ extern "C" {
 #define CALIB_FULLSCALE_DEF    1000
 #define CALIB_WHEELDIA_MIN     30
 #define CALIB_WHEELDIA_MAX     200
-#define CALIB_WHEELDIA_DEF     65
+#define CALIB_WHEELDIA_DEF     48      /* MG310 kit tyre (doc 34 SS8.1) */
 
 /* Motor position metadata (doc 34 SS8.1 pos byte; display/UI only in v1). */
 #define CALIB_POS_FRONT_LEFT   0u

@@ -4,7 +4,7 @@
 |---|---|
 | 文档编号 | 34 |
 | 域 | TC275 侧（3x） |
-| 状态 | **V1.3（已落地）**（2026-09-27：**§13 新增闭环使能门**——`rt/motor_algo.c` 新增 `g_closedLoopOk`：方向记录 `src=0`（首次烧录 / 校验失败回落 / 0x74 REC_CLEAR）时**强制开环等价**（SERVO `measValid=FALSE` 复用：duty=目标、清积分），把 23 §8.4 一直写着的"校验失败按开环等价行为运行"从口头规定变成固件强制执行，消除"编码器已接线但方向未标定 → 闭环正反馈跑飞"（原点回中电机仍转动的台架现象，§1 证据的延伸）；0x70 DONE / 0x73 REC_SET 自动开门、0x74 关门，门随 RecordLive version 边沿翻转并各打一行日志；§5.3 重写（按 src 分上电行为，删除 M3 完成前"每次上电重跑 0x70"旧口径）、§5.2/§7.2/§10/§12 同步。V1.2 = **§3 M2a + §8 M3' + §9 DPT 命令族全部编码完成**——新增 `mw/calib/`（记录编解码 + CPU0 DFlash 持久化）、xcore 四个新块、`rt/encoder` 参数运行时化、`rt/motor_algo` 结果发布/BUSY 拒绝/jog、0x71~0x74 入口、CPU2 EVT 出站队列；§11 = 实现清单与 5 条偏差（D1 0x22 由 CPU0 组帧、D5 长度 23 B），§12 = 三条待裁决（DF0 真实扇区数、`.cproject` 的 Flash 排除、台架验收）。V1.1 = 追加 §8 DFlash 持久化（取代 §4 bake-in 为正式方案）、§9 DPT 命令族 0x71~0x74 与逐电机 jog、§10 验收追加；V1.0 = 首版） |
+| 状态 | **V1.4（已落地）**（2026-09-30：**编码器硬件刻度修正**——实物 MG310 编码器为 13 PPR 霍尔 AB（×4 = 52 计数/电机转，×20.409 减速 = 1061.27 计数/轮转，48 mm 胎 = 0.1421 mm/计数），§8.1 默认 `wheelDiaMm` 65→**48**（`CALIB_WHEELDIA_DEF`/`ENCODER_WHEEL_DIA_MM` 同批，范围 [30,200] 不变）；换算公式一字未动。V1.3（已落地）（2026-09-27：**§13 新增闭环使能门**——`rt/motor_algo.c` 新增 `g_closedLoopOk`：方向记录 `src=0`（首次烧录 / 校验失败回落 / 0x74 REC_CLEAR）时**强制开环等价**（SERVO `measValid=FALSE` 复用：duty=目标、清积分），把 23 §8.4 一直写着的"校验失败按开环等价行为运行"从口头规定变成固件强制执行，消除"编码器已接线但方向未标定 → 闭环正反馈跑飞"（原点回中电机仍转动的台架现象，§1 证据的延伸）；0x70 DONE / 0x73 REC_SET 自动开门、0x74 关门，门随 RecordLive version 边沿翻转并各打一行日志；§5.3 重写（按 src 分上电行为，删除 M3 完成前"每次上电重跑 0x70"旧口径）、§5.2/§7.2/§10/§12 同步。V1.2 = **§3 M2a + §8 M3' + §9 DPT 命令族全部编码完成**——新增 `mw/calib/`（记录编解码 + CPU0 DFlash 持久化）、xcore 四个新块、`rt/encoder` 参数运行时化、`rt/motor_algo` 结果发布/BUSY 拒绝/jog、0x71~0x74 入口、CPU2 EVT 出站队列；§11 = 实现清单与 5 条偏差（D1 0x22 由 CPU0 组帧、D5 长度 23 B），§12 = 三条待裁决（DF0 真实扇区数、`.cproject` 的 Flash 排除、台架验收）。V1.1 = 追加 §8 DFlash 持久化（取代 §4 bake-in 为正式方案）、§9 DPT 命令族 0x71~0x74 与逐电机 jog、§10 验收追加；V1.0 = 首版） |
 | 代码基线 | `main`（含 F02 `73058cd` servo/判向 + F04 `658209b` 电池遥测）之上的本轮工作树 |
 | 读者 | 在 myCar 作业的 AI / 开发者（实施 M2a/M3 前**必读**，按 [33-ai-codebase-guide.md](33-ai-codebase-guide.md) 进入） |
 | 跨库配套 | [c6_car/doc/17-calib-ui.md](../../../../c6_car/doc/17-calib-ui.md)（标定 Web UI 需求；本文 §3 的帧契约与该文档 §4 是同一份协议的两端） |
@@ -257,7 +257,7 @@ LINKERR=/LINKDBG= 18 值             变化或异常时（state/irq/clk/ready/�
 | 6..9 | pos[4] | u8×4：0 前左 / 1 前右 / 2 后左 / 3 后右（默认按 23 §3 电机表：A 前左、B 后左、C 后右、D 前右） |
 | 10..13 | invert[4] | i8×4（0x70 结果；默认 +1） |
 | 14..15 | fullScaleMmS | i16（LE），默认 1000（= `ENCODER_FULL_SCALE_MM_S`） |
-| 16..17 | wheelDiaMm | i16（LE），默认 65（encoder.c 现硬编码常量） |
+| 16..17 | wheelDiaMm | i16（LE），默认 48（V1.4 起对齐 MG310 实配 48 mm 胎，= `CALIB_WHEELDIA_DEF`/`ENCODER_WHEEL_DIA_MM`；初版 65） |
 | 18..19 | crc16 | 覆盖 0..17，用 SF 帧同款 CRC16 算法（sf_frame.c 现行多项式，不新造） |
 
 - **单槽 + magic/CRC/范围三重校验**：任一失败 → 整体回落默认值并按 `src=0` 上报（EVT 0x23 的 `crcOk=0`）。磨损论证：DFlash 扇区擦写寿命典型 ≥10 万次，台架保存频率 ≤10 次/天 → 数十年量级，**无需磨损均衡**（写明依据，防未来过度设计）；
@@ -265,7 +265,7 @@ LINKERR=/LINKDBG= 18 值             变化或异常时（state/irq/clk/ready/�
 
 ### 8.2 算法参数运行时化（rt/encoder.c）
 
-- `ENCODER_FULL_SCALE_MM_S` 宏与轮径 `65.0f` 常量改为**运行时变量** `g_fullScaleMmS / g_wheelDiaMm`（初值 = 宏默认），`ENCODER_task` 测速与 `ENCODER_publish` 的 pct 换算**共用同一变量**；CPU2 的 vTarget 遥测换算（Cpu2_Main）加载同一数值（经 xcore `RecordLive` 广播或同款加载流程，实现时二选一并写明）；
+- `ENCODER_FULL_SCALE_MM_S` 宏与轮径宏常量（初版 `65.0f`，V1.4 起默认 48）改为**运行时变量** `g_fullScaleMmS / g_wheelDiaMm`（初值 = 宏默认），`ENCODER_task` 测速与 `ENCODER_publish` 的 pct 换算**共用同一变量**；CPU2 的 vTarget 遥测换算（Cpu2_Main）加载同一数值（经 xcore `RecordLive` 广播或同款加载流程，实现时二选一并写明）；
 - **公式一律不动，只换数据源**（改公式 = 重调整个闭环，doc/33 §5.2 红线）；
 - 除零/越界保护：换算处对非法值钳回默认（防 DFlash 位翻转把除零带进 1 kHz 环）。
 
@@ -387,7 +387,7 @@ typedef struct { boolean valid; XcoreCalibRecord rec; } XcoreRecordLive; /* CPU0
 | **`mw/calib/calib_record.c/.h`（新）** | 纯 C99 编解码层（与 `sf_frame.h` 同规矩，主机可编）：`CalibRecord` + 20 B blob（magic/ver/src/pos/invert/fullScale/wheelDia/crc16，CRC 复用 `SF_crc16`）、三重校验 `decode`、`fillDefaults`、`paramsOk`、`jogDecode`（钳 ±500 + `motor<4`）、`recSetDecode`（12 B，长度不符直接拒）、EVT 0x22/0x23 组帧 |
 | **`mw/calib/calib_store.c/.h`（新）** | CPU0 持久化：DF0 扇区 15 单槽；`CALIB_init`（同步事件前加载并广播）、`CALIB_tick`（消费 CPU1 结果 + 延迟写队列）、`CALIB_sendRecord/recordSet/recordClear`；写序列 = 喂狗→关中断→擦→逐页写→回读→开中断→喂狗，ENDINIT 走 `bsp/wdg.h`，**未用 `IfxScuWdt_serviceCpuWatchdog`** |
 | `mw/xcore/xcore.h/.c` | 新块 `CalibResult`（CPU1 写 / CPU0 取）、`Jog`（4×duty + `jogSeq` 序号）、`RecordLive`（`version` 计数器 + 记录）、**EVT 出站环形队列**（8 槽 × ≤32 B，**只有 CPU0 压**（`mw/calib`）、CPU2 取发） |
-| `rt/encoder.c/.h` | §8.2 参数运行时化 `g_fullScaleMmS/g_wheelDiaMm`（**公式一字未动**，只换数据源；setter 越界回落宏默认）；新增 `ENCODER_WHEEL_DIA_MM 65` 宏取代散落的 `65.0f` |
+| `rt/encoder.c/.h` | §8.2 参数运行时化 `g_fullScaleMmS/g_wheelDiaMm`（**公式一字未动**，只换数据源；setter 越界回落宏默认）；新增 `ENCODER_WHEEL_DIA_MM` 宏（初版 65，V1.4 起默认 48）取代散落的 `65.0f` |
 | `rt/motor_algo.c` | `MOTOR_ALGO_calibPublish()`（DONE / ABORT / **BUSY 拒绝且不重启**）；`MOTOR_ALGO_applyRecord()`（`version` 边沿应用 invert/fullScale/wheelDia）；`MOTOR_ALGO_jogStep()`（`jogSeq` 变化续期、**300 ms 超时归零 + `SERVO_reset` + `MOTOR_stopAll`**）；1 kHz 环次序见 §11.3 |
 | `mw/proto/protocol.c/.h` | `PROTO_CMD_DPT_MOTOR_JOG/REC_GET/REC_SET/REC_CLEAR`（0x71~0x74）；jog 受故障锁存 + 急停门禁，拒收打日志；0x70~0x74 均不发心跳 |
 | `Cpu0_Main.c` | `core0_main`：`XCORE_init → STIME_init → UART_init → CALIB_init`（UART 必须先于 CALIB_init——其加载日志走 ASCLIN0，未初始化访问 SFR 即 bus error；均在放同步事件**之前**，CPU1 起来即有好记录）；`vRobotControlTask`：`ROBOT_task → CALIB_tick → WDG_serviceCpu` |

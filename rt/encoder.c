@@ -29,8 +29,9 @@
  *   - the 1 kHz ENCODER_task() takes per-ms deltas, applies the 8 ms median
  *     window and publishes side speeds through xcore.
  *
- * Worst case ISR load: 4 encoders * 1040 edges per motor rev at the motor's
- * 2000 rpm spec = ~139k IRQ/s, ~0.3 us each -> well under 10% of CPU1.
+ * Worst case ISR load: 4 encoders * 52 edges per motor rev at the MG310's
+ * 500 rpm no-load spec = ~1.7k IRQ/s (~3k at the 13 V top of the recommended
+ * range), ~0.3 us each -> negligible on CPU1.
  */
 
 #define ENC_TIM                IfxGtm_Tim_0

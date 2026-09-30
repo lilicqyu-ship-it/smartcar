@@ -4,13 +4,17 @@
 #include "Ifx_Types.h"
 
 /* MG310 wheel Hall encoders (doc/20-design/23-wiring.md section 8):
- * 260 lines * gear 1:20.409 per wheel rev, A/B quadrature, x4 decode here
- * (both edges of both phases), pins P33.0..P33.7 = X2-28..35. */
+ * 13 PPR Hall A/B quadrature, x4 decode here (both edges of both phases)
+ * = 52 counts per motor rev; gear 1:20.409 -> 1061.27 counts per wheel rev.
+ * 48 mm tyre = 150.8 mm circumference = 0.1421 mm per count.
+ * Pins P33.0..P33.7 = X2-28..35. */
 #define ENCODER_COUNT              4      /* E1..E4, one per motor */
-#define ENCODER_LINES              260u
+#define ENCODER_PPR                13u    /* Hall pulses per motor rev */
 #define ENCODER_GEAR_NUM           20409u /* gear 1:20.409 */
 #define ENCODER_GEAR_DEN           1000u
-#define ENCODER_COUNTS_WHEEL_REV   ((uint32)((uint32)(ENCODER_LINES * 4u) * ENCODER_GEAR_NUM / ENCODER_GEAR_DEN))
+/* 13 * 4 * 20.409 = 1061.268; the integer math truncates to 1061 (-0.03%,
+ * noise next to the 8 ms median window). */
+#define ENCODER_COUNTS_WHEEL_REV   ((uint32)((uint32)(ENCODER_PPR * 4u) * ENCODER_GEAR_NUM / ENCODER_GEAR_DEN))
 
 /* Measured wheel speed that maps to percent*10 = 1000 in the telemetry domain.
  * Default assumes ~1000 mm/s at full command; recalibrate on the bench
@@ -20,8 +24,9 @@
 #define ENCODER_FULL_SCALE_MM_S    1000
 
 /* Wheel tyre diameter in mm, second runtime speed-conversion parameter
- * (doc 34 SS8.2); the encoder.c constant it replaces was 65.0f. */
-#define ENCODER_WHEEL_DIA_MM       65
+ * (doc 34 SS8.2). MG310 kit tyre is 48 mm (150.8 mm circumference,
+ * 0.1421 mm/count); the placeholder this macro replaced was 65. */
+#define ENCODER_WHEEL_DIA_MM       48
 
 /* A side is E1+E2 (motors A+B), right side is E3+E4 (motors C+D) - same split
  * as the motor algorithm. */
