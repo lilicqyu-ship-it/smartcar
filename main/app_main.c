@@ -64,6 +64,17 @@ void app_main(void)
     app_state_boot_mark_lcd();
     app_state_boot_mark_touch();
 
+    /* Touch at 100 Hz: the GT1151 has no interrupt line on this board, so
+     * LVGL polls it on the indev timer, which defaults to the 33 ms refresh
+     * period - the stick moved in 30 Hz steps (a phone samples at 60-120 Hz).
+     * 10 ms is one short I2C read; the ctrl task still coalesces to 50 Hz. */
+    lv_indev_t *touch = bsp_display_get_input_dev();
+    if (touch && lv_indev_get_read_timer(touch)) {
+        bsp_display_lock(0);
+        lv_timer_set_period(lv_indev_get_read_timer(touch), 10);
+        bsp_display_unlock();
+    }
+
     /* radio + control FIRST (spec 74/95.8/95.9): the Wi-Fi driver needs ~50 KB
      * of internal RAM at init.  Building the UI first let LVGL's small objects
      * take that RAM (all pages together) and esp_wifi_init() failed with

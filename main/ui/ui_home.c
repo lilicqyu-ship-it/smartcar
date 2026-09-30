@@ -17,10 +17,13 @@ typedef struct {
     lv_obj_t *conn;         /* top bar: connection state          */
     lv_obj_t *owner;        /* top bar: control owner             */
     lv_obj_t *speed;        /* big speed value                    */
-    lv_obj_t *thr_bar;      /* throttle bar (symmetric -100..100) */
+    lv_obj_t *thr_bar;      /* throttle arc, left of the stick (-100..100) */
     lv_obj_t *thr_val;
-    lv_obj_t *str_bar;      /* steering bar                       */
+    lv_obj_t *str_bar;      /* steering arc, under the stick              */
     lv_obj_t *str_val;
+    lv_obj_t *spd_arc;      /* speed arc, over the stick                  */
+    lv_obj_t *mode_btn[3];  /* ECO / NORMAL / SPORT segmented selector    */
+    lv_obj_t *batt_bar;
     lv_obj_t *rssi_cap;     /* RSSI caption carries quality word  */
     lv_obj_t *batt;         /* info row 1 left                    */
     lv_obj_t *mode;         /* info row 1 middle                  */
@@ -62,12 +65,16 @@ static void gear_cb(lv_event_t *e)
     ui_nav_open(UI_PAGE_SETTINGS);
 }
 
-/* one-touch mode cycling from the drive page (spec 33/34) */
+/* one-touch mode select from the drive page (spec 33/34): each segment sets
+ * its mode directly - no cycling through a mode you do not want */
 static void mode_cb(lv_event_t *e)
 {
     scr_settings_t set;
     scr_settings_get(&set);
-    uint8_t m = (set.mode + 1) % (SCR_MODE_SPORT + 1);
+    uint8_t m = (uint8_t)(uintptr_t)lv_event_get_user_data(e);
+    if (m > SCR_MODE_SPORT) {
+        m = SCR_MODE_NORMAL;
+    }
     scr_settings_set_control(m, set.deadzone_pct);
     app_state_set_mode((scr_mode_t)m);
     ui_toast("%s MODE", m == SCR_MODE_ECO ? "ECO" : m == SCR_MODE_NORMAL ? "NORMAL" : "SPORT");
@@ -128,10 +135,12 @@ static lv_obj_t *mk_label(lv_obj_t *parent, const char *txt, const lv_font_t *f,
  * exactly a third of the card and its labels clip with "..." inside it, so a
  * long value ("-68 dBm EXCELLENT", "LOSS 10.0%") can never spill into its
  * neighbour - the old space-between row let three free-width labels overlap. */
-static lv_obj_t *info_cell(lv_obj_t *grid, const char *cap, lv_obj_t **cap_out)
+static lv_obj_t *info_cell(lv_obj_t *rail, const char *cap, lv_obj_t **cap_out)
 {
-    lv_obj_t *cell = lv_obj_create(grid);
-    lv_obj_set_size(cell, LV_PCT(33), 40);
+    /* one telemetry row of the right rail: small caption over a large value,
+     * both fixed to a single line so nothing can wrap into its neighbour */
+    lv_obj_t *cell = lv_obj_create(rail);
+    lv_obj_set_size(cell, LV_PCT(100), 46);
     lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(cell, 0, 0);
     lv_obj_set_style_pad_all(cell, 0, 0);
@@ -139,64 +148,43 @@ static lv_obj_t *info_cell(lv_obj_t *grid, const char *cap, lv_obj_t **cap_out)
     lv_obj_remove_flag(cell, LV_OBJ_FLAG_CLICKABLE);
 
     lv_obj_t *c = mk_label(cell, cap, F_SM, lv_color_hex(UI_COL_DIM));
-    /* fixed one-line height: DOTS would otherwise wrap and overlap the value */
     lv_obj_set_size(c, LV_PCT(100), lv_font_get_line_height(F_SM));
     lv_label_set_long_mode(c, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_style_text_align(c, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_set_style_text_letter_space(c, 1, 0);
-    lv_obj_align(c, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_set_style_text_letter_space(c, 2, 0);
+    lv_obj_align(c, LV_ALIGN_TOP_LEFT, 0, 0);
     if (cap_out) {
         *cap_out = c;
     }
 
-    lv_obj_t *v = mk_label(cell, "--", F_MD, lv_color_hex(UI_COL_TXT));
-    lv_obj_set_size(v, LV_PCT(100), lv_font_get_line_height(F_MD));
+    lv_obj_t *v = mk_label(cell, "--", F_LG, lv_color_hex(UI_COL_TXT));
+    lv_obj_set_size(v, LV_PCT(100), lv_font_get_line_height(F_LG));
     lv_label_set_long_mode(v, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(v, LV_ALIGN_BOTTOM_MID, 0, 0);
+    lv_obj_align(v, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     return v;
 }
 
-/* HUD bar row: caption | symmetric bar | value.  Fixed widths, no overlap. */
-static lv_obj_t *bar_row(lv_obj_t *parent, const char *cap, lv_obj_t **val_out)
+/* 30 Hz stick feedback: the THR/STR arcs follow the knob instead of the 10 Hz
+ * page refresh (they used to lag the finger visibly).  Unchanged values do not
+ * invalidate anything, so an idle stick costs nothing. */
+static void stick_timer_cb(lv_timer_t *t)
 {
-    lv_obj_t *row = lv_obj_create(parent);
-    lv_obj_set_size(row, LV_PCT(100), 22);
-    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(row, 0, 0);
-    lv_obj_set_style_pad_all(row, 0, 0);
-    lv_obj_remove_flag(row, LV_OBJ_FLAG_SCROLLABLE);
-
-    lv_obj_t *c = mk_label(row, cap, F_SM, lv_color_hex(UI_COL_DIM));
-    lv_obj_set_width(c, 44);
-    lv_obj_align(c, LV_ALIGN_LEFT_MID, 0, 0);
-
-    lv_obj_t *b = lv_bar_create(row);
-    lv_obj_set_height(b, 8);
-    lv_obj_set_width(b, LV_PCT(100));
-    lv_obj_set_style_margin_left(b, 0, 0);
-    lv_bar_set_range(b, -100, 100);
-    lv_bar_set_mode(b, LV_BAR_MODE_SYMMETRICAL);
-    lv_bar_set_value(b, 0, LV_ANIM_OFF);
-    lv_obj_set_style_radius(b, 2, 0);
-    lv_obj_set_style_radius(b, 2, LV_PART_INDICATOR);
-    lv_obj_set_style_bg_color(b, lv_color_hex(UI_COL_SURFACE2), 0);
-    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-    lv_obj_set_style_bg_color(b, lv_color_hex(UI_COL_ACCENT), LV_PART_INDICATOR);
-    lv_obj_set_style_anim_duration(b, 0, 0);
-
-    lv_obj_t *v = mk_label(row, "+0%", F_SM, lv_color_hex(UI_COL_TXT));
-    lv_obj_set_width(v, 48);
-    lv_obj_set_style_text_align(v, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_align(v, LV_ALIGN_RIGHT_MID, 0, 0);
-
-    /* bar fills what is left between caption and value */
-    lv_obj_update_layout(row);
-    lv_obj_set_width(b, lv_obj_get_content_width(row) - 44 - 48 - 8);
-    lv_obj_align(b, LV_ALIGN_LEFT_MID, 44, 0);
-
-    *val_out = v;
-    return b;
+    (void)t;
+    if (lv_obj_has_flag(lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(s_home.thr_bar))),
+                        LV_OBJ_FLAG_HIDDEN)) {
+        return;                     /* home page not visible */
+    }
+    scr_state_t st;
+    app_state_snapshot(&st);
+    int thr = st.out_v * 100 / SCR_DRIVE_V_MAX;
+    int str = st.out_w * 100 / SCR_DRIVE_W_MAX;
+    if (lv_arc_get_value(s_home.thr_bar) != thr) {
+        lv_arc_set_value(s_home.thr_bar, thr);
+    }
+    if (lv_arc_get_value(s_home.str_bar) != str) {
+        lv_arc_set_value(s_home.str_bar, str);
+    }
+    ui_label_set_fmt(s_home.thr_val, "%+d%%", thr);
+    ui_label_set_fmt(s_home.str_val, "%+d%%", str);
 }
 
 void ui_home_create(lv_obj_t *root)
@@ -262,83 +250,145 @@ void ui_home_create(lv_obj_t *root)
     lv_obj_center(gear_lbl);
     lv_obj_add_event_cb(gear, gear_cb, LV_EVENT_CLICKED, NULL);
 
-    /* ---- body: left telemetry column + joystick zone --------------------------- */
+    /* ---- body: cockpit = speed/mode | stick with HUD arcs | telemetry rail -------
+     * The stick sits in the middle of the screen (both thumbs reach it) and
+     * is ringed by three live arcs - throttle on the left, steering below,
+     * speed above - so the information you steer by is where you look while
+     * steering, and the space around the pad is no longer dead.  Both side
+     * rails are fixed-width; nothing floats. */
+    int body_h = h - 52 - 56 - 12;
+    const int RAIL = 196;
     lv_obj_t *body = lv_obj_create(root);
-    lv_obj_set_size(body, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_grow(body, 1);
+    lv_obj_set_size(body, LV_PCT(100), body_h + 12);
     lv_obj_set_style_bg_opa(body, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(body, 0, 0);
     lv_obj_set_style_pad_all(body, 6, 0);
     lv_obj_remove_flag(body, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(body, LV_FLEX_FLOW_ROW);
 
+    /* left rail: speed + mode selector */
     lv_obj_t *left = lv_obj_create(body);
-    lv_obj_set_size(left, (int)(w * 0.36f), LV_PCT(100));
+    lv_obj_set_size(left, RAIL, body_h);
+    lv_obj_align(left, LV_ALIGN_LEFT_MID, 0, 0);
     lv_obj_set_style_bg_opa(left, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(left, 0, 0);
     lv_obj_set_style_pad_all(left, 0, 0);
     lv_obj_remove_flag(left, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_set_flex_flow(left, LV_FLEX_FLOW_COLUMN);
 
-    lv_obj_set_style_pad_row(left, 6, 0);
-
-    /* speed card (spec 17: big number + unit) */
     lv_obj_t *scard = ui_card(left);
-    lv_obj_set_size(scard, LV_PCT(100), LV_SIZE_CONTENT);
-    lv_obj_set_flex_grow(scard, 1);
+    lv_obj_set_size(scard, RAIL, 150);
+    lv_obj_align(scard, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_t *sp_lbl = mk_label(scard, "SPEED", F_SM, lv_color_hex(UI_COL_ACCENT));
     lv_obj_set_style_text_letter_space(sp_lbl, 3, 0);
     lv_obj_align(sp_lbl, LV_ALIGN_TOP_LEFT, 2, 0);
     s_home.speed = mk_label(scard, "0.00", F_XXL, lv_color_hex(UI_COL_TXT));
-    lv_obj_align(s_home.speed, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_align(s_home.speed, LV_ALIGN_CENTER, 0, 4);
     lv_obj_t *unit = mk_label(scard, "m/s", F_MD, lv_color_hex(UI_COL_DIM));
     lv_obj_align(unit, LV_ALIGN_BOTTOM_RIGHT, -2, 0);
 
-    /* throttle / steering of what is actually sent (spec 16) as HUD bars */
-    lv_obj_t *dcard = ui_card(left);
-    lv_obj_set_size(dcard, LV_PCT(100), 62);
-    lv_obj_set_style_pad_ver(dcard, 6, 0);
-    lv_obj_set_flex_flow(dcard, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(dcard, LV_FLEX_ALIGN_SPACE_EVENLY, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    s_home.thr_bar = bar_row(dcard, "THR", &s_home.thr_val);
-    s_home.str_bar = bar_row(dcard, "STR", &s_home.str_val);
+    lv_obj_t *mcap = mk_label(left, "DRIVE MODE", F_SM, lv_color_hex(UI_COL_ACCENT));
+    lv_obj_set_style_text_letter_space(mcap, 3, 0);
+    lv_obj_align(mcap, LV_ALIGN_TOP_LEFT, 4, 160);
+    static const char *const mtxt[3] = { "ECO", "NORMAL", "SPORT" };
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *mb = lv_button_create(left);
+        lv_obj_set_size(mb, RAIL, 52);
+        lv_obj_align(mb, LV_ALIGN_TOP_MID, 0, 184 + i * 58);
+        lv_obj_set_style_radius(mb, 8, 0);
+        lv_obj_set_style_shadow_width(mb, 0, 0);
+        lv_obj_set_style_bg_color(mb, lv_color_hex(UI_COL_SURFACE), 0);
+        lv_obj_set_style_border_width(mb, 1, 0);
+        lv_obj_set_style_border_color(mb, lv_color_hex(UI_COL_LINE), 0);
+        lv_obj_set_style_bg_color(mb, lv_color_hex(0x0B2A3A), LV_STATE_CHECKED);
+        lv_obj_set_style_border_color(mb, lv_color_hex(UI_COL_ACCENT), LV_STATE_CHECKED);
+        lv_obj_set_style_border_width(mb, 2, LV_STATE_CHECKED);
+        lv_obj_add_event_cb(mb, mode_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
+        lv_obj_t *ml = mk_label(mb, mtxt[i], F_LG, lv_color_hex(UI_COL_DIM));
+        lv_obj_set_style_text_letter_space(ml, 3, 0);
+        lv_obj_set_style_text_color(ml, lv_color_hex(UI_COL_ACCENT), LV_STATE_CHECKED);
+        lv_obj_add_flag(ml, LV_OBJ_FLAG_EVENT_BUBBLE);
+        lv_obj_center(ml);
+        s_home.mode_btn[i] = mb;
+    }
+    s_home.mode = lv_obj_get_child(s_home.mode_btn[1], 0);  /* legacy handle */
 
-    /* telemetry grid (spec 70): 3 x 2 fixed cells */
-    lv_obj_t *icard = ui_card(left);
-    lv_obj_set_size(icard, LV_PCT(100), 100);
-    lv_obj_set_style_pad_all(icard, 6, 0);
-    lv_obj_set_style_pad_row(icard, 4, 0);
-    lv_obj_set_style_pad_column(icard, 0, 0);
-    lv_obj_set_flex_flow(icard, LV_FLEX_FLOW_ROW_WRAP);
-    lv_obj_set_flex_align(icard, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
-    s_home.batt   = info_cell(icard, "BATTERY", NULL);
-    s_home.mode   = info_cell(icard, "MODE", NULL);
-    s_home.vstate = info_cell(icard, "STATE", NULL);
-    s_home.rssi   = info_cell(icard, "RSSI", &s_home.rssi_cap);
-    s_home.lat    = info_cell(icard, "PING", NULL);
-    s_home.loss   = info_cell(icard, "LOSS", NULL);
-    /* mode cycling: the whole cell is the touch target, not just the text */
-    lv_obj_add_flag(lv_obj_get_parent(s_home.mode), LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(lv_obj_get_parent(s_home.mode), mode_cb, LV_EVENT_CLICKED, NULL);
+    /* right rail: telemetry, one fixed row per value */
+    lv_obj_t *rail = ui_card(body);
+    lv_obj_set_size(rail, RAIL, body_h);
+    lv_obj_align(rail, LV_ALIGN_RIGHT_MID, 0, 0);
+    lv_obj_set_style_pad_all(rail, 10, 0);
+    lv_obj_set_flex_flow(rail, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_flex_align(rail, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START,
+                          LV_FLEX_ALIGN_START);
+    s_home.batt   = info_cell(rail, "BATTERY", NULL);
+    s_home.batt_bar = lv_bar_create(rail);
+    lv_obj_set_size(s_home.batt_bar, LV_PCT(100), 6);
+    lv_bar_set_range(s_home.batt_bar, 0, 100);
+    lv_obj_set_style_radius(s_home.batt_bar, 2, 0);
+    lv_obj_set_style_radius(s_home.batt_bar, 2, LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(s_home.batt_bar, lv_color_hex(UI_COL_SURFACE2), 0);
+    lv_obj_set_style_bg_color(s_home.batt_bar, lv_color_hex(UI_COL_OK), LV_PART_INDICATOR);
+    s_home.vstate = info_cell(rail, "STATE", NULL);
+    s_home.rssi   = info_cell(rail, "RSSI", &s_home.rssi_cap);
+    s_home.lat    = info_cell(rail, "PING", NULL);
+    s_home.loss   = info_cell(rail, "LOSS", NULL);
 
-    /* joystick zone (spec 13-16) */
+    /* centre: stick ringed by HUD arcs */
     lv_obj_t *zone = lv_obj_create(body);
-    lv_obj_set_flex_grow(zone, 1);
-    lv_obj_set_size(zone, LV_PCT(100), LV_PCT(100));
+    int zw = w - 2 * RAIL - 12 - 16;
+    lv_obj_set_size(zone, zw, body_h);
+    lv_obj_align(zone, LV_ALIGN_CENTER, 0, 0);
     lv_obj_set_style_bg_opa(zone, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(zone, 0, 0);
     lv_obj_set_style_pad_all(zone, 0, 0);
     lv_obj_remove_flag(zone, LV_OBJ_FLAG_SCROLLABLE);
 
-    int body_h = h - 52 - 56 - 12;
-    int joy_size = body_h - 8;
-    if (joy_size > 340) {
-        joy_size = 340;
+    int ring = body_h - 4;                  /* arcs ring diameter */
+    if (ring > zw - 8) {
+        ring = zw - 8;
     }
+    int joy_size = ring - 64;               /* pad inside the arcs */
+    struct { lv_obj_t **o; int a0, a1; uint32_t col; bool sym; } arcs[3] = {
+        { &s_home.thr_bar, 125, 235, UI_COL_ACCENT, true },   /* left: throttle  */
+        { &s_home.str_bar,  55, 125, UI_COL_INFO,   true },   /* bottom: steer  */
+        { &s_home.spd_arc, 235, 305, UI_COL_OK,     false },  /* top: speed     */
+    };
+    for (int i = 0; i < 3; i++) {
+        lv_obj_t *a = lv_arc_create(zone);
+        lv_obj_set_size(a, ring, ring);
+        lv_obj_center(a);
+        lv_arc_set_bg_angles(a, arcs[i].a0, arcs[i].a1);
+        lv_arc_set_range(a, arcs[i].sym ? -100 : 0, 100);
+        lv_arc_set_mode(a, arcs[i].sym ? LV_ARC_MODE_SYMMETRICAL : LV_ARC_MODE_NORMAL);
+        lv_arc_set_value(a, 0);
+        lv_obj_remove_style(a, NULL, LV_PART_KNOB);
+        lv_obj_remove_flag(a, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_arc_width(a, 8, 0);
+        lv_obj_set_style_arc_color(a, lv_color_hex(UI_COL_SURFACE2), 0);
+        lv_obj_set_style_arc_rounded(a, false, 0);
+        lv_obj_set_style_arc_width(a, 8, LV_PART_INDICATOR);
+        lv_obj_set_style_arc_color(a, lv_color_hex(arcs[i].col), LV_PART_INDICATOR);
+        lv_obj_set_style_arc_rounded(a, false, LV_PART_INDICATOR);
+        *arcs[i].o = a;
+    }
+    /* arc readouts in the free corners of the zone */
+    lv_obj_t *tl = mk_label(zone, "THR", F_SM, lv_color_hex(UI_COL_ACCENT));
+    lv_obj_set_style_text_letter_space(tl, 2, 0);
+    lv_obj_align(tl, LV_ALIGN_TOP_LEFT, 0, 0);
+    s_home.thr_val = mk_label(zone, "+0%", F_LG, lv_color_hex(UI_COL_TXT));
+    lv_obj_align(s_home.thr_val, LV_ALIGN_TOP_LEFT, 0, 18);
+    lv_obj_t *sl = mk_label(zone, "STR", F_SM, lv_color_hex(UI_COL_INFO));
+    lv_obj_set_style_text_letter_space(sl, 2, 0);
+    lv_obj_align(sl, LV_ALIGN_BOTTOM_LEFT, 0, -24);
+    s_home.str_val = mk_label(zone, "+0%", F_LG, lv_color_hex(UI_COL_TXT));
+    lv_obj_align(s_home.str_val, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_t *fw = mk_label(zone, LV_SYMBOL_UP " FWD", F_SM, lv_color_hex(UI_COL_DIM));
+    lv_obj_align(fw, LV_ALIGN_TOP_RIGHT, 0, 0);
+    lv_obj_t *rv = mk_label(zone, LV_SYMBOL_DOWN " REV", F_SM, lv_color_hex(UI_COL_DIM));
+    lv_obj_align(rv, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
+
     lv_obj_t *joy = ui_joystick_create(zone, joy_size);
     lv_obj_center(joy);
+    lv_timer_create(stick_timer_cb, 33, NULL);
 
     /* ---- STOP (spec 18: big, fixed, bottom centre) ------------------------------ */
     lv_obj_t *stop_area = lv_obj_create(root);
@@ -402,23 +452,24 @@ void ui_home_refresh(const scr_state_t *st)
         ui_label_set_color(s_home.speed, lv_color_hex(UI_COL_DIM));
     }
 
-    /* throttle / steering of what was actually sent (spec 16: 油门非零可见);
-     * the bar/label setters are no-ops for unchanged values, so an idle stick
-     * invalidates nothing */
-    int thr = st->out_v * 100 / SCR_DRIVE_V_MAX;
-    int str = st->out_w * 100 / SCR_DRIVE_W_MAX;
-    if (lv_bar_get_value(s_home.thr_bar) != thr) {
-        lv_bar_set_value(s_home.thr_bar, thr, LV_ANIM_OFF);
+    /* throttle / steering arcs: driven by stick_timer_cb at 30 Hz */
+
+    int spd = 0;
+    if (st->tele_fresh) {
+        int32_t a = st->speed_mm_s < 0 ? -st->speed_mm_s : st->speed_mm_s;
+        spd = (int)(a * 100 / (SCR_DRIVE_V_MAX > 0 ? SCR_DRIVE_V_MAX : 1));
+        spd = spd > 100 ? 100 : spd;
     }
-    if (lv_bar_get_value(s_home.str_bar) != str) {
-        lv_bar_set_value(s_home.str_bar, str, LV_ANIM_OFF);
+    if (lv_arc_get_value(s_home.spd_arc) != spd) {
+        lv_arc_set_value(s_home.spd_arc, spd);
     }
-    ui_label_set_fmt(s_home.thr_val, "%+d%%", thr);
-    ui_label_set_fmt(s_home.str_val, "%+d%%", str);
 
     /* battery / mode / vehicle state */
     if (st->tele_fresh && st->batt_pct > 0) {
         ui_label_set_fmt(s_home.batt, "%u%%", st->batt_pct);
+        if (lv_bar_get_value(s_home.batt_bar) != st->batt_pct) {
+            lv_bar_set_value(s_home.batt_bar, st->batt_pct, LV_ANIM_OFF);
+        }
         lv_obj_set_style_text_color(s_home.batt,
             ui_col_for_state(st->batt_pct > CONFIG_SCR_BATT_LOW_PCT,
                              st->batt_pct <= CONFIG_SCR_BATT_LOW_PCT &&
@@ -433,8 +484,19 @@ void ui_home_refresh(const scr_state_t *st)
     scr_settings_t set;
     scr_settings_get(&set);
     uint8_t m = set.mode <= SCR_MODE_SPORT ? set.mode : 1;
-    ui_label_set_color(s_home.mode, lv_color_hex(UI_COL_ACCENT));
-    ui_label_set_text(s_home.mode, mode_txt[m]);   /* tap cell to cycle (spec 33/34) */
+    (void)mode_txt;
+    for (int i = 0; i < 3; i++) {
+        bool on = (i == m);
+        if (on != lv_obj_has_state(s_home.mode_btn[i], LV_STATE_CHECKED)) {
+            if (on) {
+                lv_obj_add_state(s_home.mode_btn[i], LV_STATE_CHECKED);
+                lv_obj_add_state(lv_obj_get_child(s_home.mode_btn[i], 0), LV_STATE_CHECKED);
+            } else {
+                lv_obj_remove_state(s_home.mode_btn[i], LV_STATE_CHECKED);
+                lv_obj_remove_state(lv_obj_get_child(s_home.mode_btn[i], 0), LV_STATE_CHECKED);
+            }
+        }
+    }
 
     /* joystick live-input gate: only while the S3 actually holds control */
     ui_joystick_set_enabled(st->conn == SCR_CONN_CONNECTED &&

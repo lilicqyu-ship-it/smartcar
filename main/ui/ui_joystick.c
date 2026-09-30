@@ -21,8 +21,10 @@ typedef struct {
     uint8_t     deadzone;   /* % of full radius, captured on press    */
     int         last_dx, last_dy;   /* knob offset at release, for snap-back */
     bool        enabled;    /* live input gate (conn + owner checked) */
-    int         drawn_dx, drawn_dy; /* last position painted (2 px hysteresis) */
+    int         drawn_dx, drawn_dy; /* last position painted              */
     bool        drawn_valid;
+    float       fx, fy;     /* adaptively filtered touch offset       */
+    bool        filt_valid; /* false = next sample seeds the filter   */
 } joy_t;
 
 static joy_t s_joy;
@@ -67,6 +69,7 @@ static void snapback_anim(void *var, int32_t v)
 static void joy_release(void)
 {
     s_joy.drawn_valid = false;
+    s_joy.filt_valid = false;
     /* visual snap back (spec 13: 视觉回弹) */
     lv_anim_t a;
     lv_anim_init(&a);
@@ -104,6 +107,30 @@ static void joy_pressing(lv_event_t *e)
 
     float dx = (float)(p.x - cx);
     float dy = (float)(p.y - cy);
+
+    /* Adaptive low-pass (1-euro style): a resting finger jitters by 1-2 px on
+     * the GT1151, which used to be hidden by a 2 px redraw hysteresis - that
+     * made real motion move in visible steps.  Here the smoothing strength
+     * follows the movement: nearly still -> heavy smoothing (no jitter), fast
+     * swipe -> alpha 1 (no lag).  At the 100 Hz touch rate the worst-case
+     * added delay is ~20 ms, and only for sub-pixel motion. */
+    if (!s_joy.filt_valid) {
+        s_joy.fx = dx;
+        s_joy.fy = dy;
+        s_joy.filt_valid = true;
+    } else {
+        float ex = dx - s_joy.fx, ey = dy - s_joy.fy;
+        float step = sqrtf(ex * ex + ey * ey);
+        float alpha = 0.3f + step / 12.0f;
+        if (alpha > 1.0f) {
+            alpha = 1.0f;
+        }
+        s_joy.fx += alpha * ex;
+        s_joy.fy += alpha * ey;
+    }
+    dx = s_joy.fx;
+    dy = s_joy.fy;
+
     float len = sqrtf(dx * dx + dy * dy);
     float r = len > 0.0f ? len : 0.0f;
     if (r > (float)s_joy.max_r) {
@@ -113,15 +140,14 @@ static void joy_pressing(lv_event_t *e)
         r = (float)s_joy.max_r;
     }
 
-    s_joy.last_dx = (int)dx;
-    s_joy.last_dy = (int)dy;
-    if (!s_joy.drawn_valid ||
-        (int)dx - s_joy.drawn_dx > 1 || s_joy.drawn_dx - (int)dx > 1 ||
-        (int)dy - s_joy.drawn_dy > 1 || s_joy.drawn_dy - (int)dy > 1) {
-        s_joy.drawn_dx = (int)dx;
-        s_joy.drawn_dy = (int)dy;
+    s_joy.last_dx = (int)lroundf(dx);
+    s_joy.last_dy = (int)lroundf(dy);
+    if (!s_joy.drawn_valid || s_joy.last_dx != s_joy.drawn_dx ||
+        s_joy.last_dy != s_joy.drawn_dy) {
+        s_joy.drawn_dx = s_joy.last_dx;
+        s_joy.drawn_dy = s_joy.last_dy;
         s_joy.drawn_valid = true;
-        knob_to(s_joy.knob, (int)dx, (int)dy);
+        knob_to(s_joy.knob, s_joy.last_dx, s_joy.last_dy);
     }
 
     /* radial dead zone with linear remap from its edge (spec 15) */
@@ -159,6 +185,8 @@ static void joy_pressed(lv_event_t *e)
 
     /* touching the stick is the explicit re-engage after STOP (spec 19/105) */
     scr_ctrl_joystick_touch();
+    s_joy.filt_valid = false;
+    lv_anim_delete(s_joy.knob, NULL);   /* finger beats a running snap-back */
     joy_pressing(e);
 }
 

@@ -83,6 +83,10 @@ CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_HEIGHT=20
 # GDMA/FIFO reset every VBlank in bounce-buffer mode produced snow/garbage
 # pixels on this board (real-hardware test 2026-09-29).
 
+# Render as soon as a frame is dirty: the 35 Hz panel vsync (DIRECT_MODE flush
+# waits for it) is the real cap; a 33 ms LVGL period added up to a frame of lag.
+CONFIG_LV_DEF_REFR_PERIOD=16
+
 # ---- LVGL fonts used by the UI hierarchy (spec 54) ---------------------------------
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_16=y

@@ -296,6 +296,8 @@ typedef struct {
     lv_obj_t *status;
     lv_obj_t *steps;
     lv_obj_t *btn;
+    lv_obj_t *node[3], *node_lbl[3], *wire[2];
+    lv_obj_t *big, *key, *token;
 } pair_t;
 
 static pair_t s_pair;
@@ -305,42 +307,139 @@ static void pair_cb(lv_event_t *e)
     scr_link_request_pair();
 }
 
+static void pair_back_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_nav_open(UI_PAGE_SETTINGS);
+}
+
+/* Pairing = the three-step handshake drawn as a circuit: each node lights up
+ * once satisfied (car in range, pairing requested, token stored), so the user
+ * sees where the process stands instead of reading a paragraph. */
 void ui_pages_create_pair(lv_obj_t *root)
 {
-    ui_header(root, "PAIRING", nav_home_cb);
-    lv_obj_t *body = kv_body(root);
+    ui_header(root, "PAIRING", pair_back_cb);
+    static const char *const sn[3] = { "CAR IN RANGE", "HOLD CAR BUTTON 3S", "TAP PAIR" };
+    static const char *const si[3] = { LV_SYMBOL_WIFI, LV_SYMBOL_POWER, LV_SYMBOL_OK };
+    for (int i = 0; i < 3; i++) {
+        int x = 70 + i * 250;
+        lv_obj_t *n = lv_obj_create(root);
+        lv_obj_set_size(n, 90, 90);
+        lv_obj_set_pos(n, x, 76);
+        lv_obj_set_style_radius(n, LV_RADIUS_CIRCLE, 0);
+        lv_obj_set_style_bg_color(n, lv_color_hex(UI_COL_SURFACE), 0);
+        lv_obj_set_style_bg_opa(n, LV_OPA_COVER, 0);
+        lv_obj_set_style_border_width(n, 2, 0);
+        lv_obj_set_style_border_color(n, lv_color_hex(UI_COL_LINE), 0);
+        lv_obj_remove_flag(n, LV_OBJ_FLAG_SCROLLABLE);
+        lv_obj_remove_flag(n, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_t *ic = lv_label_create(n);
+        lv_label_set_text(ic, si[i]);
+        lv_obj_set_style_text_font(ic, F_XL, 0);
+        lv_obj_set_style_text_color(ic, lv_color_hex(UI_COL_DIM), 0);
+        lv_obj_center(ic);
+        s_pair.node[i] = n;
+        lv_obj_t *nl = lv_label_create(root);
+        lv_label_set_text_fmt(nl, "%02d  %s", i + 1, sn[i]);
+        lv_obj_set_style_text_font(nl, F_SM, 0);
+        lv_obj_set_style_text_color(nl, lv_color_hex(UI_COL_DIM), 0);
+        lv_obj_set_style_text_letter_space(nl, 1, 0);
+        lv_obj_set_width(nl, 220);
+        lv_obj_set_style_text_align(nl, LV_TEXT_ALIGN_CENTER, 0);
+        lv_obj_set_pos(nl, x + 45 - 110, 176);
+        s_pair.node_lbl[i] = nl;
+        if (i < 2) {
+            lv_obj_t *wv = lv_obj_create(root);
+            lv_obj_set_size(wv, 160, 3);
+            lv_obj_set_pos(wv, x + 90, 120);
+            lv_obj_set_style_radius(wv, 0, 0);
+            lv_obj_set_style_border_width(wv, 0, 0);
+            lv_obj_set_style_bg_color(wv, lv_color_hex(UI_COL_LINE), 0);
+            lv_obj_set_style_bg_opa(wv, LV_OPA_COVER, 0);
+            lv_obj_remove_flag(wv, LV_OBJ_FLAG_CLICKABLE);
+            s_pair.wire[i] = wv;
+        }
+    }
 
-    s_pair.steps = lv_label_create(body);
-    ui_label_set_text(s_pair.steps,
-        "1. Power on the vehicle and stay in range\n"
-        "2. Press the pairing button on the car for 3 s\n"
-        "3. Touch PAIR below within the open window");
-    ui_label_set_color(s_pair.steps, lv_color_hex(UI_COL_DIM));
-    lv_obj_set_style_text_font(s_pair.steps, F_MD, 0);
-    lv_label_set_long_mode(s_pair.steps, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(s_pair.steps, LV_PCT(100));
-
-    s_pair.btn = ui_button(body, "PAIR WITH VEHICLE", lv_color_hex(UI_COL_ACCENT), pair_cb, NULL);
-    lv_obj_set_size(s_pair.btn, LV_PCT(100), 52);
-
-    s_pair.status = lv_label_create(body);
-    ui_label_set_text(s_pair.status, " ");
+    lv_obj_t *card = ui_card(root);
+    lv_obj_set_size(card, 784, 262);
+    lv_obj_set_pos(card, 8, 210);
+    lv_obj_set_style_pad_all(card, 16, 0);
+    s_pair.key = lv_label_create(card);
+    lv_label_set_text(s_pair.key, LV_SYMBOL_EYE_CLOSE);
+    lv_obj_set_style_text_font(s_pair.key, F_XXL, 0);
+    lv_obj_set_style_text_color(s_pair.key, lv_color_hex(UI_COL_DIM), 0);
+    lv_obj_align(s_pair.key, LV_ALIGN_TOP_LEFT, 0, 4);
+    s_pair.big = lv_label_create(card);
+    lv_label_set_text(s_pair.big, "NOT PAIRED");
+    lv_obj_set_style_text_font(s_pair.big, F_XL, 0);
+    lv_obj_set_style_text_letter_space(s_pair.big, 3, 0);
+    lv_obj_set_style_text_color(s_pair.big, lv_color_hex(UI_COL_WARN), 0);
+    lv_obj_align(s_pair.big, LV_ALIGN_TOP_LEFT, 78, 4);
+    s_pair.token = lv_label_create(card);
+    lv_label_set_text(s_pair.token, " ");
+    lv_obj_set_style_text_font(s_pair.token, F_SM, 0);
+    lv_obj_set_style_text_color(s_pair.token, lv_color_hex(UI_COL_DIM), 0);
+    lv_obj_align(s_pair.token, LV_ALIGN_TOP_LEFT, 80, 44);
+    s_pair.status = lv_label_create(card);
+    lv_label_set_text(s_pair.status, " ");
     lv_obj_set_style_text_font(s_pair.status, F_MD, 0);
-    lv_obj_set_width(s_pair.status, LV_PCT(100));
+    lv_obj_set_style_text_color(s_pair.status, lv_color_hex(UI_COL_TXT), 0);
+    lv_obj_set_width(s_pair.status, 752);
     lv_label_set_long_mode(s_pair.status, LV_LABEL_LONG_WRAP);
+    lv_obj_align(s_pair.status, LV_ALIGN_TOP_LEFT, 0, 86);
+    s_pair.steps = s_pair.status;       /* legacy handle */
+    s_pair.btn = ui_button(card, LV_SYMBOL_BLUETOOTH "  PAIR WITH VEHICLE",
+                           lv_color_hex(0x0B2A3A), pair_cb, NULL);
+    lv_obj_set_size(s_pair.btn, LV_PCT(100), 60);
+    lv_obj_set_style_border_width(s_pair.btn, 2, 0);
+    lv_obj_set_style_border_color(s_pair.btn, lv_color_hex(UI_COL_ACCENT), 0);
+    lv_obj_set_style_text_font(lv_obj_get_child(s_pair.btn, 0), F_LG, 0);
+    lv_obj_align(s_pair.btn, LV_ALIGN_BOTTOM_MID, 0, 0);
+}
+
+static void pair_node(int i, bool on)
+{
+    lv_color_t c = lv_color_hex(on ? UI_COL_ACCENT : UI_COL_LINE);
+    if (!lv_color_eq(lv_obj_get_style_border_color(s_pair.node[i], 0), c)) {
+        lv_obj_set_style_border_color(s_pair.node[i], c, 0);
+        lv_obj_set_style_text_color(lv_obj_get_child(s_pair.node[i], 0),
+                                    lv_color_hex(on ? UI_COL_ACCENT : UI_COL_DIM), 0);
+        lv_obj_set_style_text_color(s_pair.node_lbl[i],
+                                    lv_color_hex(on ? UI_COL_TXT : UI_COL_DIM), 0);
+        if (i < 2) {
+            lv_obj_set_style_bg_color(s_pair.wire[i], c, 0);
+        }
+    }
 }
 
 void ui_pages_pair_refresh(const scr_state_t *st)
 {
-    bool paired = false;
     scr_settings_t set;
     scr_settings_get(&set);
-    paired = set.token[0] != '\0';
+    bool paired = set.token[0] != '\0';
+    bool in_range = st->conn == SCR_CONN_CONNECTED;
+    bool asked = st->pair_status[0] != '\0';
 
-    ui_label_set_text(s_pair.status, st->pair_status[0] ? st->pair_status
-                          : (paired ? "Paired. Token stored." : "Not paired."));
-    lv_obj_set_style_text_color(s_pair.status,
-        paired ? lv_color_hex(UI_COL_OK) : lv_color_hex(UI_COL_DIM), 0);
+    pair_node(0, in_range);
+    pair_node(1, in_range && (asked || paired));
+    pair_node(2, paired);
+
+    ui_label_set_text(s_pair.big, paired ? "PAIRED" : "NOT PAIRED");
+    ui_label_set_color(s_pair.big, lv_color_hex(paired ? UI_COL_OK : UI_COL_WARN));
+    ui_label_set_text(s_pair.key, paired ? LV_SYMBOL_OK : LV_SYMBOL_EYE_CLOSE);
+    ui_label_set_color(s_pair.key, lv_color_hex(paired ? UI_COL_OK : UI_COL_DIM));
+    if (paired) {
+        size_t n = strlen(set.token);
+        ui_label_set_fmt(s_pair.token, "TOKEN  %.4s ****** %s", set.token,
+                         n > 8 ? set.token + n - 4 : "");
+    } else {
+        ui_label_set_text(s_pair.token, "No session token stored");
+    }
+    ui_label_set_text(s_pair.status, asked ? st->pair_status :
+                      (!in_range ? "Power on the car and come within range of its hotspot." :
+                       paired ? "This remote is bound to the car. Pair again only after a reset." :
+                       "Hold the pairing button on the car for 3 s, then tap PAIR within the window."));
 }
 
 /* ---- Event history page (spec 83) -----------------------------------------------------------*/
@@ -413,10 +512,19 @@ typedef struct {
     lv_obj_t *list;
     lv_obj_t *subs[5];
     sub_t cur;
-    /* control sub */
+    /* control sub: drive tuning */
     lv_obj_t *mode_btns[3];
+    lv_obj_t *mode_bar[3];
     lv_obj_t *dz_lbl;
     lv_obj_t *dz_slider;
+    lv_obj_t *dz_ring;          /* dead-zone disc inside the stick outline */
+    lv_obj_t *curve;            /* response curve polyline               */
+    lv_point_precise_t curve_pts[4];
+    lv_obj_t *curve_txt;
+    int       ctl_mode_drawn, ctl_dz_drawn;
+    /* radio sub: link console */
+    lv_obj_t *rd_bar[5];
+    lv_obj_t *rd_rssi, *rd_q, *rd_ch, *rd_lat, *rd_loss, *rd_rate, *rd_ssid;
     /* radio sub */
     lv_obj_t *ssid_ta, *pass_ta, *kb;
     lv_timer_t *kb_hide;        /* delayed keyboard hide (defocus race) */
@@ -499,7 +607,7 @@ static void dz_slider_cb(lv_event_t *e)
 {
     lv_obj_t *slider = lv_event_get_target(e);
     int v = lv_slider_get_value(slider);
-    ui_label_set_fmt(s_set.dz_lbl, "Dead zone: %d %%", v);
+    ui_label_set_fmt(s_set.dz_lbl, "%d%%", v);
 }
 
 static void dz_released_cb(lv_event_t *e)
@@ -832,114 +940,292 @@ void ui_pages_create_settings(lv_obj_t *root)
         ui_label_set_text(s_set.tile_sub[SUB_NAV_EVENTS], "Event log");
     }
 
-    /* ---- Control sub (spec 32/33) ---- */
+    /* ---- Control sub = DRIVE TUNING (spec 32/33) ----
+     * Three mode cards showing what each mode does (output cap as a bar), a
+     * to-scale dead-zone disc inside the stick outline, and the resulting
+     * response curve: the user sees the effect of a setting, not a number. */
     s_set.subs[SUB_CONTROL] = make_sub(root);
-    lv_obj_t *h1 = ui_header(s_set.subs[SUB_CONTROL], "CONTROL", sub_back_cb);
-    (void)h1;
-    lv_obj_t *b1 = kv_body(s_set.subs[SUB_CONTROL]);
-
-    lv_obj_t *mode_row = lv_obj_create(b1);
-    lv_obj_set_size(mode_row, LV_PCT(100), 48);
-    lv_obj_set_style_bg_opa(mode_row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(mode_row, 0, 0);
-    lv_obj_remove_flag(mode_row, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_t *mode_lbl = lv_label_create(mode_row);
-    ui_label_set_text(mode_lbl, "Mode");
-    ui_label_set_color(mode_lbl, lv_color_hex(UI_COL_DIM));
-    lv_obj_align(mode_lbl, LV_ALIGN_LEFT_MID, 10, 0);
+    lv_obj_t *cs = s_set.subs[SUB_CONTROL];
+    ui_header(cs, "DRIVE TUNING", sub_back_cb);
+    static const char *const mname[3] = { "ECO", "NORMAL", "SPORT" };
+    static const char *const mdesc[3] = { "Gentle, learning", "Balanced daily", "Full power" };
+    const int mpct[3] = { CONFIG_SCR_MODE_ECO_PCT, CONFIG_SCR_MODE_NORMAL_PCT,
+                          CONFIG_SCR_MODE_SPORT_PCT };
     for (int i = 0; i < 3; i++) {
-        lv_obj_t *mb = lv_button_create(mode_row);
-        lv_obj_set_size(mb, 84, 38);
-        lv_obj_align(mb, LV_ALIGN_RIGHT_MID, -(2 - i) * 90 - 8, 0);
-        lv_obj_set_style_bg_color(mb, lv_color_hex(UI_COL_SURFACE2), 0);
-        /* selected mode turns accent: CHECKED state has no default look */
-        lv_obj_set_style_bg_color(mb, lv_color_hex(UI_COL_ACCENT), LV_STATE_CHECKED);
+        lv_obj_t *mb = lv_button_create(cs);
+        lv_obj_set_size(mb, 168, 214);
+        lv_obj_set_pos(mb, 8 + i * 176, 60);
+        lv_obj_set_style_radius(mb, 8, 0);
+        lv_obj_set_style_shadow_width(mb, 0, 0);
+        lv_obj_set_style_pad_all(mb, 12, 0);
+        lv_obj_set_style_bg_color(mb, lv_color_hex(UI_COL_SURFACE), 0);
+        lv_obj_set_style_border_width(mb, 1, 0);
+        lv_obj_set_style_border_color(mb, lv_color_hex(UI_COL_LINE), 0);
+        lv_obj_set_style_bg_color(mb, lv_color_hex(0x0B2A3A), LV_STATE_CHECKED);
+        lv_obj_set_style_border_color(mb, lv_color_hex(UI_COL_ACCENT), LV_STATE_CHECKED);
+        lv_obj_set_style_border_width(mb, 2, LV_STATE_CHECKED);
         lv_obj_add_event_cb(mb, mode_btn_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
-        lv_obj_t *ml = lv_label_create(mb);
-        ui_label_set_text(ml, i == 0 ? "ECO" : i == 1 ? "NORMAL" : "SPORT");
-        lv_obj_set_style_text_font(ml, F_SM, 0);
-        lv_obj_center(ml);
+        lv_obj_t *ix = lv_label_create(mb);
+        lv_label_set_text_fmt(ix, "MODE %02d", i + 1);
+        lv_obj_set_style_text_font(ix, F_SM, 0);
+        lv_obj_set_style_text_color(ix, lv_color_hex(UI_COL_ACCENT), 0);
+        lv_obj_set_style_text_letter_space(ix, 2, 0);
+        lv_obj_align(ix, LV_ALIGN_TOP_LEFT, 0, 0);
+        lv_obj_t *nm = lv_label_create(mb);
+        lv_label_set_text(nm, mname[i]);
+        lv_obj_set_style_text_font(nm, F_XL, 0);
+        lv_obj_set_style_text_color(nm, lv_color_hex(UI_COL_TXT), 0);
+        lv_obj_set_style_text_letter_space(nm, 2, 0);
+        lv_obj_align(nm, LV_ALIGN_TOP_LEFT, 0, 26);
+        lv_obj_t *ds = lv_label_create(mb);
+        lv_label_set_text(ds, mdesc[i]);
+        lv_obj_set_style_text_font(ds, F_SM, 0);
+        lv_obj_set_style_text_color(ds, lv_color_hex(UI_COL_DIM), 0);
+        lv_obj_align(ds, LV_ALIGN_TOP_LEFT, 0, 64);
+        lv_obj_t *pc = lv_label_create(mb);
+        lv_label_set_text_fmt(pc, "%d%%", mpct[i]);
+        lv_obj_set_style_text_font(pc, F_XXL, 0);
+        lv_obj_set_style_text_color(pc, lv_color_hex(UI_COL_TXT), 0);
+        lv_obj_align(pc, LV_ALIGN_BOTTOM_LEFT, 0, -22);
+        lv_obj_t *cap = lv_label_create(mb);
+        lv_label_set_text(cap, "OUTPUT CAP");
+        lv_obj_set_style_text_font(cap, F_SM, 0);
+        lv_obj_set_style_text_color(cap, lv_color_hex(UI_COL_DIM), 0);
+        lv_obj_align(cap, LV_ALIGN_BOTTOM_RIGHT, 0, -30);
+        lv_obj_t *br = lv_bar_create(mb);
+        lv_obj_set_size(br, LV_PCT(100), 8);
+        lv_bar_set_range(br, 0, 100);
+        lv_bar_set_value(br, mpct[i], LV_ANIM_OFF);
+        lv_obj_set_style_radius(br, 2, 0);
+        lv_obj_set_style_radius(br, 2, LV_PART_INDICATOR);
+        lv_obj_set_style_bg_color(br, lv_color_hex(UI_COL_SURFACE2), 0);
+        lv_obj_set_style_bg_color(br, lv_color_hex(UI_COL_DIM), LV_PART_INDICATOR);
+        lv_obj_remove_flag(br, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_align(br, LV_ALIGN_BOTTOM_MID, 0, 0);
         s_set.mode_btns[i] = mb;
+        s_set.mode_bar[i] = br;
     }
 
-    lv_obj_t *dz_row = lv_obj_create(b1);
-    lv_obj_set_size(dz_row, LV_PCT(100), 44);
-    lv_obj_set_style_bg_opa(dz_row, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(dz_row, 0, 0);
-    lv_obj_remove_flag(dz_row, LV_OBJ_FLAG_SCROLLABLE);
-    s_set.dz_lbl = lv_label_create(dz_row);
-    lv_obj_align(s_set.dz_lbl, LV_ALIGN_LEFT_MID, 10, 0);
-    ui_label_set_color(s_set.dz_lbl, lv_color_hex(UI_COL_DIM));
-    lv_obj_t *dz_sl = lv_slider_create(dz_row);
+    /* dead zone: to-scale disc inside the stick outline + slider */
+    lv_obj_t *dzc = ui_card(cs);
+    lv_obj_set_size(dzc, 256, 214);
+    lv_obj_set_pos(dzc, 536, 60);
+    lv_obj_set_style_pad_all(dzc, 12, 0);
+    lv_obj_t *dzt = lv_label_create(dzc);
+    lv_label_set_text(dzt, "DEAD ZONE");
+    lv_obj_set_style_text_font(dzt, F_SM, 0);
+    lv_obj_set_style_text_color(dzt, lv_color_hex(UI_COL_ACCENT), 0);
+    lv_obj_set_style_text_letter_space(dzt, 3, 0);
+    lv_obj_align(dzt, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_t *outline = lv_obj_create(dzc);
+    lv_obj_set_size(outline, 120, 120);
+    lv_obj_set_style_radius(outline, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(outline, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(outline, 2, 0);
+    lv_obj_set_style_border_color(outline, lv_color_hex(UI_COL_LINE), 0);
+    lv_obj_set_style_pad_all(outline, 0, 0);
+    lv_obj_remove_flag(outline, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(outline, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_align(outline, LV_ALIGN_TOP_LEFT, 0, 26);
+    s_set.dz_ring = lv_obj_create(outline);
+    lv_obj_set_size(s_set.dz_ring, 12, 12);
+    lv_obj_set_style_radius(s_set.dz_ring, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_border_width(s_set.dz_ring, 1, 0);
+    lv_obj_set_style_border_color(s_set.dz_ring, lv_color_hex(UI_COL_WARN), 0);
+    lv_obj_set_style_bg_color(s_set.dz_ring, lv_color_hex(UI_COL_WARN), 0);
+    lv_obj_set_style_bg_opa(s_set.dz_ring, LV_OPA_30, 0);
+    lv_obj_remove_flag(s_set.dz_ring, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_center(s_set.dz_ring);
+    s_set.dz_lbl = lv_label_create(dzc);
+    lv_label_set_text(s_set.dz_lbl, "--");
+    lv_obj_set_style_text_font(s_set.dz_lbl, F_XXL, 0);
+    lv_obj_set_style_text_color(s_set.dz_lbl, lv_color_hex(UI_COL_TXT), 0);
+    lv_obj_align(s_set.dz_lbl, LV_ALIGN_TOP_RIGHT, 0, 40);
+    lv_obj_t *dzn = lv_label_create(dzc);
+    lv_label_set_text(dzn, "of stick\nradius");
+    lv_obj_set_style_text_font(dzn, F_SM, 0);
+    lv_obj_set_style_text_color(dzn, lv_color_hex(UI_COL_DIM), 0);
+    lv_obj_set_style_text_align(dzn, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_align(dzn, LV_ALIGN_TOP_RIGHT, 0, 100);
+    lv_obj_t *dz_sl = lv_slider_create(dzc);
     s_set.dz_slider = dz_sl;
-    lv_obj_set_width(dz_sl, 200);
-    lv_obj_align(dz_sl, LV_ALIGN_RIGHT_MID, -10, 0);
+    lv_obj_set_size(dz_sl, LV_PCT(94), 10);
+    lv_obj_align(dz_sl, LV_ALIGN_BOTTOM_MID, 0, -6);
     lv_slider_set_range(dz_sl, 0, 30);
+    lv_obj_set_style_bg_color(dz_sl, lv_color_hex(UI_COL_SURFACE2), 0);
+    lv_obj_set_style_bg_color(dz_sl, lv_color_hex(UI_COL_WARN), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(dz_sl, lv_color_hex(UI_COL_TXT), LV_PART_KNOB);
     lv_obj_add_event_cb(dz_sl, dz_slider_cb, LV_EVENT_VALUE_CHANGED, NULL);
     lv_obj_add_event_cb(dz_sl, dz_released_cb, LV_EVENT_RELEASED, NULL);
-    lv_obj_t *note = lv_label_create(b1);
-    ui_label_set_text(note, "Dead zone avoids crawling from finger jitter (spec 15).\nMode scales the joystick output on the remote.");
-    ui_label_set_color(note, lv_color_hex(UI_COL_DIM));
-    lv_obj_set_style_text_font(note, F_SM, 0);
-    lv_obj_set_width(note, LV_PCT(100));
-    lv_label_set_long_mode(note, LV_LABEL_LONG_WRAP);
 
-    /* ---- Radio sub (spec 35) ---- */
+    /* response curve: stick deflection -> output of the selected mode */
+    lv_obj_t *rc = ui_card(cs);
+    lv_obj_set_size(rc, 784, 190);
+    lv_obj_set_pos(rc, 8, 282);
+    lv_obj_set_style_pad_all(rc, 12, 0);
+    lv_obj_t *rct = lv_label_create(rc);
+    lv_label_set_text(rct, "RESPONSE CURVE");
+    lv_obj_set_style_text_font(rct, F_SM, 0);
+    lv_obj_set_style_text_color(rct, lv_color_hex(UI_COL_ACCENT), 0);
+    lv_obj_set_style_text_letter_space(rct, 3, 0);
+    lv_obj_align(rct, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_t *plot = lv_obj_create(rc);
+    lv_obj_set_size(plot, 520, 130);
+    lv_obj_align(plot, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_style_bg_opa(plot, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(plot, 1, 0);
+    lv_obj_set_style_border_side(plot, LV_BORDER_SIDE_LEFT | LV_BORDER_SIDE_BOTTOM, 0);
+    lv_obj_set_style_border_color(plot, lv_color_hex(UI_COL_LINE), 0);
+    lv_obj_set_style_pad_all(plot, 0, 0);
+    lv_obj_remove_flag(plot, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_remove_flag(plot, LV_OBJ_FLAG_CLICKABLE);
+    for (int g = 1; g < 4; g++) {       /* faint 25/50/75 % grid */
+        lv_obj_t *gl = lv_obj_create(plot);
+        lv_obj_set_size(gl, 520, 1);
+        lv_obj_set_style_border_width(gl, 0, 0);
+        lv_obj_set_style_bg_color(gl, lv_color_hex(UI_COL_SURFACE2), 0);
+        lv_obj_set_style_bg_opa(gl, LV_OPA_COVER, 0);
+        lv_obj_remove_flag(gl, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_pos(gl, 0, 130 - g * 130 / 4);
+    }
+    s_set.curve = lv_line_create(plot);
+    lv_obj_set_style_line_width(s_set.curve, 3, 0);
+    lv_obj_set_style_line_color(s_set.curve, lv_color_hex(UI_COL_ACCENT), 0);
+    lv_obj_set_style_line_rounded(s_set.curve, true, 0);
+    lv_obj_set_pos(s_set.curve, 0, 0);
+    lv_obj_t *xl = lv_label_create(rc);
+    lv_label_set_text(xl, "STICK " LV_SYMBOL_RIGHT);
+    lv_obj_set_style_text_font(xl, F_SM, 0);
+    lv_obj_set_style_text_color(xl, lv_color_hex(UI_COL_DIM), 0);
+    lv_obj_align(xl, LV_ALIGN_TOP_LEFT, 440, 0);
+    s_set.curve_txt = lv_label_create(rc);
+    lv_label_set_text(s_set.curve_txt, " ");
+    lv_obj_set_width(s_set.curve_txt, 220);
+    lv_label_set_long_mode(s_set.curve_txt, LV_LABEL_LONG_WRAP);
+    lv_obj_set_style_text_font(s_set.curve_txt, F_MD, 0);
+    lv_obj_set_style_text_color(s_set.curve_txt, lv_color_hex(UI_COL_TXT), 0);
+    lv_obj_set_style_text_line_space(s_set.curve_txt, 6, 0);
+    lv_obj_align(s_set.curve_txt, LV_ALIGN_TOP_RIGHT, 0, 24);
+    s_set.ctl_mode_drawn = s_set.ctl_dz_drawn = -1;
+
+    /* ---- Radio sub = RADIO LINK console (spec 35) ----
+     * Left: the live link (signal bars, dBm, channel, RTT, loss, rates), so
+     * the effect of a credential change is visible on the same screen.
+     * Right: hotspot credentials + pairing.  Keyboard slides up as before. */
     s_set.subs[SUB_RADIO] = make_sub(root);
-    ui_header(s_set.subs[SUB_RADIO], "RADIO SETUP", sub_back_cb);
-    lv_obj_t *b2 = kv_body(s_set.subs[SUB_RADIO]);
+    lv_obj_t *rs = s_set.subs[SUB_RADIO];
+    ui_header(rs, "RADIO LINK", sub_back_cb);
+    lv_obj_t *lc = ui_card(rs);
+    lv_obj_set_size(lc, 300, 412);
+    lv_obj_set_pos(lc, 8, 60);
+    lv_obj_set_style_pad_all(lc, 12, 0);
+    lv_obj_t *lt = lv_label_create(lc);
+    lv_label_set_text(lt, "LIVE SIGNAL");
+    lv_obj_set_style_text_font(lt, F_SM, 0);
+    lv_obj_set_style_text_color(lt, lv_color_hex(UI_COL_ACCENT), 0);
+    lv_obj_set_style_text_letter_space(lt, 3, 0);
+    lv_obj_align(lt, LV_ALIGN_TOP_LEFT, 0, 0);
+    for (int i = 0; i < 5; i++) {
+        s_set.rd_bar[i] = lv_obj_create(lc);
+        int bh = 20 + i * 18;
+        lv_obj_set_size(s_set.rd_bar[i], 22, bh);
+        lv_obj_set_pos(s_set.rd_bar[i], i * 30, 132 - bh);
+        lv_obj_set_style_radius(s_set.rd_bar[i], 3, 0);
+        lv_obj_set_style_border_width(s_set.rd_bar[i], 0, 0);
+        lv_obj_set_style_bg_color(s_set.rd_bar[i], lv_color_hex(UI_COL_SURFACE2), 0);
+        lv_obj_set_style_bg_opa(s_set.rd_bar[i], LV_OPA_COVER, 0);
+        lv_obj_remove_flag(s_set.rd_bar[i], LV_OBJ_FLAG_CLICKABLE);
+    }
+    s_set.rd_rssi = lv_label_create(lc);
+    lv_label_set_text(s_set.rd_rssi, "--");
+    lv_obj_set_style_text_font(s_set.rd_rssi, F_XXL, 0);
+    lv_obj_set_style_text_color(s_set.rd_rssi, lv_color_hex(UI_COL_TXT), 0);
+    lv_obj_align(s_set.rd_rssi, LV_ALIGN_TOP_RIGHT, 0, 28);
+    lv_obj_t *du = lv_label_create(lc);
+    lv_label_set_text(du, "dBm");
+    lv_obj_set_style_text_font(du, F_SM, 0);
+    lv_obj_set_style_text_color(du, lv_color_hex(UI_COL_DIM), 0);
+    lv_obj_align(du, LV_ALIGN_TOP_RIGHT, 0, 88);
+    s_set.rd_q = lv_label_create(lc);
+    lv_label_set_text(s_set.rd_q, "NO SIGNAL");
+    lv_obj_set_style_text_font(s_set.rd_q, F_LG, 0);
+    lv_obj_set_style_text_letter_space(s_set.rd_q, 3, 0);
+    lv_obj_set_style_text_color(s_set.rd_q, lv_color_hex(UI_COL_DIM), 0);
+    lv_obj_align(s_set.rd_q, LV_ALIGN_TOP_LEFT, 0, 146);
+    static const char *const rk[5] = { "NETWORK", "CHANNEL", "ROUND TRIP", "LOSS", "TX / RX" };
+    lv_obj_t **rv[5] = { &s_set.rd_ssid, &s_set.rd_ch, &s_set.rd_lat, &s_set.rd_loss, &s_set.rd_rate };
+    for (int i = 0; i < 5; i++) {
+        lv_obj_t *k = lv_label_create(lc);
+        lv_label_set_text(k, rk[i]);
+        lv_obj_set_style_text_font(k, F_SM, 0);
+        lv_obj_set_style_text_color(k, lv_color_hex(UI_COL_DIM), 0);
+        lv_obj_align(k, LV_ALIGN_TOP_LEFT, 0, 196 + i * 40);
+        *rv[i] = lv_label_create(lc);
+        lv_label_set_text(*rv[i], "--");
+        lv_obj_set_style_text_font(*rv[i], F_LG, 0);
+        lv_obj_set_style_text_color(*rv[i], lv_color_hex(UI_COL_TXT), 0);
+        lv_obj_set_size(*rv[i], 150, lv_font_get_line_height(F_LG));
+        lv_label_set_long_mode(*rv[i], LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_set_style_text_align(*rv[i], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_align(*rv[i], LV_ALIGN_TOP_RIGHT, 0, 192 + i * 40);
+    }
 
-    lv_obj_t *ssid_lbl = lv_label_create(b2);
-    ui_label_set_text(ssid_lbl, "C6 AP SSID");
-    ui_label_set_color(ssid_lbl, lv_color_hex(UI_COL_DIM));
-    s_set.ssid_ta = lv_textarea_create(b2);
-    lv_obj_set_size(s_set.ssid_ta, LV_PCT(100), 44);
-    lv_textarea_set_one_line(s_set.ssid_ta, true);
-    lv_obj_add_event_cb(s_set.ssid_ta, ta_focus_cb, LV_EVENT_FOCUSED, NULL);
-    lv_obj_add_event_cb(s_set.ssid_ta, ta_defocus_cb, LV_EVENT_DEFOCUSED, NULL);
-
-    lv_obj_t *pass_lbl = lv_label_create(b2);
-    ui_label_set_text(pass_lbl, "Password");
-    ui_label_set_color(pass_lbl, lv_color_hex(UI_COL_DIM));
-    s_set.pass_ta = lv_textarea_create(b2);
-    lv_obj_set_size(s_set.pass_ta, LV_PCT(100), 44);
-    lv_textarea_set_one_line(s_set.pass_ta, true);
+    lv_obj_t *cc = ui_card(rs);
+    lv_obj_set_size(cc, 476, 412);
+    lv_obj_set_pos(cc, 316, 60);
+    lv_obj_set_style_pad_all(cc, 14, 0);
+    lv_obj_t *hs_t = lv_label_create(cc);
+    lv_label_set_text(hs_t, "VEHICLE HOTSPOT");
+    lv_obj_set_style_text_font(hs_t, F_SM, 0);
+    lv_obj_set_style_text_color(hs_t, lv_color_hex(UI_COL_ACCENT), 0);
+    lv_obj_set_style_text_letter_space(hs_t, 3, 0);
+    lv_obj_align(hs_t, LV_ALIGN_TOP_LEFT, 0, 0);
+    static const char *const fk[2] = { LV_SYMBOL_WIFI "  SSID", LV_SYMBOL_EYE_CLOSE "  PASSWORD" };
+    lv_obj_t **ft[2] = { &s_set.ssid_ta, &s_set.pass_ta };
+    for (int i = 0; i < 2; i++) {
+        lv_obj_t *k = lv_label_create(cc);
+        lv_label_set_text(k, fk[i]);
+        lv_obj_set_style_text_font(k, F_SM, 0);
+        lv_obj_set_style_text_color(k, lv_color_hex(UI_COL_DIM), 0);
+        lv_obj_align(k, LV_ALIGN_TOP_LEFT, 0, 30 + i * 80);
+        lv_obj_t *ta = lv_textarea_create(cc);
+        lv_obj_set_size(ta, LV_PCT(100), 46);
+        lv_obj_align(ta, LV_ALIGN_TOP_LEFT, 0, 50 + i * 80);
+        lv_textarea_set_one_line(ta, true);
+        lv_obj_set_style_bg_color(ta, lv_color_hex(UI_COL_SURFACE2), 0);
+        lv_obj_set_style_text_color(ta, lv_color_hex(UI_COL_TXT), 0);
+        lv_obj_set_style_text_font(ta, F_MD, 0);
+        lv_obj_set_style_border_width(ta, 1, 0);
+        lv_obj_set_style_border_color(ta, lv_color_hex(UI_COL_LINE), 0);
+        lv_obj_set_style_border_color(ta, lv_color_hex(UI_COL_ACCENT), LV_STATE_FOCUSED);
+        lv_obj_add_event_cb(ta, ta_focus_cb, LV_EVENT_FOCUSED, NULL);
+        lv_obj_add_event_cb(ta, ta_defocus_cb, LV_EVENT_DEFOCUSED, NULL);
+        *ft[i] = ta;
+    }
     lv_textarea_set_password_mode(s_set.pass_ta, true);
-    lv_obj_add_event_cb(s_set.pass_ta, ta_focus_cb, LV_EVENT_FOCUSED, NULL);
-    lv_obj_add_event_cb(s_set.pass_ta, ta_defocus_cb, LV_EVENT_DEFOCUSED, NULL);
 
-    lv_obj_t *apply = ui_button(b2, "APPLY + RECONNECT", lv_color_hex(UI_COL_ACCENT), wifi_apply_cb, NULL);
-    lv_obj_set_size(apply, LV_PCT(100), 48);
-
-    lv_obj_t *pairb = ui_button(b2, "PAIR WITH VEHICLE", lv_color_hex(UI_COL_SURFACE2), pair_btn_cb, NULL);
-    lv_obj_set_size(pairb, LV_PCT(100), 48);
-
-    s_set.pair_status_lbl = lv_label_create(b2);
+    lv_obj_t *apply = ui_button(cc, LV_SYMBOL_REFRESH "  APPLY + RECONNECT",
+                                lv_color_hex(0x0B2A3A), wifi_apply_cb, NULL);
+    lv_obj_set_size(apply, LV_PCT(100), 50);
+    lv_obj_set_style_border_color(apply, lv_color_hex(UI_COL_ACCENT), 0);
+    lv_obj_align(apply, LV_ALIGN_TOP_LEFT, 0, 200);
+    lv_obj_t *pairb = ui_button(cc, LV_SYMBOL_BLUETOOTH "  PAIR WITH VEHICLE",
+                                lv_color_hex(UI_COL_SURFACE2), pair_btn_cb, NULL);
+    lv_obj_set_size(pairb, LV_PCT(100), 50);
+    lv_obj_align(pairb, LV_ALIGN_TOP_LEFT, 0, 260);
+    s_set.pair_status_lbl = lv_label_create(cc);
+    lv_label_set_text(s_set.pair_status_lbl, " ");
     lv_obj_set_width(s_set.pair_status_lbl, LV_PCT(100));
     lv_label_set_long_mode(s_set.pair_status_lbl, LV_LABEL_LONG_WRAP);
     lv_obj_set_style_text_font(s_set.pair_status_lbl, F_SM, 0);
+    lv_obj_set_style_text_color(s_set.pair_status_lbl, lv_color_hex(UI_COL_INFO), 0);
+    lv_obj_align(s_set.pair_status_lbl, LV_ALIGN_TOP_LEFT, 0, 324);
 
-    s_set.kb = lv_keyboard_create(s_set.subs[SUB_RADIO]);
+    s_set.kb = lv_keyboard_create(rs);
     lv_obj_set_size(s_set.kb, LV_PCT(100), LV_SIZE_CONTENT);
     lv_obj_align(s_set.kb, LV_ALIGN_BOTTOM_MID, 0, 0);
     lv_obj_add_flag(s_set.kb, LV_OBJ_FLAG_HIDDEN);
 
-    /* ---- Display sub (spec 36-38) ---- */
-    s_set.subs[SUB_DISPLAY] = make_sub(root);
-    ui_header(s_set.subs[SUB_DISPLAY], "DISPLAY", sub_back_cb);
-    lv_obj_t *b3 = kv_body(s_set.subs[SUB_DISPLAY]);
-    ui_kv_row(b3, "Theme", NULL);
-    lv_obj_t *tv = lv_obj_get_child(lv_obj_get_child(b3, -1), 1);
-    ui_label_set_text(tv, "DARK (default)");
-    ui_kv_row(b3, "Brightness", NULL);
-    lv_obj_t *bv = lv_obj_get_child(lv_obj_get_child(b3, -1), 1);
-    ui_label_set_text(bv, "fixed on this panel");
-    lv_obj_t *dnote = lv_label_create(b3);
-    ui_label_set_text(dnote, "The SUB3 panel backlight is hard-wired on the\nEV board; brightness control is not available.\nDriving mode keeps the screen always on (spec 37).");
-    ui_label_set_color(dnote, lv_color_hex(UI_COL_DIM));
-    lv_obj_set_style_text_font(dnote, F_SM, 0);
-    lv_obj_set_width(dnote, LV_PCT(100));
-    lv_label_set_long_mode(dnote, LV_LABEL_LONG_WRAP);
 
     /* ---- About = SYSTEM topology (spec 45 + engineer trigger) ----
      * Not a spec sheet: the page draws the real chain S3 -> C6 -> TC275 as
@@ -1103,7 +1389,8 @@ static void sub_sync_values(void)
                 lv_obj_remove_state(s_set.mode_btns[i], LV_STATE_CHECKED);
             }
         }
-        ui_label_set_fmt(s_set.dz_lbl, "Dead zone: %d %%", set.deadzone_pct);
+        ui_label_set_fmt(s_set.dz_lbl, "%d%%", set.deadzone_pct);
+        s_set.ctl_mode_drawn = s_set.ctl_dz_drawn = -1;
         if (s_set.dz_slider) {
             lv_slider_set_value(s_set.dz_slider, set.deadzone_pct, LV_ANIM_OFF);
         }
@@ -1223,6 +1510,78 @@ static void wire_set(int i, bool up, const char *txt)
     ui_label_set_color(s_set.ab_wlbl[i], lv_color_hex(up ? UI_COL_ACCENT : UI_COL_DIM));
 }
 
+static void control_refresh(void)
+{
+    scr_settings_t set;
+    scr_settings_get(&set);
+    int m = set.mode <= 2 ? set.mode : 1;
+    int dz = s_set.dz_slider ? lv_slider_get_value(s_set.dz_slider) : set.deadzone_pct;
+    if (m == s_set.ctl_mode_drawn && dz == s_set.ctl_dz_drawn) {
+        return;                         /* nothing changed: no repaint */
+    }
+    const int mpct[3] = { CONFIG_SCR_MODE_ECO_PCT, CONFIG_SCR_MODE_NORMAL_PCT,
+                          CONFIG_SCR_MODE_SPORT_PCT };
+    for (int i = 0; i < 3; i++) {
+        lv_obj_set_style_bg_color(s_set.mode_bar[i],
+                                  lv_color_hex(i == m ? UI_COL_ACCENT : UI_COL_DIM),
+                                  LV_PART_INDICATOR);
+    }
+    /* disc diameter = dz % of the 116 px stick interior (to scale) */
+    int d = 116 * dz / 100;
+    d = d < 6 ? 6 : d;
+    lv_obj_set_size(s_set.dz_ring, d, d);
+    lv_obj_center(s_set.dz_ring);
+    /* curve: flat inside the dead zone, then linear up to the mode cap */
+    const int W = 520, H = 130;
+    s_set.curve_pts[0] = (lv_point_precise_t){ 0, H };
+    s_set.curve_pts[1] = (lv_point_precise_t){ W * dz / 100, H };
+    s_set.curve_pts[2] = (lv_point_precise_t){ W, H - H * mpct[m] / 100 };
+    lv_line_set_points(s_set.curve, s_set.curve_pts, 3);
+    static const char *const mname[3] = { "ECO", "NORMAL", "SPORT" };
+    ui_label_set_fmt(s_set.curve_txt, "%s mode\nNo motion below %d%%\nFull stick = %d%% power",
+                     mname[m], dz, mpct[m]);
+    s_set.ctl_mode_drawn = m;
+    s_set.ctl_dz_drawn = dz;
+}
+
+static void radio_refresh(const scr_state_t *st)
+{
+    static const char *const qtxt[6] = { "NO SIGNAL", "EXCELLENT", "GOOD", "FAIR", "WEAK", "CRITICAL" };
+    int lit = 0;
+    uint32_t qc = UI_COL_DIM;
+    if (st->rssi != 0) {
+        lit = st->quality == SCR_QUAL_EXCELLENT ? 5 : st->quality == SCR_QUAL_GOOD ? 4 :
+              st->quality == SCR_QUAL_FAIR ? 3 : st->quality == SCR_QUAL_WEAK ? 2 : 1;
+        qc = st->quality >= SCR_QUAL_GOOD ? UI_COL_OK :
+             (st->quality == SCR_QUAL_CRITICAL ? UI_COL_CRIT : UI_COL_WARN);
+        ui_label_set_fmt(s_set.rd_rssi, "%d", st->rssi);
+        ui_label_set_fmt(s_set.rd_ch, "%u", st->channel);
+    } else {
+        ui_label_set_text(s_set.rd_rssi, "--");
+        ui_label_set_text(s_set.rd_ch, "--");
+    }
+    for (int i = 0; i < 5; i++) {
+        lv_color_t c = lv_color_hex(i < lit ? qc : UI_COL_SURFACE2);
+        if (!lv_color_eq(lv_obj_get_style_bg_color(s_set.rd_bar[i], 0), c)) {
+            lv_obj_set_style_bg_color(s_set.rd_bar[i], c, 0);
+        }
+    }
+    ui_label_set_text(s_set.rd_q, qtxt[(st->rssi && st->quality <= 5) ? st->quality : 0]);
+    ui_label_set_color(s_set.rd_q, lv_color_hex(qc));
+    scr_settings_t set;
+    scr_settings_get(&set);
+    ui_label_set_text(s_set.rd_ssid, set.ssid[0] ? set.ssid : "not set");
+    if (st->conn == SCR_CONN_CONNECTED) {
+        ui_label_set_fmt(s_set.rd_lat, "%u ms", st->lat_ms);
+        ui_label_set_fmt(s_set.rd_loss, "%u.%u%%", st->loss_pct_x10 / 10, st->loss_pct_x10 % 10);
+        ui_label_set_fmt(s_set.rd_rate, "%u / %u /s", st->tx_rate, st->rx_rate);
+    } else {
+        ui_label_set_text(s_set.rd_lat, "--");
+        ui_label_set_text(s_set.rd_loss, "--");
+        ui_label_set_text(s_set.rd_rate, "--");
+    }
+}
+
 static void about_refresh(const scr_state_t *st)
 {
     const esp_app_desc_t *app = esp_app_get_description();
@@ -1267,7 +1626,11 @@ void ui_pages_settings_refresh(const scr_state_t *st)
     } else if (s_set.cur == SUB_ABOUT) {
         about_refresh(st);
     }
+    if (s_set.cur == SUB_CONTROL) {
+        control_refresh();
+    }
     if (s_set.cur == SUB_RADIO) {
+        radio_refresh(st);
         ui_label_set_text(s_set.pair_status_lbl,
                           st->pair_status[0] ? st->pair_status : " ");
     }
