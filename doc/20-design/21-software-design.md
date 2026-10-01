@@ -311,7 +311,7 @@ typedef struct {                 /* 每页 = 头(16B) + 载荷 + CRC32 */
 - **职责**：4 路霍尔正交信号解码，输出每侧轮速（mm/s，1 kHz）与累计里程；为伺服/保护/产测/遥测提供统一数据源。
 - **硬件方案（2026-09-26 随实现纠错）**：**GTM0 TIM 组 0 八通道 TIEM（输入事件模式）双边沿中断 + 软件 ×4 正交解码**，A 相进偶数通道、B 相进奇数通道；引脚 P33.0~P33.7 = X2-28~35（接线表 23-wiring.md §8.2）。原稿的 "TIM UDC 硬件正交（`UDCCTRL/CLS/DUTC`）" 是 **GTM gen2 寄存器，TC275 的 gen3 TIM 没有 UDC**（模式仅 TPWM/TPIM/TIEM/TIPM/TBCM/TGPS，`IfxGtm_regdef.h` 可证），GPT12 增量口与 ERU 输入又都不在引出脚上（P33.x 无 ERU 通路，详见 23-wiring §8.3）——ISR 解码不丢计数的代价是空载 500 rpm 四路合计 ≈1.7k 中断/s、13 V 推荐上限 ≈3k/s，≪1% CPU1（13 PPR = 52 边沿/电机转，V1.12 刻度更正）。霍尔开漏上拉至 3V3（禁 5V），TIM 通道配 2 µs 去毛刺滤波。
 - **已实现接口（`rt/encoder.c/h`，属主 CPU1，原 `Bsp/encoder.c/h` 随 §3.4 目录重排迁入）**：
-  - `ENCODER_getSpeeds(int32 v[2])` —— 左/右侧轮速 mm/s（8 ms 滑窗 + 中值滤波；轮径 `ENCODER_WHEEL_DIA_MM 48`（MG310 实配 48 mm 胎）为**默认值**，运行时可改，见下"参数运行时化"）；
+  - `ENCODER_getSpeeds(int32 v[2])` —— 左/右侧轮速 mm/s（8 ms 滑窗**均值**（2026-10-01 由中值改为均值：每侧 1 计数/ms = 71 mm/s，逐 ms 整数增量取中值会量化成 71 mm/s 台阶、低速恒读 0；窗内求和保留全部计数，分辨率 ≈8.9 mm/s；判向标定 0x70 同批修正为“按当前符号取反”而非强置 -1）；轮径 `ENCODER_WHEEL_DIA_MM 48`（MG310 实配 48 mm 胎）为**默认值**，运行时可改，见下"参数运行时化"）；
   - `ENCODER_getOdometer(uint32 m[2])`；`ENCODER_getRawCounts(int32 c[4])`（产测判向用）；
   - `ENCODER_isAlive()` —— 500 ms 窗口内有边沿即 alive；`ENCODER_task()` 在 1 kHz 算法环内运行，经 `ENCODER_publish()` → `XCORE_encoderPublish` 一次发布**两个单位域**：实测速度 percent×10（alive 时 CPU0 用它覆盖状态块 leftSpeed/rightSpeed）+ 物理域 mm/s 与左右侧里程 mm（CPU2 取用填遥测 `vMeasL/R`、`odoSession`，§6.3，2026-09-27 起生效）。
 - **量产增量（本仓库未含）**：`ENCODER_selfCheck()`（静止漂移 + 单侧脉冲注入比对）、`ERR_ENC_DEAD` → `motor_guard` 安全态联动。**速度系数标定写入 DFlash 已做**（V1.10，见下条与 [34 §8](../30-tc275/34-calib-dpt.md)，取代 §15.3 的"写宏重编"设想）。

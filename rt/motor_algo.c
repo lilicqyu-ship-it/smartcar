@@ -261,9 +261,14 @@ static void MOTOR_ALGO_calibEndPulse(void)
     ENCODER_getRawCounts(counts);
     g_calib.delta[g_calib.wheel] = counts[g_calib.wheel] - g_calib.countAtStart;
 
+    /* The delta is POST-invert, so a negative one means the CURRENT sign is
+     * wrong - flip it, do not force -1: a wheel that boots with a stale -1
+     * from the DFlash record would otherwise stay -1 forever (re-running the
+     * calibration could never repair it, and that wheel's mm/s keeps
+     * cancelling its side partner -> body speed reads ~0 or negative). */
     if (g_calib.delta[g_calib.wheel] < 0)
     {
-        ENCODER_setInvert(g_calib.wheel, -1);
+        ENCODER_setInvert(g_calib.wheel, (sint8)(-ENCODER_getInvert(g_calib.wheel)));
     }
     /* delta == 0 stays +1: the ENCCAL line reports it as a dead channel. */
 

@@ -26,7 +26,7 @@
  *     share table 0, see Lcf_Tasking_Tricore_Tc.lsl __INTTAB_CPU*);
  *   - the ISR reads the post-edge level of the edge's own phase and of the
  *     partner phase and applies the standard 4x quadrature table;
- *   - the 1 kHz ENCODER_task() takes per-ms deltas, applies the 8 ms median
+ *   - the 1 kHz ENCODER_task() takes per-ms deltas, applies the 8 ms mean
  *     window and publishes side speeds through xcore.
  *
  * Worst case ISR load: 4 encoders * 52 edges per motor rev at the MG310's
@@ -249,48 +249,40 @@ void ENCODER_task(void)
     }
 
     {
-        /* median of the window (doc 21 section 5.1): insertion sort of <=8
-         * samples, middle value(s) averaged; cost is negligible at 1 kHz. */
-        sint32  sortedL[ENC_WINDOW_MS], sortedR[ENC_WINDOW_MS];
-        uint8  n     = winFull ? ENC_WINDOW_MS : winIdx;
-        uint8  j, k;
-        sint32  medL  = 0, medR = 0;
+        /* Window MEAN, not median (doc 21 section 5.1, V1.13). One side moves
+         * ~14 counts/ms at 1 m/s, i.e. 1 count/ms = 71 mm/s: a median of
+         * integer per-ms deltas is quantised to 71 mm/s steps and returns 0
+         * whenever most 1 ms slots are empty - every speed below ~70 mm/s,
+         * and a lot of the ramp, read "0" while the wheels visibly turn.
+         * The sum over the 8 ms window keeps every count (8.9 mm/s
+         * resolution). The median bought nothing here: the x4 software
+         * decode can only produce +-1 per real edge, and a glitch pair
+         * (+1/-1) cancels in a sum anyway. */
+        uint8  n    = winFull ? ENC_WINDOW_MS : winIdx;
+        uint8  j;
+        sint32 sumL = 0, sumR = 0;
 
         for (j = 0u; j < n; j++)
         {
-            sint32 v = winL[j];
-
-            for (k = j; (k > 0u) && (sortedL[k - 1u] > v); k--)
-            {
-                sortedL[k] = sortedL[k - 1u];
-            }
-            sortedL[k] = v;
-
-            v = winR[j];
-            for (k = j; (k > 0u) && (sortedR[k - 1u] > v); k--)
-            {
-                sortedR[k] = sortedR[k - 1u];
-            }
-            sortedR[k] = v;
-        }
-
-        if (n > 0u)
-        {
-            medL = (n & 1u) ? sortedL[n / 2u] : ((sortedL[n / 2u - 1u] + sortedL[n / 2u]) / 2);
-            medR = (n & 1u) ? sortedR[n / 2u] : ((sortedR[n / 2u - 1u] + sortedR[n / 2u]) / 2);
+            sumL += winL[j];
+            sumR += winR[j];
         }
 
         /* side delta counts BOTH wheels of the side, so a wheel rev is
          * 2 * ENCODER_COUNTS_WHEEL_REV; side counts/ms -> wheel mm/s.
          * circMm/mmPerCount ride the runtime wheel diameter (doc 34 SS8.2,
-         * setter-clamped); the formulas are the pre-existing ones. */
+         * setter-clamped); the formulas are the pre-existing ones, fed the
+         * window mean counts/ms instead of the median. */
+        if (n > 0u)
         {
             float32 countsPerWheelRev = (float32)(2u * ENCODER_COUNTS_WHEEL_REV);
             float32 circMm            = 3.14159265f * (float32)g_wheelDiaMm;
-            float32 mmPerS            = ((float32)medL * 1000.0f / countsPerWheelRev) * circMm;
+            float32 meanL             = (float32)sumL / (float32)n;
+            float32 meanR             = (float32)sumR / (float32)n;
+            float32 mmPerS            = (meanL * 1000.0f / countsPerWheelRev) * circMm;
 
             g_speedMmS[0] = (sint32)mmPerS;
-            mmPerS        = ((float32)medR * 1000.0f / countsPerWheelRev) * circMm;
+            mmPerS        = (meanR * 1000.0f / countsPerWheelRev) * circMm;
             g_speedMmS[1] = (sint32)mmPerS;
         }
 

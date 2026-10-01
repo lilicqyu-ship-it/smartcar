@@ -44,7 +44,7 @@ tc275_car/
 ├── app/robot.c/.h        运动状态机：命令→侧速目标、心跳超时、故障锁存、状态发布（CPU0）
 ├── rt/motor_algo.c/.h    1kHz 主循环：读目标→斜率限幅→SERVO_update→驱动；含 0x70 方向标定 + 0x71 直驱 jog + 闭环使能门 g_closedLoopOk（src=0 强制开环等价，34 §13）（CPU1）
 ├── rt/servo.c/.h         ★闭环伺服：PI + 前馈，每侧一实例；编码器失活时退化为开环（CPU1）
-├── rt/encoder.c/.h       8 路 GTM TIM0 边沿中断软件正交解码，中值窗测速+里程（CPU1）
+├── rt/encoder.c/.h       8 路 GTM TIM0 边沿中断软件正交解码，8 ms 均值窗测速+里程（CPU1）
 ├── com/link.c/.h         ★板间链路泵：寄存器握手 + 事务泵 + 命令分派 + 遥测（CPU2）
 ├── com/spi_hal_pins.c/.h QSPI3 主机 HAL：定长事务、P23.0 电平采样、时钟档位（CPU2）
 ├── com/wifi_at.c/.h       esp-at AT 桥（已弃用分支，仅删 USE_SPI_LINK 才编入）

@@ -13,7 +13,7 @@
 #define ENCODER_GEAR_NUM           20409u /* gear 1:20.409 */
 #define ENCODER_GEAR_DEN           1000u
 /* 13 * 4 * 20.409 = 1061.268; the integer math truncates to 1061 (-0.03%,
- * noise next to the 8 ms median window). */
+ * noise next to the 8 ms mean window). */
 #define ENCODER_COUNTS_WHEEL_REV   ((uint32)((uint32)(ENCODER_PPR * 4u) * ENCODER_GEAR_NUM / ENCODER_GEAR_DEN))
 
 /* Measured wheel speed that maps to percent*10 = 1000 in the telemetry domain.

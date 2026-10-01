@@ -214,7 +214,7 @@ PWM 20 kHz，`MOTOR_setSpeed(id, -1000..+1000)`；robot 层 -100..+100 → ×10 
 | C（电机3） | P33.0 | P33.1 | TIM0_4 / TIM0_5 | X2-28/29 |
 | D（电机4） | P33.2 | P33.3 | TIM0_6 / TIM0_7 | X2-30/31 |
 
-A 相进偶数通道、B 相进奇数通道，八通道全部配 TIEM 双边沿 + NEWVAL 中断（优先级 16~23，TOS=CPU1），ISR 按 4x 正交表软解码，13 PPR × 4 = 52 计数/电机转，× 减速比 1:20.409 ≈ **1061.27 计数/轮转**（48 mm 胎 = 0.1421 mm/计数）。**实现注记**：原方案的 "TIM UDC 硬件正交"（`UDCCTRL/CLS/DUTC`）是 GTM gen2 的寄存器，本芯片 TC27D 的 GTM gen3 TIM **没有 UDC**（`IfxGtm_regdef.h` 无此寄存器，模式仅 TPWM/TPIM/TIEM/TIPM/TBCM/TGPS），GPT12 增量口与 ERU 输入又都不在引出脚上，故改为"硬件边沿中断 + 软件正交"。实测值经 `ENCODER_task()`（1 kHz，8 ms 中值窗）换算 mm/s 并经 xcore 出遥测；`ENCODER_getRawCounts` 供产测判向。
+A 相进偶数通道、B 相进奇数通道，八通道全部配 TIEM 双边沿 + NEWVAL 中断（优先级 16~23，TOS=CPU1），ISR 按 4x 正交表软解码，13 PPR × 4 = 52 计数/电机转，× 减速比 1:20.409 ≈ **1061.27 计数/轮转**（48 mm 胎 = 0.1421 mm/计数）。**实现注记**：原方案的 "TIM UDC 硬件正交"（`UDCCTRL/CLS/DUTC`）是 GTM gen2 的寄存器，本芯片 TC27D 的 GTM gen3 TIM **没有 UDC**（`IfxGtm_regdef.h` 无此寄存器，模式仅 TPWM/TPIM/TIEM/TIPM/TBCM/TGPS），GPT12 增量口与 ERU 输入又都不在引出脚上，故改为"硬件边沿中断 + 软件正交"。实测值经 `ENCODER_task()`（1 kHz，8 ms 均值窗）换算 mm/s 并经 xcore 出遥测；`ENCODER_getRawCounts` 供产测判向。
 
 ## 10. 设计决策（解释）
 
