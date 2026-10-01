@@ -70,6 +70,10 @@ TC275 PFlash：PF0 = 2 MB @ `0xA000_0000`(non-cached) / `0x8000_0000`(cached)，
 
 两槽镜像对称（bank 内同偏移、同大小），槽入口 = 槽基址 + 0x20（`.start` 段，镜像 BMHD 复位约定；SBL 读此地址跳入）。注意 PF0 的 BMHD1 物理地址 0x8002_0000 落在 Slot A 内——SBL 构建已用 `IFX_CFG_CPUCSTART_BMI01_NOT_NEEDED` 去掉 bmhd_1 段，AppA 的 lsl 不在那附近安排可加载段。
 
+**整包烧录**：SBL 与 App 各自独立链接，出厂/调试器一次烧录用
+`myCarSbl/tools/merge_hex.py` 在 Intel-HEX 层合成（地址互不重叠，重叠即
+拒绝；合并入口 = SBL 0x80000020；可选 `--bin` 出整片二进制，空隙 0xFF）。
+
 推荐分区（每 bank 内自洽，两 bank 镜像对称）：
 
 ```
