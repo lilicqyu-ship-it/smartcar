@@ -37,6 +37,15 @@ uint8_t scr_link_next_seq(void);
  * app_state pair_status. */
 void scr_link_request_pair(void);
 
+/* Re-query the C6 firmware version via GET /api/health (runs in the link
+ * monitor task).  The result lands in app_state c6_fw / c6_fw_seq. */
+void scr_link_request_c6_ver(void);
+
+/* Ask the TC275 for its version now: {"t":"tcver"} -> C6 -> SPI DIAG
+ * 0x53/0x24 (C6 IRQ line notifies the TC275 master) -> EVT 0x24/0x25 ->
+ * {"t":"tcver"} back to us.  Result lands in app_state tc_app_ver / tc_ver_seq. */
+void scr_link_request_tc_ver(void);
+
 /* Re-apply Wi-Fi credentials from settings and reconnect (Radio settings). */
 void scr_link_apply_wifi(void);
 

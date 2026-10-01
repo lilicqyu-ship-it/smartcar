@@ -543,6 +543,10 @@ typedef struct {
     lv_obj_t *fw_val;
     int fw_taps;
     int64_t fw_first_tap;
+    /* tap-to-refresh firmware version per topology node (S3 / C6 / TC275) */
+    uint8_t  ver_phase[3];      /* VER_IDLE / VER_CHECKING / VER_OK / VER_FAIL */
+    uint32_t ver_seq0[3];       /* app_state version seq when the tap landed  */
+    int64_t  ver_until[3];      /* CHECKING: timeout; OK/FAIL: banner end (ms) */
 } set_t;
 
 static set_t s_set;
@@ -681,6 +685,80 @@ static void fw_tap_cb(lv_event_t *e)
         s_set.fw_taps = 0;
         ui_engineer_enable();
     }
+}
+
+/* about sub: tap a node card -> re-fetch that firmware's version.
+ *   S3    : local esp_app_desc, resolved on the spot
+ *   C6    : GET /api/health via the link task, wait for c6_fw_seq to move
+ *   TC275 : {"t":"tcver"} -> C6 -> SPI DIAG 0x53/0x24 (IRQ line notifies the
+ *           TC275 master) -> EVT 0x24/0x25 -> {"t":"tcver"}; wait for
+ *           tc_ver_seq to move.  The timeout still covers one 5 s periodic
+ *           beacon, so a TC275 without the request handler also resolves */
+enum { VER_IDLE = 0, VER_CHECKING, VER_OK, VER_FAIL };
+#define VER_C6_TIMEOUT_MS   3000
+#define VER_TC_TIMEOUT_MS   6500    /* > one 5 s beacon period */
+#define VER_BANNER_MS       1500
+
+static void node_tap_cb(lv_event_t *e)
+{
+    int i = (int)(intptr_t)lv_event_get_user_data(e);
+    int64_t now = esp_timer_get_time() / 1000;
+    if (i == 0) {
+        fw_tap_cb(e);               /* keep the 7-tap engineer unlock on S3 */
+    }
+    if (s_set.ver_phase[i] == VER_CHECKING) {
+        return;                     /* one query in flight per node */
+    }
+    scr_state_t st;
+    app_state_snapshot(&st);
+    bool ws = st.conn == SCR_CONN_CONNECTED;
+    if (i == 0) {
+        s_set.ver_phase[0] = VER_OK;            /* local: always immediate */
+        s_set.ver_until[0] = now + VER_BANNER_MS;
+    } else if (!ws || (i == 2 && !st.tc_on)) {
+        s_set.ver_phase[i] = VER_FAIL;          /* nothing to ask */
+        s_set.ver_until[i] = now + VER_BANNER_MS;
+    } else {
+        s_set.ver_phase[i] = VER_CHECKING;
+        s_set.ver_seq0[i] = i == 1 ? st.c6_fw_seq : st.tc_ver_seq;
+        s_set.ver_until[i] = now + (i == 1 ? VER_C6_TIMEOUT_MS : VER_TC_TIMEOUT_MS);
+        if (i == 1) {
+            scr_link_request_c6_ver();
+        } else {
+            scr_link_request_tc_ver();
+        }
+    }
+    app_state_log(SCR_LOG_INFO, i == 0 ? "Version refresh: S3" :
+                  i == 1 ? "Version refresh: C6" : "Version refresh: TC275");
+}
+
+/* advance a node's refresh state; returns the status override or NULL */
+static const char *node_ver_status(int i, const scr_state_t *st, uint32_t *col)
+{
+    int64_t now = esp_timer_get_time() / 1000;
+    if (s_set.ver_phase[i] == VER_CHECKING) {
+        uint32_t seq = i == 1 ? st->c6_fw_seq : st->tc_ver_seq;
+        if (seq != s_set.ver_seq0[i]) {
+            s_set.ver_phase[i] = VER_OK;
+            s_set.ver_until[i] = now + VER_BANNER_MS;
+        } else if (now >= s_set.ver_until[i]) {
+            s_set.ver_phase[i] = VER_FAIL;
+            s_set.ver_until[i] = now + VER_BANNER_MS;
+        } else {
+            *col = UI_COL_WARN;
+            return "CHECKING...";
+        }
+    }
+    if (s_set.ver_phase[i] == VER_OK || s_set.ver_phase[i] == VER_FAIL) {
+        if (now >= s_set.ver_until[i]) {
+            s_set.ver_phase[i] = VER_IDLE;
+            return NULL;
+        }
+        bool ok = s_set.ver_phase[i] == VER_OK;
+        *col = ok ? UI_COL_ACCENT : UI_COL_CRIT;
+        return ok ? "UPDATED" : (i == 1 ? "NO REPLY" : "NO BEACON");
+    }
+    return NULL;
 }
 
 /* ---- build ---------------------------------------------------------------------------------------*/
@@ -1297,12 +1375,15 @@ void ui_pages_create_settings(lv_obj_t *root)
         lv_obj_set_style_text_color(s_set.ab_st[i], lv_color_hex(UI_COL_DIM), 0);
         lv_obj_set_style_text_letter_space(s_set.ab_st[i], 2, 0);
         lv_obj_align(s_set.ab_st[i], LV_ALIGN_BOTTOM_LEFT, 0, 0);
+        /* every node card is a tap-to-refresh-version button; the S3 card
+         * also still counts the 7-tap engineer unlock (inside node_tap_cb) */
         if (i == 0) {
-            /* 7 taps on the S3 version still unlock engineer mode */
             s_set.fw_val = s_set.ab_ver[0];
-            lv_obj_add_flag(n, LV_OBJ_FLAG_CLICKABLE);
-            lv_obj_add_event_cb(n, fw_tap_cb, LV_EVENT_CLICKED, NULL);
         }
+        lv_obj_add_flag(n, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_set_style_border_color(n, lv_color_hex(UI_COL_ACCENT), LV_STATE_PRESSED);
+        lv_obj_set_style_bg_color(n, lv_color_hex(UI_COL_SURFACE2), LV_STATE_PRESSED);
+        lv_obj_add_event_cb(n, node_tap_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
         if (i < 2) {
             /* live link between node i and i+1 */
             s_set.ab_wire[i] = lv_obj_create(ab);
@@ -1598,23 +1679,77 @@ static void radio_refresh(const scr_state_t *st)
     }
 }
 
+/* Normalise any firmware version text to "vX.Y.Z": skips a prefix such as
+ * "APPFW tc275_car v", drops a git-describe tail ("-31-gc7e7581-dirty").
+ * Missing minor/patch read as 0.  false (out = "--") when no number found. */
+static bool fmt_semver(const char *src, char *out, size_t cap)
+{
+    unsigned n[3] = { 0, 0, 0 };
+    int k = 0;
+    const char *p = NULL;
+    /* prefer a "v<digit>" token: "APPFW tc275_car v0.2.2" has digits in its
+     * name ("tc275") before the version */
+    for (const char *q = src; q && *q; q++) {
+        if ((*q == 'v' || *q == 'V') && q[1] >= '0' && q[1] <= '9') {
+            p = q + 1;
+            break;
+        }
+    }
+    if (p == NULL) {
+        p = src;
+        while (p && *p && (*p < '0' || *p > '9')) {
+            p++;
+        }
+    }
+    if (p == NULL || *p == '\0') {
+        snprintf(out, cap, "--");
+        return false;
+    }
+    while (k < 3 && *p >= '0' && *p <= '9') {
+        unsigned x = 0;
+        while (*p >= '0' && *p <= '9') {
+            x = x * 10u + (unsigned)(*p++ - '0');
+        }
+        n[k++] = x;
+        if (*p != '.') {
+            break;
+        }
+        p++;
+    }
+    snprintf(out, cap, "v%u.%u.%u", n[0], n[1], n[2]);
+    return true;
+}
+
 static void about_refresh(const scr_state_t *st)
 {
     const esp_app_desc_t *app = esp_app_get_description();
-    char v[48];
-    snprintf(v, sizeof(v), "v%s", app->version);
-    node_set(0, v, st->ctrl_role ? "ONLINE  CTRL" : "ONLINE", UI_COL_OK);
+    char v[24];
+    const char *ov;
+    uint32_t oc;
+    /* every node shows the same "vX.Y.Z" format */
+    fmt_semver(app->version, v, sizeof(v));
+    oc = UI_COL_OK;
+    ov = node_ver_status(0, st, &oc);
+    node_set(0, v, ov ? ov : (st->ctrl_role ? "ONLINE  CTRL" : "ONLINE"), oc);
     bool ws = st->conn == SCR_CONN_CONNECTED;
-    node_set(1, st->c6_fw[0] ? st->c6_fw : "--", ws ? "ONLINE" : "UNREACHABLE",
-             ws ? UI_COL_OK : UI_COL_CRIT);
+    oc = ws ? UI_COL_OK : UI_COL_CRIT;
+    ov = node_ver_status(1, st, &oc);
+    fmt_semver(st->c6_fw, v, sizeof(v));
+    node_set(1, v, ov ? ov : (ws ? "ONLINE" : "UNREACHABLE"), oc);
+    /* TC275: the version beacon string wins over the telemetry fw_ver word */
+    bool have_tcs = st->tc_app_ver[0] && fmt_semver(st->tc_app_ver, v, sizeof(v));
     if (st->tele_fresh) {
-        snprintf(v, sizeof(v), "v%u.%u.%u  hw%u", (unsigned)((st->tc_fw_ver >> 16) & 0xFF),
-                 (unsigned)((st->tc_fw_ver >> 8) & 0xFF), (unsigned)(st->tc_fw_ver & 0xFF),
-                 st->hw_rev);
-        node_set(2, v, st->fault_code ? "FAULT" : "ONLINE",
-                 st->fault_code ? UI_COL_CRIT : UI_COL_OK);
+        if (!have_tcs) {
+            snprintf(v, sizeof(v), "v%u.%u.%u", (unsigned)((st->tc_fw_ver >> 16) & 0xFF),
+                     (unsigned)((st->tc_fw_ver >> 8) & 0xFF), (unsigned)(st->tc_fw_ver & 0xFF));
+        }
+        oc = st->fault_code ? UI_COL_CRIT : UI_COL_OK;
+        ov = node_ver_status(2, st, &oc);
+        node_set(2, v, ov ? ov : (st->fault_code ? "FAULT" : "ONLINE"), oc);
     } else {
-        node_set(2, "--", st->tc_on ? "STALE" : "OFFLINE", st->tc_on ? UI_COL_WARN : UI_COL_DIM);
+        oc = st->tc_on ? UI_COL_WARN : UI_COL_DIM;
+        ov = node_ver_status(2, st, &oc);
+        node_set(2, have_tcs ? v : "--", ov ? ov : (st->tc_on ? "STALE" : "OFFLINE"), oc);
     }
     wire_set(0, ws, ws ? "LIVE" : "DOWN");
     wire_set(1, ws && st->tc_on, ws && st->tc_on ? "LIVE" : "DOWN");

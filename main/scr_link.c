@@ -45,6 +45,8 @@ typedef struct {
     volatile bool wifi_up;
     volatile bool got_ip;
     volatile bool pair_req;
+    volatile bool c6_ver_req;           /* UI asked: re-query C6 version (/api/health) */
+    volatile bool tc_ver_req;           /* UI asked: {"t":"tcver"} -> C6 -> SPI -> TC275 */
 
     proto_parser_t parser;
 
@@ -389,6 +391,51 @@ static void ws_restart(void)
     ws_start();
 }
 
+/* ---- C6 version query: GET /api/health -> {"up":true,"ver":"...",...} -----------------*/
+/* Existing C6 endpoint (esp32c6_car http_server.c), so no C6 change is needed.
+ * Runs in the monitor task; 1.5 s cap keeps the WS watchdog/ping path alive. */
+static void c6_ver_do(void)
+{
+    char url[64];
+    snprintf(url, sizeof(url), "http://%s/api/health", CONFIG_SCR_C6_IP);
+    esp_http_client_config_t cfg = {
+        .url = url,
+        .method = HTTP_METHOD_GET,
+        .timeout_ms = 1500,
+    };
+    esp_http_client_handle_t h = esp_http_client_init(&cfg);
+    if (h == NULL) {
+        return;
+    }
+    char body[256] = { 0 };
+    int body_len = 0;
+    esp_err_t err = esp_http_client_open(h, 0);
+    if (err == ESP_OK) {
+        esp_http_client_fetch_headers(h);
+        while (body_len < (int)sizeof(body) - 1) {
+            int r = esp_http_client_read(h, body + body_len, sizeof(body) - 1 - body_len);
+            if (r <= 0) {
+                break;
+            }
+            body_len += r;
+        }
+    }
+    int status = esp_http_client_get_status_code(h);
+    esp_http_client_close(h);
+    esp_http_client_cleanup(h);
+    if (err != ESP_OK || status != 200) {
+        ESP_LOGW(TAG, "C6 version query failed (err=%s status=%d)", esp_err_to_name(err), status);
+        return;
+    }
+    cJSON *root = cJSON_ParseWithLength(body, body_len);
+    const cJSON *ver = root ? cJSON_GetObjectItem(root, "ver") : NULL;
+    if (cJSON_IsString(ver)) {
+        app_state_set_c6_fw(ver->valuestring);
+        ESP_LOGI(TAG, "C6 version refreshed: %s", ver->valuestring);
+    }
+    cJSON_Delete(root);
+}
+
 /* ---- pairing (doc esp32c6_car 06) ------------------------------------------------------*/
 static void pair_do(void)
 {
@@ -540,6 +587,20 @@ static void link_monitor_task(void *arg)
             pair_do();
         }
 
+        if (s_link.c6_ver_req) {
+            s_link.c6_ver_req = false;
+            c6_ver_do();
+        }
+
+        if (s_link.tc_ver_req) {
+            s_link.tc_ver_req = false;
+            /* C6 relays it to the TC275 as SPI DIAG 0x53/0x24; the answer comes
+             * back as the normal {"t":"tcver"} beacon (ws_handle_text) */
+            if (!scr_link_send_text("{\"t\":\"tcver\"}")) {
+                ESP_LOGW(TAG, "tcver request not sent");
+            }
+        }
+
         if (now - last_1hz >= 1000) {
             last_1hz = now;
             housekeeping_1hz();
@@ -641,6 +702,16 @@ uint8_t scr_link_next_seq(void)
 void scr_link_request_pair(void)
 {
     s_link.pair_req = true;
+}
+
+void scr_link_request_c6_ver(void)
+{
+    s_link.c6_ver_req = true;
+}
+
+void scr_link_request_tc_ver(void)
+{
+    s_link.tc_ver_req = true;
 }
 
 void scr_link_apply_wifi(void)

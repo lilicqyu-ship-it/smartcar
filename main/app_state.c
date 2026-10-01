@@ -181,7 +181,10 @@ void app_state_set_quality(scr_qual_t q)
 void app_state_set_c6_fw(const char *fw)
 {
     xSemaphoreTake(s_mtx, portMAX_DELAY);
-    snprintf(s_state.c6_fw, sizeof(s_state.c6_fw), "%s", fw ? fw : "-");
+    /* C6 reports bare SemVer ("0.1.3"); show it as "v0.1.3" like the S3 */
+    bool bare = fw && fw[0] >= '0' && fw[0] <= '9';
+    snprintf(s_state.c6_fw, sizeof(s_state.c6_fw), "%s%s", bare ? "v" : "", fw ? fw : "-");
+    s_state.c6_fw_seq++;
     xSemaphoreGive(s_mtx);
 }
 
@@ -190,6 +193,7 @@ void app_state_set_tc_ver(const char *app, const char *sbl)
     xSemaphoreTake(s_mtx, portMAX_DELAY);
     snprintf(s_state.tc_app_ver, sizeof(s_state.tc_app_ver), "%s", app ? app : "");
     snprintf(s_state.tc_sbl_ver, sizeof(s_state.tc_sbl_ver), "%s", sbl ? sbl : "");
+    s_state.tc_ver_seq++;
     xSemaphoreGive(s_mtx);
 }
 

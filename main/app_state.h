@@ -128,6 +128,8 @@ typedef struct {
     char         c6_fw[SCR_FW_STR_MAX];
     char         tc_app_ver[32];    /* "APPFW tc275_car vX.Y.Z" from {"t":"tcver"} */
     char         tc_sbl_ver[32];    /* "SBLFW tc275_sbl vX.Y.Z", "" = SBL absent   */
+    uint32_t     c6_fw_seq;         /* +1 on every C6 version report (hello / health) */
+    uint32_t     tc_ver_seq;        /* +1 on every {"t":"tcver"} beacon              */
     uint16_t     link_rtt_ms;       /* C6<->TC275 link RTT, from telemetry   */
     uint8_t      link_err_rate;     /* C6<->TC275 error rate, 0.1 % units    */
     char         pair_status[64];   /* pairing page feedback                 */
