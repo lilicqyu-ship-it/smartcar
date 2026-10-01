@@ -3,7 +3,7 @@
  *
  * A single struct, loaded at boot, written back on change.  The Wi-Fi
  * credentials and the session token bridge the S3 to the C6 softAP the same
- * way the phone web page does (c6_car doc 05/06).
+ * way the phone web page does (esp32c6_car doc 05/06).
  */
 #ifndef SCR_SETTINGS_H
 #define SCR_SETTINGS_H

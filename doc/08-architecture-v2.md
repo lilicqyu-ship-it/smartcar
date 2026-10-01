@@ -1,7 +1,7 @@
 # 08 · 架构 v2：双核规划、固件分区、升级 / 标定 / 诊断
 
 > 状态：已实施（2026-09-30）。本文是实现的依据；代码与本文不一致时以本文为准修正代码。
-> 接口事实来自 c6_car：`doc/07-http.md`、`doc/08-bridge.md`、`doc/09-ota.md`、`doc/17-calib-ui.md`、
+> 接口事实来自 esp32c6_car：`doc/07-http.md`、`doc/08-bridge.md`、`doc/09-ota.md`、`doc/17-calib-ui.md`、
 > `components/c6_http/http_server.c`、`components/c6_bridge/bridge.c`。
 
 ## 1. 目标与约束
@@ -39,7 +39,7 @@
 |---|---|---|
 | 摇杆 → 发送 | 仅 30 Hz 定时，最坏等 33 ms | 摇杆值变化即 `scr_ctrl_kick()` 唤醒 ctrl，立即发送（≥20 ms 合并，≤50 帧/s）；定时 30 Hz 仍作心跳 |
 | S3 TCP | Nagle 开：每帧等上一帧 ACK，C6 端 lwIP 延迟 ACK → 100–200 ms | WS 连上即对到 C6 的套接字设 `TCP_NODELAY`（浏览器默认即如此） |
-| C6 TCP | Nagle 开：遥测 / pong 回程同样被攒包 | c6_car `ws_tighten_send_timeout()` 同时设 `TCP_NODELAY` |
+| C6 TCP | Nagle 开：遥测 / pong 回程同样被攒包 | esp32c6_car `ws_tighten_send_timeout()` 同时设 `TCP_NODELAY` |
 | WS 发送锁 / 写超时 | 0 超时，冲突即丢帧 | 150 ms：该超时同时用于 socket 写，写不完客户端会**直接断开连接**；5 ms 短于一次 Wi-Fi 重传，实测每几分钟一次 RADIO LOST。发送前再用零等待 `select()` 判可写，不可写就跳过本帧（下一帧 ≤33 ms 带新值） |
 | 事件驱动上限 | — | ≥20 ms 合并（≤50 帧/s），避免空口拥塞 |
 
@@ -124,7 +124,7 @@ LVGL 堆改为 **PSRAM 优先**（`main/lv_mem_psram.c`，`LV_USE_CUSTOM_MALLOC`
 | `crc_err` / `fmt_err` 2 s 内增长 | 警告 | SPI 链路误码增长 |
 | `heap_min` < 64 KB | 警告 | C6 内存余量低 |
 | 遥测失效 | 严重 | TC275 无遥测 |
-| `fault_code` ≠ 0 | 严重 | TC275 故障码 0x…（码表在 myCar 仓库） |
+| `fault_code` ≠ 0 | 严重 | TC275 故障码 0x…（码表在 tc275_car 仓库） |
 | 电池 ≤ 低阈值 | 警告 | 电池电量低 |
 | 目标 / 实测速度偏差持续 > 200 mm/s | 警告 | 左 / 右侧速度跟踪偏差大（检查电机 / 编码器，可去标定页） |
 | 无条目 | 正常 | ALL SYSTEMS NOMINAL |

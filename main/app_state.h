@@ -29,7 +29,7 @@ extern "C" {
 #define SCR_ALERT_MSG_MAX    64
 #define SCR_FW_STR_MAX       16
 
-/* full-deflection constants, mirrors the phone control page (c6_car app.js) */
+/* full-deflection constants, mirrors the phone control page (esp32c6_car app.js) */
 #define SCR_DRIVE_V_MAX      600    /* mm/s at full joystick deflection  */
 #define SCR_DRIVE_W_MAX      300    /* deg/s at full joystick deflection */
 

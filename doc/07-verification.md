@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | 代码位置 | `test/host/`（G1 主机自测）+ 本文档集 |
-| 上游需求 | spec §111（AI 验收清单）、§112（完成标准：可理解/可操作/防误触/异常可懂/持续流畅）；方法学对齐 [c6_car doc/13-verification](../../esp32c6_car/doc/13-verification.md) 的 G1-G4 门 |
+| 上游需求 | spec §111（AI 验收清单）、§112（完成标准：可理解/可操作/防误触/异常可懂/持续流畅）；方法学对齐 [esp32c6_car doc/13-verification](../../esp32c6_car/doc/13-verification.md) 的 G1-G4 门 |
 | 状态 | 🟡 **G1/G2/G3 绿；G4 首轮真机完成（§5.0），HIL 联调项进行中** |
 
 ## 1. 门定义
@@ -19,13 +19,13 @@
 
 | 用例 | 结果 |
 |---|---|
-| CRC16-CCITT-FALSE check 值 `0x29B1`（与 c6_car 主机单测同源断言） | ✅ |
+| CRC16-CCITT-FALSE check 值 `0x29B1`（与 esp32c6_car 主机单测同源断言） | ✅ |
 | CRC NULL 防护 | ✅ |
 | DRIVE 帧构建 → 逐字节解析回环（v=600/w=300/seq 保序/极性/帧长 12） | ✅ |
 | 遥测 38 B 编解码回环（u32/u16/负值 i16/u8/u32 全字段） | ✅ |
 | 垃圾字节流后再同步到有效帧 | ✅ |
 
-proto 源文件与 c6_car **逐字节同源**，其 10⁷ 模糊测试结论直接继承。
+proto 源文件与 esp32c6_car **逐字节同源**，其 10⁷ 模糊测试结论直接继承。
 
 ## 3. G2：编译级验证（已完成）
 
@@ -97,7 +97,7 @@ proto 源文件与 c6_car **逐字节同源**，其 10⁷ 模糊测试结论直�
 3. 显示：bounce-buffer 模式无花屏/漂移 ✅（bounce 高度 20；抖动由 R-5 修复，待用户视觉复核）
 4. ~~LVGL 任务栈水位~~ 栈已提升 9216（BSP cfg），真机 UI 全页面创建稳定
 
-### 5.2 与 c6_car 联调（C6 台架：`SD-DEV000`/`sddev123456`）
+### 5.2 与 esp32c6_car 联调（C6 台架：`SD-DEV000`/`sddev123456`）
 
 1. STA 入网 + WS 建立 + `hello` 角色判定（无 token = NO CONTROL；
    `CONFIG_C6_BENCH_CTRL=y` 时全角色 CTRL，注意口径）。

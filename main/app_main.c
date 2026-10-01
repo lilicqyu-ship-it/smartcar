@@ -1,5 +1,5 @@
 /*
- * app_main.c - boot orchestration / composition root (mirrors c6_car main).
+ * app_main.c - boot orchestration / composition root (mirrors esp32c6_car main).
  *
  * Order (spec 81: fast to Ready, spec 6: P0 boot page):
  *   NVS -> state/settings -> LCD+touch (BSP) -> UI (P0 boot page)

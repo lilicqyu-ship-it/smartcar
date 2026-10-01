@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | 代码位置 | `main/proto/proto_frames.h/.c`（**逐字节拷贝自** `esp32c6_car/components/c6_proto/`，未改动） |
-| 上游需求 | [c6_car doc/02-proto.md](../../esp32c6_car/doc/02-proto.md)（唯一权威规格）/ spec §95.5（确认现有 C6 协议）、§97（不得重写 C6） |
+| 上游需求 | [esp32c6_car doc/02-proto.md](../../esp32c6_car/doc/02-proto.md)（唯一权威规格）/ spec §95.5（确认现有 C6 协议）、§97（不得重写 C6） |
 | 状态 | ✅ **100%** — 主机自检通过（CRC check 值 + 帧回环） |
 
 ## 1. 复用策略（决策）
@@ -11,9 +11,9 @@
 手机 Web 页、S3 遥控器与 C6 使用**同一套 WS 段协议**；c6_proto 的硬规则
 （纯 C99、无 OS/IDF 头、无动态内存、显式小端）使该文件可以原样进 S3 工程。
 S3 侧**不改一字**，消除"两端各写一份编码器"的漂移风险；后续协议演进直接
-从 c6_car 重新拷贝。
+从 esp32c6_car 重新拷贝。
 
-## 2. 帧格式（口径同 c6_car doc 02 §2）
+## 2. 帧格式（口径同 esp32c6_car doc 02 §2）
 
 ```
 | AA | 55 | VER=0x02 | CMD | SEQ | LEN | DATA[LEN] | CRC16 |
@@ -47,7 +47,7 @@ check("123456789") == 0x29B1；帧长上限 72 B
 `seq` 用于 S3 侧丢包估计（见 [04](04-link.md) §5）；`link_rtt_ms/link_err_rate`
 是 C6↔TC275 的链路质量，S3 原样展示于 Radio/Diagnostics 页（spec §58）。
 
-## 4. 主机自检（test/host，对齐 c6_car 主机单测思路）
+## 4. 主机自检（test/host，对齐 esp32c6_car 主机单测思路）
 
 ```
 cd test/host && make        # G1 门，无需目标机
@@ -59,15 +59,15 @@ cd test/host && make        # G1 门，无需目标机
 PASS: all cases
 ```
 
-覆盖：CRC check 值（c6_car G1 门同源断言）+ BUILD→PARSE 回环 + 遥测编解码
-回环（含负速度）+ 垃圾字节再同步。完整 10⁷ 模糊测试已在 c6_car 侧完成，
+覆盖：CRC check 值（esp32c6_car G1 门同源断言）+ BUILD→PARSE 回环 + 遥测编解码
+回环（含负速度）+ 垃圾字节再同步。完整 10⁷ 模糊测试已在 esp32c6_car 侧完成，
 本文件逐字节同源，无需重复。
 
 ## 5. 完成状态表
 
 | # | 功能 | 状态 | 证据 / 缺口 |
 |---|---|---|---|
-| P-1 | 文件同源拷贝（不改动） | ✅ | `cp` 自 c6_car，`diff` 可校验 |
+| P-1 | 文件同源拷贝（不改动） | ✅ | `cp` 自 esp32c6_car，`diff` 可校验 |
 | P-2 | S3 自检脚本级验证 | ✅ | CRC 0x29B1 + 帧回环（本机 cc） |
 | P-3 | 与 C6 真机互通 | 🟩 | 待联调（WS 帧流） |
-| P-4 | 协议演进同步机制 | 🟡 | 现为人工拷贝；建议后续以 CI 比对两仓文件哈希（c6_car 对 TC275 已有此约定） |
+| P-4 | 协议演进同步机制 | 🟡 | 现为人工拷贝；建议后续以 CI 比对两仓文件哈希（esp32c6_car 对 TC275 已有此约定） |

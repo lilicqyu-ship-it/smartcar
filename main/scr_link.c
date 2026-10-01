@@ -1,7 +1,7 @@
 /*
  * scr_link.c - Wi-Fi STA -> C6 softAP -> WebSocket -> proto v2
  *
- * Protocol mirror of c6_car (all documented in the c6_car/doc set):
+ * Protocol mirror of esp32c6_car (all documented in the esp32c6_car/doc set):
  *   frame : AA 55 VER=02 CMD SEQ LEN DATA[<=64] CRC16-CCITT-FALSE
  *   drive : 0x50 {i16 v mm/s, i16 omega deg/s}, doubles as TC275 heartbeat
  *   tele  : 0x41 38 B LE payload, broadcast to every WS session
@@ -367,7 +367,7 @@ static void ws_restart(void)
     ws_start();
 }
 
-/* ---- pairing (doc c6_car 06) ------------------------------------------------------*/
+/* ---- pairing (doc esp32c6_car 06) ------------------------------------------------------*/
 static void pair_do(void)
 {
     app_state_set_pair_status("Requesting pair window...");
@@ -426,7 +426,7 @@ static void pair_do(void)
     }
     cJSON_Delete(root);
 
-    /* failure paths documented in c6_car doc 06 section 3: tell the user what
+    /* failure paths documented in esp32c6_car doc 06 section 3: tell the user what
      * to do next instead of a bare error (spec 41) */
     const char *hint;
     switch (status) {

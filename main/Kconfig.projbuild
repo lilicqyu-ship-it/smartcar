@@ -13,7 +13,7 @@ menu "smartcar_remote"
         string "C6 softAP SSID (default until NVS holds one)"
         default "SD-DEV000"
         help
-            Bench default from c6_car CONFIG_C6_FACTORY_DEV_OVERRIDE.
+            Bench default from esp32c6_car CONFIG_C6_FACTORY_DEV_OVERRIDE.
             Production remotes pair with the real SSID printed on the car.
 
     config SCR_AP_PASS

@@ -2,7 +2,7 @@
  * scr_link.h - S3 <-> C6 link: Wi-Fi STA + WebSocket + proto v2 (spec 95-97)
  *
  * The remote is a Wi-Fi station on the C6 softAP and speaks exactly the same
- * WebSocket protocol as the phone control page of c6_car (doc 02/05/06/07):
+ * WebSocket protocol as the phone control page of esp32c6_car (doc 02/05/06/07):
  *   - binary frames: proto v2, DRIVE 0x50 at 30 Hz doubles as heartbeat
  *   - telemetry 0x41 broadcast to every session
  *   - text control plane JSON: hello / tc / pong / err

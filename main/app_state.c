@@ -24,7 +24,7 @@ static SemaphoreHandle_t s_mtx;
 static SemaphoreHandle_t s_log_mtx;
 static scr_state_t s_state;
 
-/* telemetry EMA bookkeeping (mirrors c6_car assets app.js speedometer) */
+/* telemetry EMA bookkeeping (mirrors esp32c6_car assets app.js speedometer) */
 static int64_t s_last_tele_ms;
 static bool    s_tele_seeded;
 

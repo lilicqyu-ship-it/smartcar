@@ -23,9 +23,9 @@
 | 文档 | 模块 | 代码位置 | 需求追溯 | 完成度 | 验证状态 |
 |---|---|---|---|---|---|
 | [01](01-app-state.md) | 组合根与 UI 状态中心 | `main/app_main.c` `main/app_state.c/.h` | spec §59/§83/§95.8-9/§98-101 | 🟩 代码完成 | ✅ 编译级；EMA/状态推导经走查 |
-| [02](02-proto.md) | proto v2 编解码（复用） | `main/proto/proto_frames.[ch]` | c6_car doc 02 / spec §95.5 | ✅ 100% | ✅ 主机自检（CRC 0x29B1 + 帧回环） |
+| [02](02-proto.md) | proto v2 编解码（复用） | `main/proto/proto_frames.[ch]` | esp32c6_car doc 02 / spec §95.5 | ✅ 100% | ✅ 主机自检（CRC 0x29B1 + 帧回环） |
 | [03](03-settings.md) | 用户设置（NVS） | `main/scr_settings.c/.h` | spec §31-33/§35/§15 | 🟩 代码完成 | ✅ 编译级；NVS 持久化待真机 |
-| [04](04-link.md) | 无线链路（Wi-Fi/WS） | `main/scr_link.c/.h` | c6_car doc 05/06/07 / spec §95.5-7 | 🟩 代码完成 | 🟩 编译级；与 C6 真机联调未开始 |
+| [04](04-link.md) | 无线链路（Wi-Fi/WS） | `main/scr_link.c/.h` | esp32c6_car doc 05/06/07 / spec §95.5-7 | 🟩 代码完成 | 🟩 编译级；与 C6 真机联调未开始 |
 | [05](05-ctrl.md) | 控制与安全 | `main/scr_ctrl.c/.h` | spec §18-22/§59/§102-105 | 🟩 代码完成 | 🟩 编译级；STOP/急停语义待 HIL |
 | [06](06-ui.md) | LCD UI（LVGL 9） | `main/ui/` | spec §4-§71（UI 全节） | 🟩 代码完成 | 🟩 编译级；触摸/显示待真机 |
 | [07](07-verification.md) | 验证与测试汇总 | `test/host/` + 真机日志 | spec §111 验收清单 | 🟡 G1-G3 绿，G4 首轮真机 ✅ | 真机排错 R1-R5 见 07 §5.0；HIL 联调进行中 |

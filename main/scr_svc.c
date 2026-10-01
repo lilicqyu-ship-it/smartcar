@@ -1,7 +1,7 @@
 /*
  * scr_svc.c - core-0 service task: firmware staging + OTA upload, C6
  * /api/diag polling, TC275 calibration commands / events.
- * Design: doc/08-architecture-v2.md.  Interface facts: c6_car doc 07/08/09/17.
+ * Design: doc/08-architecture-v2.md.  Interface facts: esp32c6_car doc 07/08/09/17.
  */
 #include <string.h>
 #include <stdio.h>

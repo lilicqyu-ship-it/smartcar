@@ -3,7 +3,7 @@
 | 项 | 内容 |
 |---|---|
 | 代码位置 | `main/scr_link.c/.h` |
-| 上游需求 | [c6_car doc/05-net](../../esp32c6_car/doc/05-net.md)（AP 口径）、[doc/06-pair](../../esp32c6_car/doc/06-pair.md)（配对时序）、[doc/07-http](../../esp32c6_car/doc/07-http.md)（WS 会话/角色/闸门）、spec §95.5-7（确认协议/Telemetry/不伪造）、§103（控制权丢失） |
+| 上游需求 | [esp32c6_car doc/05-net](../../esp32c6_car/doc/05-net.md)（AP 口径）、[doc/06-pair](../../esp32c6_car/doc/06-pair.md)（配对时序）、[doc/07-http](../../esp32c6_car/doc/07-http.md)（WS 会话/角色/闸门）、spec §95.5-7（确认协议/Telemetry/不伪造）、§103（控制权丢失） |
 | 状态 | 🟩 **代码完成** — 与 C6 真机联调未开始 |
 
 ## 1. 职责
@@ -44,7 +44,7 @@ WS 客户端自任务收发（managed `esp_websocket_client`，auto-reconnect 3 
 角色映射：`hello role=ctrl` → `owner=S3 MASTER`；`spec` → `owner=NO CONTROL`
 （C6 不告知对端角色，WEB MASTER 不伪造，见 [01](01-app-state.md) S-8）。
 
-## 4. 配对（对齐 c6_car doc 06 §3 时序）
+## 4. 配对（对齐 esp32c6_car doc 06 §3 时序）
 
 ```
 UI [PAIR] → scr_link_request_pair()（仅置位）
@@ -84,7 +84,7 @@ void  scr_link_apply_wifi(void);
 ```
 
 SEQ 单点发放：ctrl 任务与 link 的初始帧共享同一计数器，保证会话内
-`seq ≠ last_seq` 闸门（c6_car doc 07 §4）永远通过。
+`seq ≠ last_seq` 闸门（esp32c6_car doc 07 §4）永远通过。
 
 ## 7. 资源
 

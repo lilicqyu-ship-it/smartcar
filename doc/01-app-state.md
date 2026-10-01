@@ -8,7 +8,7 @@
 
 ## 1. 职责
 
-1. **组合根**：启动编排唯一接线点（星型依赖，对齐 c6_car `app_main` 模式）。
+1. **组合根**：启动编排唯一接线点（星型依赖，对齐 esp32c6_car `app_main` 模式）。
 2. **UI State**：全系统唯一状态中心；所有页面读同一份快照，禁止各页面私有
    副本（spec §100）。
 3. **事件历史**：32 条环形日志，供 Event Log 页与串口镜像（spec §83）。
@@ -134,7 +134,7 @@ app_alert_raise(id, lvl, title, fmt, ...) / app_alert_clear(id) / app_alert_ack(
 | S-4 | 事件环形日志 | ✅ | 32 条，newest-first；串口镜像 |
 | S-5 | 告警 raise/clear/ack（多槽位仲裁） | ✅ | 同 id 重入刷新文本；槽满丢弃新告警并保持旧告警 |
 | S-6 | 启动编排 + P0 四格 | ✅ | `app_main`；无线不阻塞 |
-| S-7 | 堆/PSRAM 水位守护 | 🟡 | 只在 Diagnostics 页展示；**无周期守护与告警**（对标 c6_car 10 s 堆守护，列入二阶段） |
+| S-7 | 堆/PSRAM 水位守护 | 🟡 | 只在 Diagnostics 页展示；**无周期守护与告警**（对标 esp32c6_car 10 s 堆守护，列入二阶段） |
 | S-8 | WEB MASTER 精确显示 | ⚪ | C6 hello 不告知对端角色，故显示 NO CONTROL（spec §103 允许两者取一） |
 | S-9 | `note_rx` 50 Hz 空转移除 | ✅ | WS 新鲜度本就在 scr_link 内计时，删除多余互斥路径 |
 

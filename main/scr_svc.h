@@ -83,7 +83,7 @@ typedef struct {
     int      imu;           /* -1 absent, 0 error, 1 ok               */
 } svc_c6diag_t;
 
-/* ---- calibration (TC275 DPT via C6, doc c6_car 17) ---------------------------*/
+/* ---- calibration (TC275 DPT via C6, doc esp32c6_car 17) ---------------------------*/
 typedef struct {
     bool     have_cal;      /* a {"t":"cal"} arrived since last start  */
     uint8_t  status;        /* 0 done, 1 estop-abort, 2 busy           */

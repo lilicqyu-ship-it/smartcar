@@ -705,7 +705,7 @@ void ui_service_fdiag_refresh(const scr_state_t *st)
     }
     if (st->tele_fresh) {
         if (st->fault_code) {
-            add_find(&f, 2, "TC275 fault 0x%04X\nSee myCar fault table", st->fault_code);
+            add_find(&f, 2, "TC275 fault 0x%04X\nSee tc275_car fault table", st->fault_code);
         }
         if (st->batt_pct && st->batt_pct <= CONFIG_SCR_BATT_LOW_PCT) {
             add_find(&f, st->batt_pct <= CONFIG_SCR_BATT_CRIT_PCT ? 2 : 1,

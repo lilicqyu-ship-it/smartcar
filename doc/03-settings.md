@@ -24,7 +24,7 @@ typedef struct {
 ```
 
 - 默认值：SSID/密码来自 Kconfig（台架 `SD-DEV000` / `sddev123456`，与
-  c6_car `CONFIG_C6_FACTORY_DEV_OVERRIDE` 口径一致）；模式 NORMAL；死区 8 %
+  esp32c6_car `CONFIG_C6_FACTORY_DEV_OVERRIDE` 口径一致）；模式 NORMAL；死区 8 %
   （spec §15：默认值由实驾测试最终确定）。
 - `update()` 整体写回（5 键 + commit），失败仅告警不回滚内存值。
 

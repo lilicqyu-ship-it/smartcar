@@ -11,7 +11,7 @@ payload to the C6 (/ota/c6 or /ota/tc275).
 
 Usage (ESP-IDF environment active, S3 on its UART bridge):
   tools/stage_fw.py --target c6    --image c6_bundle.bin --version 0.1.3 --port /dev/cu.usbserial-1130
-  tools/stage_fw.py --target tc275 --image mycar.bin     --version 1.4.0 --port /dev/cu.usbserial-1130
+  tools/stage_fw.py --target tc275 --image tc275_car.bin     --version 1.4.0 --port /dev/cu.usbserial-1130
   tools/stage_fw.py --target c6 --clear --port ...        # erase the header (region shows EMPTY)
   tools/stage_fw.py --target c6 --image x.bin --out hdr.bin   # only build the file, no flashing
 """

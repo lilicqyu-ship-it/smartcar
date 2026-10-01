@@ -3,7 +3,7 @@
 #   make        # 编译并运行
 #   make check  # 同上，带通过断言
 #
-# 对齐 c6_car test/host 的角色：协议编解码是纯 C99，同一份源文件
+# 对齐 esp32c6_car test/host 的角色：协议编解码是纯 C99，同一份源文件
 # （main/proto/proto_frames.[ch]，与 esp32c6_car 逐字节同源）直接在主机编译。
 
 CC      ?= cc

@@ -8,7 +8,7 @@
 
 ```
 ESP32-S3 (本项目)  ──Wi-Fi STA→ C6 softAP ──WebSocket /ws── proto v2
-                    (ui/controller/safety)   (c6_car, 不做任何修改)
+                    (ui/controller/safety)   (esp32c6_car, 不做任何修改)
 C6  ──SPI/SF帧──  TC275  ──  车辆
 手机 Web           备用控制 / 监视 / OTA / 维护
 ```
@@ -19,7 +19,7 @@ C6  ──SPI/SF帧──  TC275  ──  车辆
 
 ```
 main/            组合根 app_main + app_state（UI State 单一事实源）
-  proto/         proto v2 编解码（逐字节复用 c6_car/c6_proto）
+  proto/         proto v2 编解码（逐字节复用 esp32c6_car/c6_proto）
   scr_settings   NVS 设置（SSID/token/模式/死区）
   scr_link       Wi-Fi STA → C6 softAP → WebSocket → proto v2 + 配对 + 看门狗
   scr_ctrl       30 Hz DRIVE + STOP/急停 + 失联自动停 + 模式限幅
@@ -46,12 +46,12 @@ idf.py build
 idf.py -p PORT flash monitor
 ```
 
-## 链路与协议(与 c6_car 手机控制页同构,spec 95-97)
+## 链路与协议(与 esp32c6_car 手机控制页同构,spec 95-97)
 
 - Wi-Fi STA 连 C6 softAP(台架默认 `SD-DEV000` / `sddev123456`,NVS 可改)。
 - WebSocket `ws://192.168.4.1/ws?token=...`;二进制 = proto v2 帧
   (`AA 55 02 CMD SEQ LEN DATA CRC16-CCITT-FALSE`),编解码源文件
-  **原样复用** `c6_car/components/c6_proto/proto_frames.[ch]`(字节级一致)。
+  **原样复用** `esp32c6_car/components/c6_proto/proto_frames.[ch]`(字节级一致)。
 - `DRIVE 0x50 {i16 v mm/s, i16 ω deg/s}` @30 Hz,兼作 TC275 心跳;
   满行程 v=600 / ω=300,与手机页 app.js 相同。
 - `TELEMETRY 0x41`(38 B LE)50 Hz 广播:速度/电池/里程/故障/链路 RTT。
@@ -71,7 +71,7 @@ main/
                     收发/丢包统计 + 静默看门狗(10 s 重连,对齐手机页)
   scr_ctrl.[ch]     控制任务 30 Hz: 摇杆→DRIVE、STOP 锁存、急停 0x32、
                     失联自动停 + 全屏告警(spec 102)、故障/低电告警、模式限幅
-  proto/            proto v2 编解码(c6_car 原文件)
+  proto/            proto v2 编解码(esp32c6_car 原文件)
   ui/
     ui.[ch]         页面管理 10 Hz 刷新 + P0 开机页 + Toast
     ui_theme.[ch]   深色主题色板/字体层级(spec 51-54)
@@ -100,7 +100,7 @@ cd test/host
 make
 ```
 
-覆盖：CRC check 值 0x29B1（与 c6_car 主机单测同源断言）、DRIVE 帧编解码回环、遥测 38 B 编解码回环、垃圾字节再同步。
+覆盖：CRC check 值 0x29B1（与 esp32c6_car 主机单测同源断言）、DRIVE 帧编解码回环、遥测 38 B 编解码回环、垃圾字节再同步。
 
 ## CI（编译门控 + 固件大小/资源余量）
 

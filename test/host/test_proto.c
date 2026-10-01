@@ -1,7 +1,7 @@
 /*
  * test_proto.c - host selftest for the vendored proto v2 codec.
  *
- * Scope mirrors the c6_car host suite's most load-bearing assertions; the
+ * Scope mirrors the esp32c6_car host suite's most load-bearing assertions; the
  * codec itself is byte-identical to esp32c6_car/components/c6_proto (which
  * carries the 10^7 fuzz and randomized-frame suites), so only the CRC check
  * value and a frame roundtrip are re-asserted here to catch accidental
@@ -26,7 +26,7 @@ static int failures;
 
 static void test_crc_check_value(void)
 {
-    /* CRC16-CCITT-FALSE catalogue value (c6_car G1 gate assertion) */
+    /* CRC16-CCITT-FALSE catalogue value (esp32c6_car G1 gate assertion) */
     uint16_t c = proto_crc16((const uint8_t *)"123456789", 9);
     CHECK(c == 0x29B1, "crc16 check value 0x29B1");
     CHECK(proto_crc16(NULL, 8) == 0, "crc16 NULL guard");
