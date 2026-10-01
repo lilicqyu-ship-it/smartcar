@@ -85,7 +85,10 @@ tc275_car/
 
 - 启动横幅经 ASCLIN0 打印（`APPFW tc275_car vX.Y.Z`）；
 - SCons（命令行构建）产物名自动带版本：`build/tasking-debug/tc275_car_v0.2.2.elf/.hex/.map`；
-- 产物内可检索：`strings tc275_car_v0.2.2.elf | grep APPFW`。
+- 产物内可检索：`strings tc275_car_v0.2.2.elf | grep APPFW`；
+- **读取 SBL 版本**：`sbl_version_string()`（mw/app_version.[ch]）从固定地址
+  `SBL_VERSION_ADDR`（0x80007E00，tc275_sbl 的 Lcf_SBL.lsl 定址）直读 SBL 版本串，
+  magic "SBLFW" 校验，SBL 未烧时返回 NULL；启动横幅经 ASCLIN0 一并打印。
 
 ## 硬件清单
 

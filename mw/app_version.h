@@ -21,4 +21,15 @@ extern const char g_app_version[];
 
 const char *app_version_string(void);
 
+/*
+ * SBL 版本读取：tc275_sbl 的 Lcf_SBL.lsl 把 .sbl_version 组（magic
+ * "SBLFW" 的 const 版本串）定死在 0x80007E00 —— sblfls0 32KB 区尾部，
+ * SBL 代码自低向高生长，尾部定址块永不挪位。运行时从该地址直读即可。
+ */
+#define SBL_VERSION_ADDR 0x80007E00u
+
+/* 返回 SBL 版本串（"SBLFW tc275_sbl vX.Y.Z"）；SBL 未烧/老 SBL（magic
+ * 不符）时返回 NULL。 */
+const char *sbl_version_string(void);
+
 #endif

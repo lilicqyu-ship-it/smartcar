@@ -181,6 +181,8 @@ void core0_main(void)
      * scheduler-free init phase is done. */
     UART_println("UART initialized");
     UART_println(g_app_version);   /* "APPFW tc275_car vX.Y.Z" (mw/app_version.h) */
+    if (sbl_version_string())
+        UART_println(sbl_version_string());   /* "SBLFW tc275_sbl vX.Y.Z" @0x80007E00 */
 
 
     /* Configure LED1 as push-pull output */
