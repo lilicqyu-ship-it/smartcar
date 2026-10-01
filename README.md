@@ -1,6 +1,6 @@
 # smartcar_remote — SMART CAR REMOTE (ESP32-S3-LCD-EV-Board-2)
 
-[![CI](https://github.com/lilicqyu-ship-it/smartcar_remote/actions/workflows/ci.yml/badge.svg)](https://github.com/lilicqyu-ship-it/smartcar_remote/actions/workflows/ci.yml)
+[![CI](https://github.com/lilicqyu-ship-it/smartcar_remote/actions/workflows/ci.yml/badge.svg)](https://github.com/lilicqyu-ship-it/smartcar_remote/actions/workflows/ci.yml) [![version](https://img.shields.io/github/v/tag/lilicqyu-ship-it/smartcar_remote?label=version&sort=semver)](https://github.com/lilicqyu-ship-it/smartcar_remote/tags)
 
 远距离智能遥控器(主驾驶终端)固件。对标需求规格书
 [doc/ESP32-S3-LCD-EV-Board v1.5 远距离智能遥控器——LCD UI-UX 产品级需求规格书](doc/ESP32-S3-LCD-EV-Board%20v1.5%20远距离智能遥控器——LCD%20UI-UX%20产品级需求规格书.md),
