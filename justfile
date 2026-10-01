@@ -75,14 +75,15 @@ fw-clean:
 # 各工程根目录的 SConstruct 直接解析 .cproject（include/宏/源码排除），
 # 不依赖 ADS 生成文件；需本机装完整版 TASKING TriCore v6.3r1 + pip install scons。
 # 产物在 <工程>/build/tasking-debug/（elf/hex/map），配置与 ADS Debug 完全同源。
+# 并行度默认 -j8（SConstruct 内置），命令行 -j 可覆盖。
 
 # SCons 编译 tc275_car（余参透传: cfg=release / opt=-O2 / size / -c）
 scons-car *args:
-    cd tc275_car && {{py}} -m SCons -j8 {{args}}
+    cd tc275_car && {{py}} -m SCons {{args}}
 
 # SCons 编译 tc275_sbl（余参透传: cfg=release / opt=-O2 / size / -c）
 scons-sbl *args:
-    cd tc275_sbl && {{py}} -m SCons -j8 {{args}}
+    cd tc275_sbl && {{py}} -m SCons {{args}}
 
 # 检查本机开发环境（git/just/gh/bash 版本、换行与长路径配置）
 doctor:

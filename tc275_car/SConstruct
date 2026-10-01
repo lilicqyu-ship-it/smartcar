@@ -10,7 +10,7 @@
 #   scons opt=-O2         # 覆盖优化级别（默认 -O0，与 IDE 一致）
 #   scons size            # 只跑 elfsize 查看体积
 #   scons -c              # 清理 build/
-#   scons -j8             # 并行编译
+#   scons -jN             # 覆盖并行度（默认 -j8）
 #
 # 工具链查找：TASKING_TRICORE_HOME / TASKING_HOME 环境变量
 #   -> C:\Program Files\TASKING\TriCore v6.3*（取最新 6.3.x）
@@ -18,6 +18,9 @@
 import os
 
 import aurix_tasking
+
+# 并行度默认 -j8；命令行显式给 -j 时以命令行为准（SetOption 只补缺省）
+SetOption('num_jobs', 8)
 
 CONFIGS = {
     'debug': 'TriCore Debug (TASKING)',

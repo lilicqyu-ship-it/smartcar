@@ -74,7 +74,7 @@ include、宏、排除表直接解析 `.cproject`，编译/链接参数复刻 ID
 - 产物在 `build/tasking-<cfg>/`，文件名自动携带 `mw/app_version.h` 的
   版本号（`tc275_car_v0.2.2.elf/.hex/.map`）。
 - 常用参数：`cfg=release`（对应 IDE Release 源集）、`opt=-O2`、`size`
-  （只看体积）、`-c` 清理、`-j8` 并行。
+  （只看体积）、`-c` 清理；并行度默认 -j8（SConstruct 内置，`-jN` 可覆盖）。
 - TASKING 工具链由 `aurix_tasking.find_tasking()` 自动发现
   （`TASKING_TRICORE_HOME`/`TASKING_HOME` 可覆盖）。
 

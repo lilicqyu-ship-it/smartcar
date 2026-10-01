@@ -98,7 +98,7 @@ SConstruct：include 路径、宏、源码排除列表直接解析 `.cproject`�
 新 clone 即可直接命令行全量编译。产物在 `<工程>/build/tasking-debug/`（elf/hex/map）。
 
 ```bash
-just scons-car                   # 全量编译（-j8），增量续编
+just scons-car                   # 全量编译（默认 8 并行），增量续编
 just scons-sbl size              # 只看体积（elfsize）
 just scons-car cfg=release       # Release 源集（.cproject 的该配置目前不完整，编不过属正常）
 cd tc275_sbl && scons -c         # 清理
