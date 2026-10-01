@@ -57,6 +57,13 @@ CONFIG_ESP_BROWNOUT_DET=y
 # (main/Kconfig.projbuild) instead of touching this line.
 CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
 
+# ---- bench control bypass ------------------------------------------------------------
+# Bench rig: every WS session gets CTRL without a pair token (the TC275 PAIR
+# channel is not wired up yet). Kept here, not only in the gitignored sdkconfig,
+# because a regenerated sdkconfig silently dropped it once (monorepo move) and
+# the remote lost control. PRODUCTION MUST set this to n.
+CONFIG_C6_BENCH_CTRL=y
+
 # ---- logging: runtime default WARN (LLDD 7), raise on bench via menuconfig ----------
 CONFIG_LOG_DEFAULT_LEVEL_WARN=y
 CONFIG_LOG_MAXIMUM_LEVEL_INFO=y
