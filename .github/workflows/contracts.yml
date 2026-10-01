@@ -1,0 +1,27 @@
+# 契约门禁：submodule 指针指向的四仓库版本，其共享接口副本必须与 contracts/ 逐字节一致
+name: contracts
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    # Windows 也跑一遍：保证脚本在 Git Bash 下可用、换行规则在两平台一致
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive   # 子仓库均为 public，默认 token 即可拉取
+      - name: check contracts
+        run: bash scripts/check-contracts.sh
+      - name: scripts smoke test
+        run: bash scripts/repos.sh status

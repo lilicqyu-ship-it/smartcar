@@ -89,20 +89,21 @@ sync_board() {
   )
 
   for repo in "${REPOS[@]}"; do
-    while IFS=$'\t' read -r url iid; do
+    # contentId 必须是 GraphQL node id（.id），不是 issue 编号
+    while IFS=$'\t' read -r url num nid; do
       [[ -z "$url" ]] && continue
       if [[ -n "${existing[$url]:-}" ]]; then
-        echo "  skip $repo#$iid（已在板上）"
+        echo "  skip $repo#$num（已在板上）"
         continue
       fi
       if gh api graphql -f query="mutation(\$p:ID!,\$c:ID!){addItemProjectV2(input:{projectId:\$p,contentId:\$c}){item{id}}}" \
-           -f p="$pid" -f c="$iid" >/dev/null 2>&1; then
-        echo "  add  $repo#$iid"
+           -f p="$pid" -f c="$nid" >/dev/null 2>&1; then
+        echo "  add  $repo#$num"
       else
-        echo "  FAIL $repo#$iid"
+        echo "  FAIL $repo#$num"
       fi
-    done < <(gh issue list -R "$OWNER/$repo" --state open --json number,url \
-               --jq '.[] | "\(.url)\t\(.number)"' 2>/dev/null)
+    done < <(gh issue list -R "$OWNER/$repo" --state open --limit 200 --json number,url,id \
+               --jq '.[] | "\(.url)\t\(.number)\t\(.id)"' 2>/dev/null)
   done
 }
 
