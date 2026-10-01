@@ -7,6 +7,13 @@
 
 ## [未发布]
 
+## [1.0.0] - 2026-10-01
+
+首个稳定版，对齐 `mw/app_version.h` 1.0.0。
+
+### 新增
+- 按需版本信标：DIAG 0x53/0x24 请求即答 EVT 0x24/0x25（PROTO 消费 CID_DIAG，app_ver 请求标志 CPU0 同轮取走，不再等 5 s 周期；配合 S3 About 页 tap 刷新）
+
 ## [0.2.2] - 2026-10-01
 
 ### 新增
@@ -56,7 +63,8 @@
 - SPI 契约逐行对齐已烧录 C6 固件；相位改 trailing 边沿采样并降慢 CS/数据沿速率
 - HTTP keep-alive 回复固定到 +IPD 来源链路
 
-[未发布]: https://github.com/lilicqyu-ship-it/tc275_car/compare/v0.2.2...HEAD
+[未发布]: https://github.com/lilicqyu-ship-it/tc275_car/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/lilicqyu-ship-it/tc275_car/compare/v0.2.2...v1.0.0
 [0.2.2]: https://github.com/lilicqyu-ship-it/tc275_car/compare/v0.2.1...v0.2.2
 [0.2.1]: https://github.com/lilicqyu-ship-it/tc275_car/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/lilicqyu-ship-it/tc275_car/releases/tag/v0.2.0
