@@ -426,6 +426,32 @@ static void jog_cb(lv_event_t *e)
     }
 }
 
+/* Solid ▲ / ▼ on the jog buttons. Montserrat has no U+25B2/25BC glyphs, so
+ * the triangle is drawn directly; it takes the button's current text color,
+ * so the disabled (dim) state greys it out like a label would. */
+static void jog_arrow_draw_cb(lv_event_t *e)
+{
+    lv_obj_t *o = lv_event_get_target_obj(e);
+    bool up = (intptr_t)lv_event_get_user_data(e) != 0;
+    lv_area_t a;
+    lv_obj_get_coords(o, &a);
+    int32_t cx = (a.x1 + a.x2) / 2;
+    int32_t cy = (a.y1 + a.y2) / 2;
+    const int32_t hw = 14, hh = 12;     /* 28 x 24 px triangle */
+
+    lv_draw_triangle_dsc_t dsc;
+    lv_draw_triangle_dsc_init(&dsc);
+    dsc.color = lv_obj_get_style_text_color(o, LV_PART_MAIN);
+    dsc.opa = LV_OPA_COVER;
+    dsc.p[0].x = cx;
+    dsc.p[0].y = up ? cy - hh : cy + hh;
+    dsc.p[1].x = cx - hw;
+    dsc.p[1].y = up ? cy + hh : cy - hh;
+    dsc.p[2].x = cx + hw;
+    dsc.p[2].y = dsc.p[1].y;
+    lv_draw_triangle(lv_event_get_layer(e), &dsc);
+}
+
 static void calib_create(lv_obj_t *root)
 {
     ui_header(root, "CALIBRATE  TC275", back_settings_cb);
@@ -520,7 +546,10 @@ static void calib_create(lv_obj_t *root)
         lv_obj_align(s_cal.jog_cnt[m], LV_ALIGN_TOP_LEFT, x + 84, 34);
         for (int d = 0; d < 2; d++) {
             int i = m * 2 + d;
-            s_cal.jog[i] = btn(jc, d ? LV_SYMBOL_RIGHT : LV_SYMBOL_LEFT, UI_COL_SURFACE2, 80, 64);
+            s_cal.jog[i] = btn(jc, "", UI_COL_SURFACE2, 80, 64);
+            /* d=1 -> +duty (forward) ▲, d=0 -> -duty ▼ */
+            lv_obj_add_event_cb(s_cal.jog[i], jog_arrow_draw_cb, LV_EVENT_DRAW_MAIN_END,
+                                (void *)(intptr_t)d);
             lv_obj_align(s_cal.jog[i], LV_ALIGN_TOP_LEFT, x + d * 88, 62);
             lv_obj_set_style_bg_color(s_cal.jog[i], lv_color_hex(UI_COL_ACCENT), LV_STATE_PRESSED);
             lv_obj_add_event_cb(s_cal.jog[i], jog_cb, LV_EVENT_PRESSED, (void *)(intptr_t)i);
