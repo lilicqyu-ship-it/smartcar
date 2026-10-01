@@ -6,10 +6,9 @@
 
   esp32c6_car     build/flash 委托 esp32c6_car/flash.py（EIM 环境自动发现）
   smartcar_remote 自行发现 EIM 环境后调用 idf.py build / -p PORT flash
-  tc275_sbl       委托 tools/build_sbl.sh（完整版 TASKING 命令行编译）、
+  tc275_sbl       python -m SCons（解析 .cproject 与 ADS 同源；产物名带版本）、
                   tools/flash.py（AURIXFlasher CLI 烧录）
-  tc275_car       解析 ADS 生成的 subdir.mk 提取编译/链接命令，用完整版
-                  TASKING 命令行增量重编；烧录同样走 tc275_sbl/tools/flash.py
+  tc275_car       python -m SCons（同上）；烧录走 tc275_sbl/tools/flash.py
 
 用法（或 just fw-* 配方）:
   python firmware/fw.py list                      各工程构建产物 / 归档状态一览
@@ -22,14 +21,12 @@
   project ∈ esp32c6_car | smartcar_remote | tc275_car | tc275_sbl
   别名: c6 / remote / app / sbl / myCarSbl
 
-环境覆盖（自动探测失败时）: FW_TASKING / FW_SH / FW_IDF_PROFILE
+环境覆盖（自动探测失败时）: TASKING_TRICORE_HOME（SCons 工具链发现）/ FW_IDF_PROFILE
 """
 import argparse
 import glob
 import json
 import os
-import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -42,10 +39,10 @@ PROJECTS = ("esp32c6_car", "smartcar_remote", "tc275_car", "tc275_sbl")
 ALIASES = {"c6": "esp32c6_car", "remote": "smartcar_remote",
            "app": "tc275_car", "sbl": "tc275_sbl", "myCarSbl": "tc275_sbl"}
 
-# TC275 侧固定约定（与各仓库 README 一致）
-TASKING_GLOB = r"C:/Program Files/TASKING/TriCore */ctc/bin"
-TC275_APP_BUILD = "TriCore Debug (TASKING)"
-SBL_BUILD = "Debug"
+# TC275 侧固定约定：命令行构建 = SCons（build/tasking-<cfg>/，产物名带版本）；
+# ADS IDE 构建目录作为产物发现的回退（与各仓库 README 一致）。
+ADS_APP_BUILD = "TriCore Debug (TASKING)"
+ADS_SBL_BUILD = "Debug"
 
 
 def die(msg, code=1):
@@ -94,38 +91,8 @@ def require_project(p):
 
 # ---------------------------------------------------------------- 工具发现
 
-def find_tasking():
-    v = os.environ.get("FW_TASKING")
-    if v:
-        p = Path(v)
-        if p.exists():
-            return p
-        die(f"FW_TASKING={v} 指向的 TASKING ctc/bin 不存在")
-    hits = sorted(glob.glob(TASKING_GLOB))
-    return Path(hits[-1]) if hits else None
-
-
-def tasking_env():
-    """带完整版 TASKING ctc/bin 前置的 PATH 环境。"""
-    tctc = find_tasking()
-    if not tctc:
-        die("未找到完整版 TASKING（如 v6.3r1，装在 C:/Program Files/TASKING/）。"
-            "ADS 的内置 TASKING 许可禁止 IDE 外运行；或用环境变量 "
-            "FW_TASKING=<ctc/bin 目录> 指定。")
-    env = dict(os.environ)
-    env["PATH"] = str(tctc) + os.pathsep + env.get("PATH", "")
-    return env
-
-
-def find_sh():
-    """sh.exe：PATH 优先，其次 Git 安装常见位置（脚本里可能没挂 PATH）。"""
-    p = shutil.which("sh") or shutil.which("bash")
-    if p:
-        return p
-    for c in (r"C:/Program Files/Git/bin/sh.exe", r"C:/Program Files/Git/usr/bin/sh.exe"):
-        if Path(c).exists():
-            return c
-    return None
+# TASKING 工具链发现由 SCons 的 aurix_tasking.find_tasking() 负责：
+# TASKING_TRICORE_HOME / TASKING_HOME 环境变量，或 Program Files 常见位置。
 
 
 def git_info(repo):
@@ -161,42 +128,63 @@ def esp_artifacts(repo):
     return [p for p in out if p.exists()]
 
 
-def tc275_artifacts(repo, build_dir):
-    """ADS/TASKING 构建目录里的 hex/elf/map（多个时取最新）。
+def tc275_artifacts(repo, extra_dirs=()):
+    """TASKING 构建产物：SCons 的 build/tasking-*/ 优先，ADS 目录回退。
 
     factory_full.hex 是 SBL+App 的合成整包，不能顶替工程自身的 hex，
     从"最新 hex"候选中排除、存在时单独附带。"""
-    b = repo / build_dir
-    out = []
-    for pat in ("*.hex", "*.elf", "*.map"):
-        hits = sorted((p for p in b.glob(pat) if p.name != "factory_full.hex"),
-                      key=lambda p: p.stat().st_mtime)
+    dirs = sorted((repo / "build").glob("tasking-*")) + [Path(d) for d in extra_dirs]
+    out, factory = [], None
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        for pat in ("*.hex", "*.elf", "*.map"):
+            hits = sorted((p for p in d.glob(pat) if p.name != "factory_full.hex"),
+                          key=lambda p: p.stat().st_mtime)
+            if hits and hits[-1] not in out:
+                out.append(hits[-1])
+        if (d / "factory_full.hex").exists():
+            factory = d / "factory_full.hex"
+    if factory:
+        out.append(factory)
+    # 不同构建目录可能有同名产物（如 release 半成品 map）：按名去重，留最新
+    dedup = {}
+    for p in out:
+        if p.name not in dedup or p.stat().st_mtime > dedup[p.name].stat().st_mtime:
+            dedup[p.name] = p
+    return sorted(dedup.values(), key=lambda p: p.stat().st_mtime)
+
+
+def _newest_hex(patterns):
+    for pat in patterns:
+        hits = sorted(glob.glob(str(pat)), key=os.path.getmtime)
         if hits:
-            out.append(hits[-1])
-    if (b / "factory_full.hex").exists():
-        out.append(b / "factory_full.hex")
-    return out
+            return Path(hits[-1])
+    return None
 
 
 def sbl_hex():
-    return sbl_dir() / SBL_BUILD / "tc275_sbl.hex"
+    """SCons 版本化产物优先（tc275_sbl_vX.Y.Z.hex），ADS Debug/ 回退。"""
+    d = sbl_dir()
+    return _newest_hex([d / "build" / "tasking-*" / "tc275_sbl_v*.hex",
+                        d / "build" / "tasking-*" / "tc275_sbl.hex",
+                        d / ADS_SBL_BUILD / "tc275_sbl.hex"])
 
 
 def app_hex():
-    """tc275_car 的 App 槽 A 镜像；工程名历史上叫 myCar，兼容两者。"""
-    b = ROOT / "tc275_car" / TC275_APP_BUILD
-    for name in ("tc275_car.hex", "myCar.hex"):
-        if (b / name).exists():
-            return b / name
-    hits = sorted(b.glob("*.hex"), key=lambda p: p.stat().st_mtime)
-    return hits[-1] if hits else None
+    """tc275_car 的镜像：SCons 版本化产物优先，ADS 目录回退（myCar 为旧名兼容）。"""
+    r = ROOT / "tc275_car"
+    return _newest_hex([r / "build" / "tasking-*" / "tc275_car_v*.hex",
+                        r / "build" / "tasking-*" / "tc275_car.hex",
+                        r / ADS_APP_BUILD / "tc275_car.hex",
+                        r / ADS_APP_BUILD / "myCar.hex"])
 
 
 ARTIFACTS = {
     "esp32c6_car": lambda: esp_artifacts(ROOT / "esp32c6_car"),
     "smartcar_remote": lambda: esp_artifacts(ROOT / "smartcar_remote"),
-    "tc275_car": lambda: tc275_artifacts(ROOT / "tc275_car", TC275_APP_BUILD),
-    "tc275_sbl": lambda: tc275_artifacts(sbl_dir(), SBL_BUILD),
+    "tc275_car": lambda: tc275_artifacts(ROOT / "tc275_car", [ROOT / "tc275_car" / ADS_APP_BUILD]),
+    "tc275_sbl": lambda: tc275_artifacts(sbl_dir(), [sbl_dir() / ADS_SBL_BUILD]),
 }
 
 
@@ -285,97 +273,13 @@ def build_smartcar_remote(_args):
 
 
 def build_tc275_sbl(args):
-    """tools/build_sbl.sh；带 App hex 参数时顺带产出 factory_full.hex。"""
-    sh = find_sh()
-    if not sh:
-        die("找不到 sh/bash（Windows 需安装 Git）")
-    cmd = [sh, "tools/build_sbl.sh"]
-    extra = [a for a in args if not a.startswith("-")]
-    if extra:
-        cmd.append(extra[0])
-    return run(cmd, cwd=sbl_dir())
+    """python -m SCons（tc275_sbl，解析 .cproject 与 ADS 同源）；余参透传。"""
+    return run([sys.executable, "-m", "SCons", *args], cwd=sbl_dir())
 
 
-def build_tc275_car(_args):
-    """tc275_car 命令行增量重编。
-
-    ADS 生成的 makefile 把目标/依赖名整个用双引号括起来，GNU make 与
-    TASKING mktc 都无法直接驱动（引号被当文件名字面量）；这里改为解析
-    build 目录里的 subdir.mk，取出每个 .c 的 cctc 命令与链接命令，用完整
-    版 TASKING 直接执行——编译标志取自 ADS 生成的文件本身，与 IDE 零漂移。
-    """
-    repo = ROOT / "tc275_car"
-    b = repo / TC275_APP_BUILD
-    if not (b / "makefile").exists():
-        die(f"{b} 下没有 ADS 生成的构建文件——先在 AURIX Development Studio 里"
-            " import 本工程并构建一次（生成 makefile/subdir.mk/.opt），之后命令行"
-            "即可增量重编。")
-    env = tasking_env()
-
-    # 每条编译规则: "X.src": "../S.c" + 紧随的 tab 缩进 cctc 命令行
-    rule_re = re.compile(r'^"([^"]+)"\s*:\s*"(\.\./[^"]+)"')
-
-    def instantiate(recipe, out, src, stem):
-        r = recipe.replace("$@", out).replace("$<", src).replace("$*", stem)
-        return shlex.split(r, posix=True)
-
-    jobs = []  # (repo 相对源文件, obj 相对构建目录, 编译 argv, 汇编 argv)
-    for mk in sorted(b.rglob("subdir.mk")):
-        lines = mk.read_text(encoding="utf-8", errors="replace").splitlines()
-        for i, line in enumerate(lines):
-            m = rule_re.match(line)
-            if not (m and m.group(1).endswith(".src") and m.group(2).endswith(".c")):
-                continue
-            if i + 1 >= len(lines) or not lines[i + 1].startswith("\t"):
-                continue
-            target, src = m.group(1), m.group(2)
-            obj = target[:-4] + ".o"
-            cc = instantiate(lines[i + 1].strip(), target, src, target[:-4])
-            asm = None  # .o 规则（astc）在编译规则后几行内
-            for j in range(i + 2, min(i + 8, len(lines))):
-                if lines[j].startswith("\t") and "astc" in lines[j]:
-                    asm = instantiate(lines[j].strip(), obj, target, obj[:-2])
-                    break
-            jobs.append((src, obj, cc, asm))
-    if not jobs:
-        die("未从 subdir.mk 解析到任何编译规则（构建目录可能损坏，请在 ADS 里"
-            " Clean 后重新构建一次）")
-
-    # 链接命令：makefile 里 tab 缩进的 "@argfile <名> <标志...> $(OBJS)" 一行
-    mf = (b / "makefile").read_text(encoding="utf-8", errors="replace")
-    lm = re.search(r'^\s*@argfile\s+(\S+)\s+(.+)\$\(OBJS\)\s*$', mf, re.M)
-    if not lm:
-        die("makefile 里找不到链接命令（@argfile 行）")
-    link_flags = shlex.split(lm.group(2), posix=True)
-
-    stale = []
-    for j in jobs:
-        src_file = repo / j[0][3:]
-        if not src_file.exists():
-            die(f"subdir.mk 引用的源文件不存在: {j[0]}（构建目录与源码不同步，"
-                "在 ADS 里重新构建一次以刷新 makefile）")
-        if not (b / j[1]).exists() or src_file.stat().st_mtime > (b / j[1]).stat().st_mtime:
-            stale.append(j)
-    info(f"{len(jobs)} 个编译单元，{len(stale)} 个需要重编")
-    for src, _obj, cc, asm in stale:
-        print(f"  cctc {src}")
-        if run(cc, cwd=b, env=env):
-            return 1
-        if asm and run(asm, cwd=b, env=env):
-            return 1
-
-    elf = next((m.group(1) for f in link_flags
-                if (m := re.search(r'-o"?(.+\.elf)"?$', f))), None)
-    objs = [j[1] for j in jobs]
-    newest = max((b / o).stat().st_mtime for o in objs)
-    if stale or not (b / elf).exists() or (b / elf).stat().st_mtime < newest:
-        info(f"链接 {elf}（{len(objs)} 个对象）")
-        if run(["cctc", *link_flags, *objs], cwd=b, env=env):
-            return 1
-        run(["elfsize", elf], cwd=b, env=env)
-    else:
-        info(f"{elf} 已是最新，跳过链接")
-    return 0
+def build_tc275_car(args):
+    """python -m SCons（tc275_car，解析 .cproject 与 ADS 同源）；余参透传。"""
+    return run([sys.executable, "-m", "SCons", *args], cwd=ROOT / "tc275_car")
 
 
 BUILDERS = {

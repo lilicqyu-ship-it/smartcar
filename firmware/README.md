@@ -35,32 +35,32 @@ firmware/
 |---|---|---|
 | esp32c6_car | 委托 `esp32c6_car/flash.py build`（自动发现 EIM/IDF 环境，含 assets 打包） | 委托 `flash.py`：`full`（默认）/`assets`/`all`，`-p COMx` 指定串口，`-m` 烧后监视 |
 | smartcar_remote | EIM 环境 + `idf.py build` | `idf.py -p <串口> flash`，串口按 USB VID 自动识别（可 `-p COMx` 覆盖，余参透传如 `monitor`） |
-| tc275_car | 解析 ADS 生成的 `subdir.mk`，用完整版 TASKING 命令行增量重编 | `tc275_sbl/tools/flash.py flash <App槽A.hex>`（AURIXFlasher CLI） |
-| tc275_sbl | 委托 `tc275_sbl/tools/build_sbl.sh` | `tc275_sbl/tools/flash.py flash Debug/tc275_sbl.hex` |
+| tc275_car | `python -m SCons`（解析 `.cproject`，与 ADS 同源零漂移；产物名带版本） | `tc275_sbl/tools/flash.py flash <App槽A.hex>`（AURIXFlasher CLI） |
+| tc275_sbl | `python -m SCons`（同上） | `tc275_sbl/tools/flash.py flash`（自动取 SCons 最新版本化 hex） |
 
 TC275 烧录透传 `flash.py` 的参数：`--id <n>` 选 DAS 端口、`--log x.xml`
 出详细日志等（需 DAS 服务在跑，装 ADS 即有）。
 
-### tc275_car 命令行编译的说明
+### tc275 双仓 SCons 命令行编译的说明
 
-ADS 生成的 makefile 把目标/依赖名整个用双引号括起，GNU make 与 TASKING
-mktc 都无法直接驱动；fw.py 改为解析 `TriCore Debug (TASKING)/` 里的
-`subdir.mk`，提取每个 `.c` 的 cctc 命令与链接命令直接执行——编译标志取自
-ADS 生成的文件本身，与 IDE **零漂移**。限制：
+两仓各持一份同源的 `SConstruct` + `site_scons/aurix_tasking.py`：源集、
+include、宏、排除表直接解析 `.cproject`，编译/链接参数复刻 IDE 生成的
+命令行（TASKING TriCore v6.3r1），与 IDE **零漂移**，Clean 后也能独立出
+产物——**不依赖** ADS 的生成构建文件。
 
-- **首次必须在 ADS 里 import 并构建一次**（生成 makefile/subdir.mk/.opt）；
-  之后命令行即可增量重编，两边可以混用（产物都在同一构建目录）。
-- 增量只看 `.c` 的 mtime：改了**头文件**后请 `touch` 引用它的 `.c`，或
-  在 ADS 里构建。
-- 在 ADS 的 Project Properties 里改了编译选项后，需在 ADS 里重新构建一次
-  让生成文件刷新。
+- 产物在 `build/tasking-<cfg>/`，文件名自动携带 `mw/app_version.h` 的
+  版本号（`tc275_car_v0.2.2.elf/.hex/.map`）。
+- 常用参数：`cfg=release`（对应 IDE Release 源集）、`opt=-O2`、`size`
+  （只看体积）、`-c` 清理、`-j8` 并行。
+- TASKING 工具链由 `aurix_tasking.find_tasking()` 自动发现
+  （`TASKING_TRICORE_HOME`/`TASKING_HOME` 可覆盖）。
 
 ### factory（出厂整包）
 
 `fw.py factory` = 编译 tc275_car（App 槽 A）+ tc275_sbl（SBL）→ Intel-HEX
-层合成 `tc275_sbl/Debug/factory_full.hex`（一次烧录整片：SBL 0x80000000 +
-App 0x80008000，合成工具校验地址不重叠）。`--flash` 直接用 AURIXFlasher
-合成+烧录一步到位。
+层合成 `tc275_sbl/build/tasking-debug/factory_full.hex`（一次烧录整片：
+SBL 0x80000000 + App 0x80008000，合成工具校验地址不重叠）。`--flash` 直接
+用 AURIXFlasher 合成+烧录一步到位。
 
 ## 环境要求
 
@@ -69,12 +69,12 @@ App 0x80008000，合成工具校验地址不重叠）。`--flash` 直接用 AURI
   指定 PowerShell 激活脚本。
 - **TC275 两工程**：完整版 TASKING（如 v6.3r1，`C:/Program Files/TASKING/`；
   ADS 内置版许可禁止 IDE 外运行）+ ADS（首次生成构建文件、AURIXFlasher、
-  DAS）。不在默认位置时用 `FW_TASKING=<ctc/bin 目录>` 覆盖。
+  DAS）。SCons 侧不在默认位置时用 `TASKING_TRICORE_HOME` 环境变量覆盖。
 - Windows 上 fw.py 需在 Git Bash / CMD / PowerShell 任一里以 `python` 运行。
 
 ## FAQ
 
-- **`未找到完整版 TASKING`** → 装完整版或 `FW_TASKING=<ctc/bin>`；
+- **`找不到 TASKING TriCore 工具链`** → 装完整版或设 `TASKING_TRICORE_HOME`；
   只装了 ADS 时 tc275 两工程只能在 IDE 里编。
 - **`没有 ADS 生成的构建文件`** → 先在 ADS 里 import + 构建一次（见上）。
 - **tc275_sbl 找不到目录** → 子模块已从 `myCarSbl` 改名 `tc275_sbl`，
