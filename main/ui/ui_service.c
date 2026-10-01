@@ -579,7 +579,7 @@ static struct {
     lv_obj_t *verdict, *vsub;
     lv_obj_t *find[FIND_MAX];
     lv_obj_t *c6[12];
-    lv_obj_t *tc[12];
+    lv_obj_t *tc[13];
     lv_obj_t *refresh, *clear;
     int64_t trk_bad_since[2];
 } s_fd;
@@ -804,7 +804,7 @@ void ui_service_fdiag_refresh(const scr_state_t *st)
 
     /* SBL version rides its own beacon ({"t":"tcver"}), independent of
      * telemetry freshness; empty string = SBL not flashed / pre-version SBL. */
-    if (st->tc_sbl_ver[0] == ' ') {
+    if (st->tc_sbl_ver[0] == '\0') {
         ui_label_set_text(s_fd.tc[12], "--");
         ui_label_set_color(s_fd.tc[12], lv_color_hex(UI_COL_DIM));
     } else if (strncmp(st->tc_sbl_ver, "SBLFW tc275_sbl v", 17) == 0) {
