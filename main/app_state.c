@@ -235,6 +235,9 @@ void app_state_set_telemetry(const proto_telemetry_t *t)
     s_state.hw_rev     = t->hw_rev;
     s_state.link_rtt_ms   = t->link_rtt_ms;
     s_state.link_err_rate = t->link_err_rate;
+    /* telemetry only exists while the C6<->TC275 SPI link is up, so a frame
+     * is first-hand proof of it - self-heals a missed {"t":"tc"} edge */
+    s_state.tc_on = true;
 
     /* body speed EMA: mean measured wheel speed, dt-aware, snap on gaps and
      * around rest (same tuning as the phone control page) */

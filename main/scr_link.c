@@ -47,6 +47,7 @@ typedef struct {
     volatile bool pair_req;
     volatile bool c6_ver_req;           /* UI asked: re-query C6 version (/api/health) */
     volatile bool tc_ver_req;           /* UI asked: {"t":"tcver"} -> C6 -> SPI -> TC275 */
+    uint8_t ws_fail_run;                /* consecutive WS disconnects w/o a connect */
 
     proto_parser_t parser;
 
@@ -162,7 +163,15 @@ static void ws_apply_hello(const cJSON *root)
     if (cJSON_IsString(ver)) {
         app_state_set_c6_fw(ver->valuestring);
     }
-    app_state_set_tc(cJSON_IsBool(tc) ? cJSON_IsTrue(tc) : false);
+    /* hello.tc is a placeholder STRING ("down") on the C6 - http_server has no
+     * link visibility - and the C6 broadcasts the real {"t":"tc","on":..}
+     * just BEFORE the hello (ws_sess_set_ws -> bridge_notify_clients).
+     * Applying the string as false overwrote that true and left tc_on stuck
+     * off on a stable link (SPI wire DOWN, TC275 version tap refused).
+     * Only a real bool may set the vehicle state. */
+    if (cJSON_IsBool(tc)) {
+        app_state_set_tc(cJSON_IsTrue(tc));
+    }
 }
 
 static void ws_handle_text(const char *data, int len)
@@ -295,6 +304,7 @@ static void ws_event_handler(void *arg, esp_event_base_t base,
         case WEBSOCKET_EVENT_CONNECTED: {
             link_set_nodelay();
             s_link.ws_running = true;
+            s_link.ws_fail_run = 0;
             s_link.last_rx_ms = now_ms();
             app_state_set_conn(SCR_CONN_CONNECTED);
             app_state_log(SCR_LOG_INFO, "WS connected");
@@ -317,6 +327,16 @@ static void ws_event_handler(void *arg, esp_event_base_t base,
             app_state_set_tc(false);
             scr_svc_on_ws_down();
             app_state_log(SCR_LOG_WARN, "WS disconnected");
+            /* C6 rebooted under us: its softAP forgot this station, but the
+             * STA may not notice for a long time (seen 09-30/10-01: WS connect
+             * timeouts every 8 s, no Wi-Fi DISCONNECTED event).  After 3 WS
+             * failures in a row, drop the association; the DISCONNECTED
+             * handler reconnects from scratch. */
+            if (++s_link.ws_fail_run >= 3 && s_link.wifi_up) {
+                s_link.ws_fail_run = 0;
+                ESP_LOGW(TAG, "WS keeps failing: forcing Wi-Fi re-association");
+                esp_wifi_disconnect();
+            }
             break;
         case WEBSOCKET_EVENT_DATA:
             if (ev->data_len <= 0) {
@@ -598,6 +618,8 @@ static void link_monitor_task(void *arg)
              * back as the normal {"t":"tcver"} beacon (ws_handle_text) */
             if (!scr_link_send_text("{\"t\":\"tcver\"}")) {
                 ESP_LOGW(TAG, "tcver request not sent");
+            } else {
+                ESP_LOGI(TAG, "tcver request sent");
             }
         }
 
