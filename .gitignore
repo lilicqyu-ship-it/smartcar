@@ -6,3 +6,4 @@
 firmware/dist/**/*.elf
 firmware/dist/**/*.map
 firmware/dist/**/*.mdf
+/firmware/__pycache__/*.pyc
