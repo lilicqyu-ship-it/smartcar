@@ -1,0 +1,7 @@
+/TriCore Debug (TASKING)
+/TriCore Release (TASKING)
+/test/host/out/
+/build/
+/cc[0-9a-f]*
+__pycache__/
+50-tech-assessment.md

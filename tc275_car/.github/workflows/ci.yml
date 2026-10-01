@@ -1,0 +1,54 @@
+name: CI
+
+# Host-side verification only. The TASKING firmware build cannot run on
+# hosted runners (proprietary compiler), so CI covers what gcc can prove:
+# the SF frame codec, the 38-byte telemetry layout against the C6's own
+# decoder, and the JSON source of the link sequence diagram.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+  workflow_call:   # reused by release.yml so a tag cannot publish untested code
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: Host tests (gcc, ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout tc275_car
+        uses: actions/checkout@v4
+
+      # The telemetry test compiles the slave's own proto_frames.c so the
+      # cross-repo byte layout is locked, not copied (doc 22 E13 / R12).
+      # esp32c6_car is public; tracking its main is the point - a C6-side
+      # contract change must break this CI here, not on the bench.
+      - name: Checkout esp32c6_car (sibling repo, for the cross-check)
+        uses: actions/checkout@v4
+        with:
+          repository: lilicqyu-ship-it/esp32c6_car
+          ref: main
+          path: esp32c6_car
+
+      - name: SF frame codec tests
+        run: |
+          mkdir -p test/host/out
+          gcc -std=c99 -Wall -Wextra -Werror -O2 -I . \
+              test/host/test_sf.c mw/sf/sf_frame.c mw/calib/calib_record.c \
+              -o test/host/out/test_sf
+          test/host/out/test_sf
+
+      - name: Telemetry layout tests (C6 decoder cross-check)
+        run: |
+          gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
+              -I esp32c6_car/components/c6_proto -I esp32c6_car/components/c6_sf \
+              test/host/test_sf_telemetry.c mw/sf/sf_telemetry.c \
+              mw/sf/sf_frame.c esp32c6_car/components/c6_proto/proto_frames.c \
+              -o test/host/out/test_sf_telemetry
+          test/host/out/test_sf_telemetry
+
+      - name: Sequence diagram source is valid JSON
+        run: python3 -m json.tool doc/20-design/link-c6.sequence.json > /dev/null

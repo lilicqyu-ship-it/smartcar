@@ -1,0 +1,537 @@
+#include "rt/motor_algo.h"
+#include "bsp/motor.h"
+#include "rt/encoder.h"
+#include "rt/servo.h"
+#include "bsp/stime.h"
+#include "bsp/adc.h"
+#include "bsp/wdg.h"
+#include "mw/xcore/xcore.h"
+
+/* Left side: MOTOR_A + MOTOR_B (TB6612#1), Right side: MOTOR_C + MOTOR_D (TB6612#2)
+ * (same wheel mapping the robot controller uses) */
+#define SIDE_LEFT_0   MOTOR_A
+#define SIDE_LEFT_1   MOTOR_B
+#define SIDE_RIGHT_0  MOTOR_C
+#define SIDE_RIGHT_1  MOTOR_D
+
+typedef struct
+{
+    sint16  cmd;                         /* raw side speed command from CPU0 */
+    sint16  target;                      /* cmd slew-limited, feeds the servo */
+} AlgoSide;
+
+static AlgoSide g_left;
+static AlgoSide g_right;
+
+static uint32  g_lastSeq;                /* last seen target update counter */
+static uint32  g_lastSeqMs;              /* timestamp of the last target update */
+static boolean g_targetEstop;            /* e-stop bit of the last published target */
+
+/* ---- per-motor open-loop jog, 0x71 (doc 34 SS9.3) --------------------------
+ * Bench tool: CPU0 writes clamped +-500 duties, this core drives them
+ * directly (open loop, no servo, encoders not involved) while the command
+ * stream is fresh. Priority: estop > calibration > jog > servo. 300 ms
+ * without a refresh zeroes the duties and the servo path resumes. */
+#define MOTOR_JOG_TIMEOUT_MS    300u
+
+static uint32  g_jogSeq;                 /* last seen jog command counter    */
+static uint32  g_jogDeadlineMs;          /* 0 = jog inactive                 */
+static uint8   g_recordVer = 0xFFu;      /* impossible value: apply boot rec */
+
+/* Closed-loop enable gate. The servo may only close the loop on a record
+ * whose source is real (src != CALIB_SRC_DEFAULT): a fresh flash or a
+ * failed validation falls back to compile-time default signs, which the
+ * mirrored gearboxes make wrong on some wheels, and closing the loop on
+ * wrong signs is exactly the positive-feedback runaway bench-observed in
+ * doc 34 SS1 (sustained duty at target 0). Doc 23 SS8.4 therefore
+ * prescribes "open-loop equivalent" for src=0: SERVO_update's measValid=
+ * FALSE path (duty = target, integral dropped) is reused unchanged. The
+ * gate follows the RecordLive version edge - 0x70 DONE (CPU0 persists,
+ * src = DFLASH) and 0x73 REC_SET enable it, 0x74 REC_CLEAR disables it. */
+static boolean g_closedLoopOk;
+
+/* ---- wheel direction calibration (bench, doc 23 SS8.4 step 2 automated) ---
+ * One +12% duty pulse per wheel for 250 ms; the count delta over the pulse
+ * (already post-invert, the ISR applies g_encInvert) says which way that
+ * wheel's encoder counts. A negative delta flips ENCODER_setInvert to -1, a
+ * zero delta reports a dead encoder (no counts is wiring, not sign). Wheel
+ * MOTOR_A..D is paired 1:1 with encoder E1..E4 (doc 23 SS8.2 table), so the
+ * motor id doubles as the encoder index. Total run ~1.4 s; e-stop aborts it
+ * from the normal branch above. */
+#define MOTOR_CALIB_DUTY        120      /* 12% duty pulse, wheels OFF GROUND */
+#define MOTOR_CALIB_PULSE_MS    250u
+#define MOTOR_CALIB_SETTLE_MS   80u
+
+typedef enum
+{
+    CALIB_IDLE = 0,
+    CALIB_PULSE,                         /* driving the wheel under test     */
+    CALIB_SETTLE                         /* stopped, let the wheel coast out */
+} CalibPhase;
+
+static struct
+{
+    boolean  active;
+    uint8    wheel;                      /* MOTOR_A..MOTOR_D under test      */
+    CalibPhase phase;
+    uint32   phaseStartMs;
+    sint32   countAtStart;
+    sint32   delta[MOTOR_COUNT];         /* counts seen during the pulse     */
+} g_calib;
+
+static sint16 MOTOR_ALGO_stepToward(sint16 current, sint16 target)
+{
+    sint16 diff = target - current;
+
+    if (diff > MOTOR_ALGO_MAX_STEP)
+    {
+        diff = MOTOR_ALGO_MAX_STEP;
+    }
+    else if (diff < -MOTOR_ALGO_MAX_STEP)
+    {
+        diff = -MOTOR_ALGO_MAX_STEP;
+    }
+    return current + diff;
+}
+
+static void MOTOR_ALGO_apply(sint16 left, sint16 right)
+{
+    MOTOR_setSpeed(SIDE_LEFT_0, left);
+    MOTOR_setSpeed(SIDE_LEFT_1, left);
+    MOTOR_setSpeed(SIDE_RIGHT_0, right);
+    MOTOR_setSpeed(SIDE_RIGHT_1, right);
+}
+
+static void MOTOR_ALGO_readTargets(void)
+{
+    sint16  l, r;
+    boolean estop;
+    uint32  seq = XCORE_motorGetTarget(&l, &r, &estop);
+    uint32  now = STIME_nowMs();
+
+    if (seq != g_lastSeq)
+    {
+        g_lastSeq   = seq;
+        g_lastSeqMs = now;
+    }
+    g_targetEstop = estop;
+
+    /* Control task lost -> ramp to stop (safety) */
+    if ((now - g_lastSeqMs) > MOTOR_ALGO_CMD_TIMEOUT_MS)
+    {
+        l = 0;
+        r = 0;
+    }
+
+    g_left.cmd  = l;
+    g_right.cmd = r;
+}
+
+static void MOTOR_ALGO_brakeAll(void)
+{
+    g_left.cmd     = 0;
+    g_right.cmd    = 0;
+    g_left.target  = 0;
+    g_right.target = 0;
+    MOTOR_brake(SIDE_LEFT_0);
+    MOTOR_brake(SIDE_LEFT_1);
+    MOTOR_brake(SIDE_RIGHT_0);
+    MOTOR_brake(SIDE_RIGHT_1);
+    XCORE_motorStatusSet(0, 0);
+}
+
+/* ---- closed loop ----------------------------------------------------------- */
+
+static boolean g_servoLogAsked;          /* 1 Hz bench line, only when active */
+
+/* One SRV= line per second while anything is moving: target, measured and
+ * applied duty per side (percent*10), the figures the bench tune of doc 21
+ * SS15.3 needs. Idle robot stays silent so the console does not spam. */
+static void MOTOR_ALGO_diag(XcoreEncoder *enc, sint16 dutyL, sint16 dutyR)
+{
+    static uint32 nextLogMs;
+    uint32        now = STIME_nowMs();
+
+    if ((g_left.target == 0) && (g_right.target == 0) &&
+        (dutyL == 0) && (dutyR == 0) &&
+        (enc->pctLeft == 0) && (enc->pctRight == 0))
+    {
+        g_servoLogAsked = FALSE;
+        return;
+    }
+
+    if ((g_servoLogAsked == FALSE) || ((sint32)(now - nextLogMs) >= 0))
+    {
+        sint32 vals[6];
+
+        vals[0] = g_left.target;
+        vals[1] = enc->pctLeft;
+        vals[2] = dutyL;
+        vals[3] = g_right.target;
+        vals[4] = enc->pctRight;
+        vals[5] = dutyR;
+        XCORE_logi("SRV=", vals, 6u);
+
+        nextLogMs       = now + 1000u;
+        g_servoLogAsked = TRUE;
+    }
+}
+
+static void MOTOR_ALGO_controlStep(void)
+{
+    XcoreEncoder enc;
+    sint16       dutyL;
+    sint16       dutyR;
+
+    /* Slew the target first: the servo sees a ramp, not a step, exactly like
+     * the open-loop path did (0..1000 in 0.5 s at MAX_STEP=2/ms). */
+    g_left.target  = MOTOR_ALGO_stepToward(g_left.target, g_left.cmd);
+    g_right.target = MOTOR_ALGO_stepToward(g_right.target, g_right.cmd);
+
+    /* ENCODER_task() ran at the top of MOTOR_ALGO_task, so this snapshot is
+     * from this very cycle. measValid=FALSE (encoder not alive OR the
+     * direction record still src=0) selects the open-loop fallback inside
+     * SERVO_update - duty = target, integral dropped - not an error. */
+    XCORE_encoderRead(&enc);
+
+    {
+        boolean measOk = (enc.alive && g_closedLoopOk) ? TRUE : FALSE;
+
+        dutyL = SERVO_update(0u, g_left.target, enc.pctLeft, measOk);
+        dutyR = SERVO_update(1u, g_right.target, enc.pctRight, measOk);
+    }
+
+    MOTOR_ALGO_apply(dutyL, dutyR);
+    XCORE_motorStatusSet(dutyL, dutyR);
+    MOTOR_ALGO_diag(&enc, dutyL, dutyR);
+}
+
+/* ---- direction calibration ------------------------------------------------- */
+
+/* One result block per run / reject (doc 34 SS3.3): CPU0 consumes it, turns
+ * it into EVT 0x22 and auto-persists on success. Invert values are read
+ * after the pulse test, so a DONE block carries the sign terminal. */
+static void MOTOR_ALGO_calibPublish(uint8 status)
+{
+    XcoreCalibResult res;
+    uint8          i;
+
+    res.status = status;
+    for (i = 0u; i < MOTOR_COUNT; i++)
+    {
+        res.invert[i] = ENCODER_getInvert(i);
+        res.delta[i]  = g_calib.delta[i];   /* untested wheels read 0       */
+    }
+    XCORE_calibResultPublish(&res);
+}
+
+static void MOTOR_ALGO_calibStart(void)
+{
+    sint32 counts[MOTOR_COUNT];
+    uint8  i;
+
+    ENCODER_getRawCounts(counts);
+    for (i = 0u; i < MOTOR_COUNT; i++)
+    {
+        g_calib.delta[i] = 0;
+    }
+
+    g_calib.active       = TRUE;
+    g_calib.wheel        = 0u;
+    g_calib.phase        = CALIB_PULSE;
+    g_calib.phaseStartMs = STIME_nowMs();
+    g_calib.countAtStart = counts[0];
+
+    /* Drop a request latched while the previous run was still active: the
+     * busy answer goes out from MOTOR_ALGO_task, the run is not restarted. */
+    (void)XCORE_dirCalibConsume();
+
+    SERVO_reset(0u);
+    SERVO_reset(1u);
+    MOTOR_stopAll();
+    XCORE_logln("ENCCAL start (wheels must be off ground)");
+}
+
+/* One wheel pulse finished: read the count delta, fix the sign, move on. */
+static void MOTOR_ALGO_calibEndPulse(void)
+{
+    sint32 counts[MOTOR_COUNT];
+
+    MOTOR_stop((MotorId)g_calib.wheel);
+    ENCODER_getRawCounts(counts);
+    g_calib.delta[g_calib.wheel] = counts[g_calib.wheel] - g_calib.countAtStart;
+
+    /* The delta is POST-invert, so a negative one means the CURRENT sign is
+     * wrong - flip it, do not force -1: a wheel that boots with a stale -1
+     * from the DFlash record would otherwise stay -1 forever (re-running the
+     * calibration could never repair it, and that wheel's mm/s keeps
+     * cancelling its side partner -> body speed reads ~0 or negative). */
+    if (g_calib.delta[g_calib.wheel] < 0)
+    {
+        ENCODER_setInvert(g_calib.wheel, (sint8)(-ENCODER_getInvert(g_calib.wheel)));
+    }
+    /* delta == 0 stays +1: the ENCCAL line reports it as a dead channel. */
+
+    g_calib.phase        = CALIB_SETTLE;
+    g_calib.phaseStartMs = STIME_nowMs();
+}
+
+static void MOTOR_ALGO_calibStep(void)
+{
+    uint32 now = STIME_nowMs();
+
+    switch (g_calib.phase)
+    {
+    case CALIB_PULSE:
+        MOTOR_setSpeed((MotorId)g_calib.wheel, MOTOR_CALIB_DUTY);
+        if ((now - g_calib.phaseStartMs) >= MOTOR_CALIB_PULSE_MS)
+        {
+            MOTOR_ALGO_calibEndPulse();
+        }
+        break;
+
+    case CALIB_SETTLE:
+        MOTOR_stop((MotorId)g_calib.wheel);
+        if ((now - g_calib.phaseStartMs) >= MOTOR_CALIB_SETTLE_MS)
+        {
+            g_calib.wheel++;
+            if (g_calib.wheel >= MOTOR_COUNT)
+            {
+                sint32 vals[8];
+                uint8  i;
+
+                for (i = 0u; i < MOTOR_COUNT; i++)
+                {
+                    vals[i] = ENCODER_getInvert(i);
+                    vals[i + 4u] = g_calib.delta[i];
+                }
+                XCORE_logi("ENCCAL", vals, 8u);   /* invert[0..3] delta[0..3] */
+
+                MOTOR_ALGO_calibPublish(CALIB_STATUS_DONE);
+                g_calib.active = FALSE;
+                g_calib.phase  = CALIB_IDLE;
+                MOTOR_stopAll();
+            }
+            else
+            {
+                sint32 counts[MOTOR_COUNT];
+
+                ENCODER_getRawCounts(counts);
+                g_calib.countAtStart = counts[g_calib.wheel];
+                g_calib.phase        = CALIB_PULSE;
+                g_calib.phaseStartMs = now;
+            }
+        }
+        break;
+
+    case CALIB_IDLE:
+    default:
+        g_calib.active = FALSE;
+        break;
+    }
+}
+
+static void MOTOR_ALGO_calibAbort(void)
+{
+    if (g_calib.active)
+    {
+        g_calib.active = FALSE;
+        g_calib.phase  = CALIB_IDLE;
+        MOTOR_stopAll();
+        MOTOR_ALGO_calibPublish(CALIB_STATUS_ABORTED);
+        XCORE_logln("ENCCAL aborted (estop)");
+    }
+}
+
+/* ---- calibration record apply (doc 34 SS8.3) -------------------------------
+ * CPU0 loads the DFlash record at boot and republishes it on every change;
+ * this core applies it on the version edge: signs go to the encoder, the
+ * two speed-conversion parameters to their runtime setters, and the closed-
+ * loop gate follows src (see g_closedLoopOk above). Anything outside the
+ * legal range is clamped there, so a corrupt record cannot reach the
+ * 1 kHz math. Position bytes stay metadata (doc 34 SS8.4). */
+static void MOTOR_ALGO_applyRecord(void)
+{
+    XcoreRecordLive live;
+    uint8           i;
+
+    XCORE_recordGet(&live);
+    if (live.version == g_recordVer)
+    {
+        return;
+    }
+    g_recordVer = live.version;
+
+    {
+        boolean ok = (live.rec.src != CALIB_SRC_DEFAULT) ? TRUE : FALSE;
+
+        if (ok != g_closedLoopOk)
+        {
+            g_closedLoopOk = ok;
+            XCORE_logln(ok ? "SERVO closed-loop enabled"
+                           : "SERVO open-loop (record src=0; calibrate via 0x70)");
+        }
+    }
+
+    for (i = 0u; i < MOTOR_COUNT; i++)
+    {
+        ENCODER_setInvert(i, live.rec.invert[i]);
+    }
+    ENCODER_setFullScaleMmS((sint32)live.rec.fullScaleMmS);
+    ENCODER_setWheelDiaMm((sint32)live.rec.wheelDiaMm);
+}
+
+/* ---- per-motor jog ----------------------------------------------------------- */
+
+/* Hand the outputs back: the local deadline goes inactive and the shared
+ * duties are zeroed, so CPU0's echo and the quiet gate see a stopped jog.
+ * Only called when a jog stream is actually armed (the 1 kHz loop must not
+ * take the xcore lock every tick while e-stopped). */
+static void MOTOR_ALGO_jogStop(void)
+{
+    g_jogDeadlineMs = 0u;
+    XCORE_jogClear();
+}
+
+/* TRUE while 0x71 is in charge of the outputs. Duty sign is the motor's own
+ * forward direction, already clamped to +-500 by CPU0; open loop on purpose
+ * (bench wiring check), so the servo and the encoder play no part here. */
+static boolean MOTOR_ALGO_jogStep(void)
+{
+    XcoreJog jog;
+    uint32   now = STIME_nowMs();
+
+    if (XCORE_jogGet(&jog) != g_jogSeq)
+    {
+        g_jogSeq        = jog.jogSeq;
+        g_jogDeadlineMs = now + MOTOR_JOG_TIMEOUT_MS;
+    }
+    if (g_jogDeadlineMs == 0u)
+    {
+        return FALSE;                    /* never started / already expired  */
+    }
+    if ((sint32)(now - g_jogDeadlineMs) >= 0)
+    {
+        MOTOR_ALGO_jogStop();
+        SERVO_reset(0u);
+        SERVO_reset(1u);
+        MOTOR_stopAll();
+        XCORE_logln("JOG timeout");
+        return FALSE;
+    }
+
+    MOTOR_setSpeed(MOTOR_A, jog.duty[0]);
+    MOTOR_setSpeed(MOTOR_B, jog.duty[1]);
+    MOTOR_setSpeed(MOTOR_C, jog.duty[2]);
+    MOTOR_setSpeed(MOTOR_D, jog.duty[3]);
+    XCORE_motorStatusSet((sint16)(jog.duty[0] + jog.duty[1]),
+                         (sint16)(jog.duty[2] + jog.duty[3]));
+
+    /* SRV= stays available for the bench (doc 34 SS9.3): targets read 0, the
+     * duty column shows the jog values actually applied. */
+    {
+        XcoreEncoder enc;
+
+        XCORE_encoderRead(&enc);
+        MOTOR_ALGO_diag(&enc, jog.duty[0] + jog.duty[1], jog.duty[2] + jog.duty[3]);
+    }
+    return TRUE;
+}
+
+/* ---- public ---------------------------------------------------------------- */
+
+void MOTOR_ALGO_init(void)
+{
+    g_left.cmd       = 0;
+    g_right.cmd      = 0;
+    g_left.target    = 0;
+    g_right.target   = 0;
+    g_lastSeq        = 0;
+    g_lastSeqMs      = STIME_nowMs();
+    g_targetEstop    = FALSE;
+    g_servoLogAsked  = FALSE;
+
+    g_calib.active       = FALSE;
+    g_calib.wheel        = 0u;
+    g_calib.phase        = CALIB_IDLE;
+    g_calib.phaseStartMs = 0u;
+    g_calib.countAtStart = 0;
+
+    g_jogSeq        = 0u;
+    g_jogDeadlineMs = 0u;
+    g_recordVer     = 0xFFu;             /* force the first record apply     */
+    g_closedLoopOk  = FALSE;             /* gate opens on the first record   */
+
+    SERVO_init();
+    ADC_init();                          /* battery telemetry, CPU1-owned     */
+    MOTOR_stopAll();
+}
+
+void MOTOR_ALGO_task(void)
+{
+    /* Encoder tick first: it must run at 1 kHz regardless of the branch
+     * taken below, and its measured speeds feed the servo and the telemetry. */
+    ENCODER_task();
+
+    /* Battery telemetry: a polled conversion every 10th tick (~3 us each),
+     * filtered and published to the xcore battery block from here. It must
+     * run in every branch, so it sits before the e-stop return. */
+    ADC_task();
+
+    /* Parameter/invert record from CPU0's DFlash load (cheap version peek). */
+    MOTOR_ALGO_applyRecord();
+
+    MOTOR_ALGO_readTargets();
+
+    /* E-stop (CPU2 bypass bit or the bit published by CPU0): brake at once,
+     * no ramp - and kill any calibration run or jog stream in progress. */
+    if (g_targetEstop || XCORE_estopIsActive())
+    {
+        MOTOR_ALGO_calibAbort();
+        if (g_jogDeadlineMs != 0u)
+        {
+            MOTOR_ALGO_jogStop();
+        }
+        MOTOR_ALGO_brakeAll();
+        SERVO_reset(0u);
+        SERVO_reset(1u);
+        return;
+    }
+
+    if (g_calib.active)
+    {
+        /* A 0x70 latched during a run is refused with a busy result, never a
+         * restart (doc 34 SS3.3). */
+        if (XCORE_dirCalibConsume())
+        {
+            MOTOR_ALGO_calibPublish(CALIB_STATUS_BUSY);
+        }
+        MOTOR_ALGO_calibStep();          /* calib owns the outputs (~1.4 s)  */
+        return;
+    }
+    if (XCORE_dirCalibConsume())
+    {
+        MOTOR_ALGO_calibStart();
+        return;
+    }
+    if (MOTOR_ALGO_jogStep())
+    {
+        return;                          /* jog owns the outputs (0x71)      */
+    }
+
+    MOTOR_ALGO_controlStep();
+}
+
+void MOTOR_ALGO_run(void)
+{
+    uint32 nextMs = STIME_nowMs();
+
+    while (1)
+    {
+        MOTOR_ALGO_task();
+        WDG_serviceCpu();               /* CPU1 WDT feed point, 1 kHz (SDD SS7.2) */
+
+        nextMs += MOTOR_ALGO_PERIOD_MS;
+        STIME_waitUntilMs(nextMs);
+    }
+}
