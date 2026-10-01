@@ -538,6 +538,7 @@ typedef struct {
     lv_obj_t *tile_sub[SUB_NAV_FDIAG + 1];   /* live subtitle per module */
     /* about sub: system topology */
     lv_obj_t *ab_ver[3], *ab_st[3], *ab_dot[3];
+    lv_obj_t *ab_sbl;           /* TC275 card only: second row, SBL version */
     lv_obj_t *ab_wire[2], *ab_wlbl[2], *ab_wst[2];
     lv_obj_t *ab_up, *ab_heap, *ab_psram, *ab_rtt;
     lv_obj_t *fw_val;
@@ -1356,19 +1357,33 @@ void ui_pages_create_settings(lv_obj_t *root)
         lv_obj_set_style_text_font(nm, F_LG, 0);
         lv_obj_set_style_text_color(nm, lv_color_hex(UI_COL_TXT), 0);
         lv_obj_set_style_text_letter_space(nm, 2, 0);
-        lv_obj_align(nm, LV_ALIGN_TOP_LEFT, 0, 40);
+        lv_obj_align(nm, LV_ALIGN_TOP_LEFT, 0, 32);
         lv_obj_t *rl = lv_label_create(n);
         lv_label_set_text(rl, nrole[i]);
         lv_obj_set_style_text_font(rl, F_SM, 0);
         lv_obj_set_style_text_color(rl, lv_color_hex(UI_COL_DIM), 0);
-        lv_obj_align(rl, LV_ALIGN_TOP_LEFT, 0, 66);
+        lv_obj_align(rl, LV_ALIGN_TOP_LEFT, 0, 56);
         s_set.ab_ver[i] = lv_label_create(n);
         lv_label_set_text(s_set.ab_ver[i], "--");
         lv_obj_set_style_text_font(s_set.ab_ver[i], F_MD, 0);
         lv_obj_set_style_text_color(s_set.ab_ver[i], lv_color_hex(UI_COL_TXT), 0);
         lv_obj_set_size(s_set.ab_ver[i], NW - 20, lv_font_get_line_height(F_MD));
         lv_label_set_long_mode(s_set.ab_ver[i], LV_LABEL_LONG_MODE_DOTS);
-        lv_obj_align(s_set.ab_ver[i], LV_ALIGN_BOTTOM_LEFT, 0, -20);
+        /* bottom stack (128 px interior): status F_SM 16 | version rows F_MD 18.
+         * TC275 carries two rows - APP above, SBL below - the others one. */
+        const int lh_md = lv_font_get_line_height(F_MD);
+        const int lh_sm = lv_font_get_line_height(F_SM);
+        lv_obj_align(s_set.ab_ver[i], LV_ALIGN_BOTTOM_LEFT, 0,
+                     i == 2 ? -(lh_sm + 2 + lh_md) : -(lh_sm + 2));
+        if (i == 2) {
+            s_set.ab_sbl = lv_label_create(n);
+            lv_label_set_text(s_set.ab_sbl, "SBL  --");
+            lv_obj_set_style_text_font(s_set.ab_sbl, F_MD, 0);
+            lv_obj_set_style_text_color(s_set.ab_sbl, lv_color_hex(UI_COL_TXT), 0);
+            lv_obj_set_size(s_set.ab_sbl, NW - 20, lh_md);
+            lv_label_set_long_mode(s_set.ab_sbl, LV_LABEL_LONG_MODE_DOTS);
+            lv_obj_align(s_set.ab_sbl, LV_ALIGN_BOTTOM_LEFT, 0, -(lh_sm + 2));
+        }
         s_set.ab_st[i] = lv_label_create(n);
         lv_label_set_text(s_set.ab_st[i], "--");
         lv_obj_set_style_text_font(s_set.ab_st[i], F_SM, 0);
@@ -1723,7 +1738,7 @@ static bool fmt_semver(const char *src, char *out, size_t cap)
 static void about_refresh(const scr_state_t *st)
 {
     const esp_app_desc_t *app = esp_app_get_description();
-    char v[24];
+    char v[32];                 /* "APP  " + up to 23 B of tv */
     const char *ov;
     uint32_t oc;
     /* every node shows the same "vX.Y.Z" format */
@@ -1736,20 +1751,29 @@ static void about_refresh(const scr_state_t *st)
     ov = node_ver_status(1, st, &oc);
     fmt_semver(st->c6_fw, v, sizeof(v));
     node_set(1, v, ov ? ov : (ws ? "ONLINE" : "UNREACHABLE"), oc);
-    /* TC275: the version beacon string wins over the telemetry fw_ver word */
-    bool have_tcs = st->tc_app_ver[0] && fmt_semver(st->tc_app_ver, v, sizeof(v));
+    /* TC275: APP row - the version beacon string wins over the telemetry
+     * fw_ver word; SBL row - beacon only ("" = SBL absent / no beacon yet) */
+    char tv[24];
+    bool have_tcs = st->tc_app_ver[0] && fmt_semver(st->tc_app_ver, tv, sizeof(tv));
+    if (!have_tcs && st->tele_fresh) {
+        snprintf(tv, sizeof(tv), "v%u.%u.%u", (unsigned)((st->tc_fw_ver >> 16) & 0xFF),
+                 (unsigned)((st->tc_fw_ver >> 8) & 0xFF), (unsigned)(st->tc_fw_ver & 0xFF));
+        have_tcs = true;
+    }
+    snprintf(v, sizeof(v), "APP  %s", have_tcs ? tv : "--");
     if (st->tele_fresh) {
-        if (!have_tcs) {
-            snprintf(v, sizeof(v), "v%u.%u.%u", (unsigned)((st->tc_fw_ver >> 16) & 0xFF),
-                     (unsigned)((st->tc_fw_ver >> 8) & 0xFF), (unsigned)(st->tc_fw_ver & 0xFF));
-        }
         oc = st->fault_code ? UI_COL_CRIT : UI_COL_OK;
         ov = node_ver_status(2, st, &oc);
         node_set(2, v, ov ? ov : (st->fault_code ? "FAULT" : "ONLINE"), oc);
     } else {
         oc = st->tc_on ? UI_COL_WARN : UI_COL_DIM;
         ov = node_ver_status(2, st, &oc);
-        node_set(2, have_tcs ? v : "--", ov ? ov : (st->tc_on ? "STALE" : "OFFLINE"), oc);
+        node_set(2, v, ov ? ov : (st->tc_on ? "STALE" : "OFFLINE"), oc);
+    }
+    if (st->tc_sbl_ver[0] && fmt_semver(st->tc_sbl_ver, tv, sizeof(tv))) {
+        ui_label_set_fmt(s_set.ab_sbl, "SBL  %s", tv);
+    } else {
+        ui_label_set_text(s_set.ab_sbl, "SBL  --");
     }
     wire_set(0, ws, ws ? "LIVE" : "DOWN");
     wire_set(1, ws && st->tc_on, ws && st->tc_on ? "LIVE" : "DOWN");
