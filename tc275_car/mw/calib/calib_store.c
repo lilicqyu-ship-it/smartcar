@@ -72,12 +72,42 @@ static boolean          g_holdActive;
 
 /* ---- low-level flash -------------------------------------------------------- */
 
+/* FSR snapshot of the last failed operation, logged once interrupts are back
+ * on (calib_flashSave) so a bench SAVE FAILED says which step broke. */
+static uint32 g_flashFailFsr;
+static uint8  g_flashFailStep;           /* 1 erase, 2 page mode, 3 program, 4 verify */
+
+/* The erase and write-page command sequences are Safety-ENDINIT protected on
+ * TC27x: issued with ENDINIT set, the FMU rejects them (FSR.PROER) and the
+ * sector is never touched - which read back as a permanent SAVE FAILED.
+ * Infineon's Flash_Programming_1_KIT_TC275_LK example wraps exactly these two
+ * calls the same way. Disabling the safety watchdog at boot does NOT clear
+ * the ENDINIT bit, so it is needed here regardless. */
+static void calib_issueErase(uint32 addr)
+{
+    uint16 pw = IfxScuWdt_getSafetyWatchdogPassword();
+
+    IfxScuWdt_clearSafetyEndinit(pw);
+    IfxFlash_eraseSector(addr);
+    IfxScuWdt_setSafetyEndinit(pw);
+}
+
+static void calib_issueWritePage(uint32 pageAddr)
+{
+    uint16 pw = IfxScuWdt_getSafetyWatchdogPassword();
+
+    IfxScuWdt_clearSafetyEndinit(pw);
+    IfxFlash_writePage(pageAddr);
+    IfxScuWdt_setSafetyEndinit(pw);
+}
+
 /* Poll the DF0 busy flag. Runs inside this core's interrupt mask, so the
  * timebase is the free-running STM (no tick interrupt needed) and the CPU
  * watchdog is refreshed here: erase + three page programs can legitimately
  * outlast the ~0.5 s window, and a stuck FMU still hits the per-operation
- * deadline and reports a failed save instead of a reset. */
-static boolean calib_flashWaitD0(void)
+ * deadline and reports a failed save instead of a reset. A finished command
+ * that left PROER / OPER / SQER set also counts as a failure. */
+static boolean calib_flashWaitD0(uint8 step)
 {
     uint32 deadline = STIME_nowMs() + CALIB_FLASH_TIMEOUT_MS;
 
@@ -86,8 +116,17 @@ static boolean calib_flashWaitD0(void)
         WDG_serviceCpu();
         if ((sint32)(STIME_nowMs() - deadline) >= 0)
         {
+            g_flashFailFsr  = FLASH0_FSR.U;
+            g_flashFailStep = step;
             return FALSE;
         }
+    }
+    if ((FLASH0_FSR.B.PROER != 0u) || (FLASH0_FSR.B.OPER != 0u) ||
+        (FLASH0_FSR.B.SQER != 0u))
+    {
+        g_flashFailFsr  = FLASH0_FSR.U;
+        g_flashFailStep = step;
+        return FALSE;
     }
     return TRUE;
 }
@@ -109,15 +148,15 @@ static boolean calib_flashWritePage(uint32 pageAddr, const uint8 *bytes)
     ok = (IfxFlash_enterPageMode(pageAddr) == 0u);
     if (ok != FALSE)
     {
-        ok = calib_flashWaitD0();      /* page mode must not race the erase */
+        ok = calib_flashWaitD0(2u);    /* page mode must not race the erase */
     }
     if (ok != FALSE)
     {
-        IfxFlash_loadPage(pageAddr,
-                          (uint32)CALIBREC_getI32(&bytes[0]),
-                          (uint32)CALIBREC_getI32(&bytes[4]));
-        IfxFlash_writePage(pageAddr);
-        ok = calib_flashWaitD0();
+        IfxFlash_loadPage2X32(pageAddr,
+                              (uint32)CALIBREC_getI32(&bytes[0]),
+                              (uint32)CALIBREC_getI32(&bytes[4]));
+        calib_issueWritePage(pageAddr);
+        ok = calib_flashWaitD0(3u);
     }
     IfxFlash_clearStatus(0u);
     return ok;
@@ -148,6 +187,8 @@ static boolean calib_flashWrite(const uint8 *blob)
     {
         if (*(volatile uint8 *)(CALIB_SECTOR_ADDR + i) != blob[i])
         {
+            g_flashFailFsr  = FLASH0_FSR.U;
+            g_flashFailStep = 4u;
             return FALSE;
         }
     }
@@ -181,14 +222,24 @@ static boolean calib_flashSave(const CalibRecord *rec)
 
     WDG_serviceCpu();
     __disable();
-    IfxFlash_eraseSector(CALIB_SECTOR_ADDR);
-    ok = calib_flashWaitD0();
+    IfxFlash_clearStatus(0u);
+    calib_issueErase(CALIB_SECTOR_ADDR);
+    ok = calib_flashWaitD0(1u);
     if (ok != FALSE)
     {
         ok = calib_flashWrite(g_opBlob);
     }
+    IfxFlash_clearStatus(0u);
     __enable();
     WDG_serviceCpu();
+    if (ok == FALSE)
+    {
+        sint32 v[2];
+
+        v[0] = (sint32)g_flashFailStep;  /* 1 erase 2 pagemode 3 program 4 verify */
+        v[1] = (sint32)g_flashFailFsr;
+        XCORE_logi("CALSAVE FAIL step/FSR=", v, 2u);
+    }
     return ok;
 }
 
@@ -198,8 +249,10 @@ static boolean calib_flashErase(void)
 
     WDG_serviceCpu();
     __disable();
-    IfxFlash_eraseSector(CALIB_SECTOR_ADDR);
-    ok = calib_flashWaitD0();
+    IfxFlash_clearStatus(0u);
+    calib_issueErase(CALIB_SECTOR_ADDR);
+    ok = calib_flashWaitD0(1u);
+    IfxFlash_clearStatus(0u);
     __enable();
     WDG_serviceCpu();
     return ok;
