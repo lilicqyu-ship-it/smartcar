@@ -22,7 +22,7 @@
 > | 加解密 | `mw/crypto/`（ed25519v/sha512/c6_consts 自 esp32c6_car 逐字拷贝）+ `mw/sf/sf_frame.[ch]`（自 tc275_car 拷贝） |
 > | App 侧接入（tc275_car 工程） | `Lcf_Tasking_Tricore_Tc.lsl` 换为槽 A 布局（入口 0x80008020）+ `Lcf_AppB.lsl`；`com/ota_app.[ch]`（OtaRxOps 装配 + 槽位自识别 + §5.2 自检确认）；`com/link.c` OTA 帧分发到 `OTARX_frame`；`Cpu2_Main.c` init/tick；`mw/proto/protocol.h` 补 PROTO_CMD_OTA_*（0x60..0x65）；mw/ota、mw/crypto、bsp/flash_ota 与 SBL 工程同源拷贝 |
 | host 测试 | `test/host/`（282 断言全绿：`make check`）+ `tools/gen_test_vectors.py` |
-> | 构建脚本 | `tools/build_sbl.sh`（本机完整版 TASKING v6.3r1 命令行验证；正式产物仍应从 ADS 出） |
+> | 构建脚本 | SCons（`SConstruct`/`site_scons/`，解析 `.cproject` 与 ADS 同源；本机完整版 TASKING v6.3r1） |
 >
 > 对原设计的**修正**（核对代码/手册后确认，详见各节内标注）：PF1 基址、TCFW 签名范围、§5.1 的 DFlash 磨写细化。
 
