@@ -199,6 +199,12 @@ static void ws_handle_text(const char *data, int len)
                    strcmp(t->valuestring, "otaerror") == 0) {
             /* calibration results / OTA progress: owned by the service module */
             scr_svc_on_ws_json(t->valuestring, root);
+        } else if (strcmp(t->valuestring, "tcver") == 0) {
+            /* TC275 version beacon: {"t":"tcver","app":"...","sbl":"..."} */
+            const cJSON *a = cJSON_GetObjectItem(root, "app");
+            const cJSON *b = cJSON_GetObjectItem(root, "sbl");
+            app_state_set_tc_ver(cJSON_IsString(a) ? a->valuestring : "",
+                                 cJSON_IsString(b) ? b->valuestring : "");
         } else if (strcmp(t->valuestring, "err") == 0) {
             const cJSON *e = cJSON_GetObjectItem(root, "e");
             if (cJSON_IsString(e) && strcmp(e->valuestring, "auth") == 0) {

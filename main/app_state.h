@@ -126,6 +126,8 @@ typedef struct {
     uint32_t     tele_seq;          /* last telemetry E2E sequence           */
     scr_qual_t   quality;
     char         c6_fw[SCR_FW_STR_MAX];
+    char         tc_app_ver[32];    /* "APPFW tc275_car vX.Y.Z" from {"t":"tcver"} */
+    char         tc_sbl_ver[32];    /* "SBLFW tc275_sbl vX.Y.Z", "" = SBL absent   */
     uint16_t     link_rtt_ms;       /* C6<->TC275 link RTT, from telemetry   */
     uint8_t      link_err_rate;     /* C6<->TC275 error rate, 0.1 % units    */
     char         pair_status[64];   /* pairing page feedback                 */
@@ -185,6 +187,7 @@ void app_state_set_rates(uint16_t tx, uint16_t rx);
 void app_state_set_loss(uint16_t pct_x10);
 void app_state_set_quality(scr_qual_t q);
 void app_state_set_c6_fw(const char *fw);
+void app_state_set_tc_ver(const char *app, const char *sbl);
 void app_state_set_telemetry(const proto_telemetry_t *t);
 void app_state_set_pair_status(const char *txt);    /* pairing page feedback  */
 

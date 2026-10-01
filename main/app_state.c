@@ -185,6 +185,14 @@ void app_state_set_c6_fw(const char *fw)
     xSemaphoreGive(s_mtx);
 }
 
+void app_state_set_tc_ver(const char *app, const char *sbl)
+{
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    snprintf(s_state.tc_app_ver, sizeof(s_state.tc_app_ver), "%s", app ? app : "");
+    snprintf(s_state.tc_sbl_ver, sizeof(s_state.tc_sbl_ver), "%s", sbl ? sbl : "");
+    xSemaphoreGive(s_mtx);
+}
+
 void app_state_set_owner(scr_owner_t o)
 {
     xSemaphoreTake(s_mtx, portMAX_DELAY);

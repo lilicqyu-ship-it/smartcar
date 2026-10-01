@@ -626,12 +626,13 @@ static void fdiag_create(lv_obj_t *root)
     for (int i = 0; i < 12; i++) {
         s_fd.c6[i] = kv_at(cc, 26 + i * 31, c6k[i]);
     }
-    static const char *const tck[12] = { "TELEMETRY", "STATE", "FAULT", "FIRMWARE",
+    static const char *const tck[13] = { "TELEMETRY", "STATE", "FAULT", "FIRMWARE",
                                          "HW REV", "BATTERY", "LEFT T/M", "RIGHT T/M",
-                                         "ODO SESSION", "ODO TOTAL", "LINK RTT", "LINK ERR" };
+                                         "ODO SESSION", "ODO TOTAL", "LINK RTT", "LINK ERR",
+                                         "SBL" };
     lv_obj_t *tcc = card_at(root, 558, 58, 234, 414, "TC275 VEHICLE");
-    for (int i = 0; i < 12; i++) {
-        s_fd.tc[i] = kv_at(tcc, 26 + i * 31, tck[i]);
+    for (int i = 0; i < 13; i++) {
+        s_fd.tc[i] = kv_at(tcc, 26 + i * 29, tck[i]);
     }
 }
 
@@ -799,6 +800,19 @@ void ui_service_fdiag_refresh(const scr_state_t *st)
             ui_label_set_text(s_fd.tc[i], "--");
             ui_label_set_color(s_fd.tc[i], lv_color_hex(UI_COL_DIM));
         }
+    }
+
+    /* SBL version rides its own beacon ({"t":"tcver"}), independent of
+     * telemetry freshness; empty string = SBL not flashed / pre-version SBL. */
+    if (st->tc_sbl_ver[0] == ' ') {
+        ui_label_set_text(s_fd.tc[12], "--");
+        ui_label_set_color(s_fd.tc[12], lv_color_hex(UI_COL_DIM));
+    } else if (strncmp(st->tc_sbl_ver, "SBLFW tc275_sbl v", 17) == 0) {
+        ui_label_set_text(s_fd.tc[12], st->tc_sbl_ver + 17);
+        ui_label_set_color(s_fd.tc[12], lv_color_hex(UI_COL_TXT));
+    } else {
+        ui_label_set_text(s_fd.tc[12], st->tc_sbl_ver);
+        ui_label_set_color(s_fd.tc[12], lv_color_hex(UI_COL_TXT));
     }
     set_enabled(s_fd.clear, link && st->ctrl_role);
 }
