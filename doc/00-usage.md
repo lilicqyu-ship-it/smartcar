@@ -59,7 +59,7 @@ smartcar/
 ├── esp32c6_car/             # 子仓库①：ESP32-C6 小车主控固件（ESP-IDF）
 ├── smartcar_remote/         # 子仓库②：ESP32-S3 遥控器（LVGL + proto）
 ├── tc275_car/               # 子仓库③：TC275 车体控制固件（TriCore）
-├── myCarSbl/                # 子仓库④：TC275 OTA 二级引导（PFlash 双 bank + 回滚）
+├── tc275_sbl/                # 子仓库④：TC275 OTA 二级引导（PFlash 双 bank + 回滚）
 ├── contracts/               # ★ 共享接口契约（唯一权威版本，逐字节校验）
 │   ├── link/                #   LINK 通信协议：proto_frames.[ch]（帧格式/命令常量表/CRC16）
 │   ├── ota/                 #   SBL↔App 接口：ota_layout.h（槽位/分区/DFlash 分配）
@@ -204,7 +204,7 @@ git push
 
 适用：槽位布局、镜像头、签名范围、公钥、ed25519/SHA-512 实现。SBL 和 App 必须一致，否则只能上板才发现。
 
-流程与 §5.2 完全相同，只是副本方变成 `myCarSbl/mw/ota|crypto/`、`tc275_car/mw/ota|crypto/`、`esp32c6_car/components/c6_ota/`，涉及仓库更多：
+流程与 §5.2 完全相同，只是副本方变成 `tc275_sbl/mw/ota|crypto/`、`tc275_car/mw/ota|crypto/`、`esp32c6_car/components/c6_ota/`，涉及仓库更多：
 
 1. 改 `contracts/ota/...` 或 `contracts/crypto/...`
 2. `just contracts-apply`（同步进所有相关仓库）
@@ -279,11 +279,11 @@ CHECKS=(
   "link/proto_frames.h  esp32c6_car/components/c6_proto/proto_frames.h smartcar_remote/main/proto/proto_frames.h"
   ...
   # 新增行：contracts/内路径  各仓库副本路径...
-  "ota/ota_layout.h     myCarSbl/mw/ota/ota_layout.h  tc275_car/mw/ota/ota_layout.h"
+  "ota/ota_layout.h     tc275_sbl/mw/ota/ota_layout.h  tc275_car/mw/ota/ota_layout.h"
 )
 ```
 
-当前覆盖 27 项：link 2 文件 ×2 仓库、ota 4 文件 ×2 仓库（myCarSbl+tc275_car）、crypto 5 文件 ×3 仓库（esp32c6_car+myCarSbl+tc275_car）。
+当前覆盖 27 项：link 2 文件 ×2 仓库、ota 4 文件 ×2 仓库（tc275_sbl+tc275_car）、crypto 5 文件 ×3 仓库（esp32c6_car+tc275_sbl+tc275_car）。
 
 ### 7.2 sync-gh.sh —— GitHub 配置批量下发
 
@@ -383,11 +383,11 @@ git submodule add -b main https://github.com/lilicqyu-ship-it/tc275_car-freecad.
 | contracts/ 文件 | 内容 | 各仓库副本 |
 |---|---|---|
 | link/proto_frames.h/.c | LINK v2 帧编解码 + 命令常量表 + CRC16 | esp32c6_car `components/c6_proto/`；smartcar_remote `main/proto/` |
-| ota/ota_layout.h | PFlash 槽位 A/B、DFlash 扇区分配 | myCarSbl `mw/ota/`；tc275_car `mw/ota/` |
+| ota/ota_layout.h | PFlash 槽位 A/B、DFlash 扇区分配 | tc275_sbl `mw/ota/`；tc275_car `mw/ota/` |
 | ota/ota_meta.h | DFlash 双页启动元数据（24B LE） | 同上 |
 | ota/tcfw_bundle.h | TCFW 包头 148B、签名范围 84B | 同上 |
 | ota/ota_keys.h | ed25519 验签公钥 | 同上 |
-| crypto/ed25519v.h/.c | ed25519 验签实现 | esp32c6_car `components/c6_ota/`；myCarSbl `mw/crypto/`；tc275_car `mw/crypto/` |
+| crypto/ed25519v.h/.c | ed25519 验签实现 | esp32c6_car `components/c6_ota/`；tc275_sbl `mw/crypto/`；tc275_car `mw/crypto/` |
 | crypto/sha512.h/.c | SHA-512 实现 | 同上 |
 | crypto/c6_consts.h | C6FW 常量（与 C6 侧对齐） | 同上 |
 
@@ -395,5 +395,5 @@ git submodule add -b main https://github.com/lilicqyu-ship-it/tc275_car-freecad.
 
 - `esp32c6_car/doc/02-proto.md` —— LINK 协议设计
 - `tc275_car/doc/20-design/24-ota-sbl-dualbank.md` —— OTA 方案设计
-- `myCarSbl/doc/24-ota-sbl-dualbank.md` —— SBL 实现
+- `tc275_sbl/doc/24-ota-sbl-dualbank.md` —— SBL 实现
 - `README.md` —— 本仓库简介与命令速览

@@ -8,7 +8,7 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-REPOS=(esp32c6_car smartcar_remote tc275_car myCarSbl)
+REPOS=(esp32c6_car smartcar_remote tc275_car tc275_sbl)
 
 has_upstream() { git -C "$1" rev-parse --abbrev-ref '@{upstream}' &>/dev/null; }
 

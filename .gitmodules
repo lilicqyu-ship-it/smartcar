@@ -10,7 +10,7 @@
 	path = tc275_car
 	url = https://github.com/lilicqyu-ship-it/tc275_car.git
 	branch = main
-[submodule "myCarSbl"]
-	path = myCarSbl
-	url = https://github.com/lilicqyu-ship-it/myCarSbl.git
+[submodule "tc275_sbl"]
+	path = tc275_sbl
+	url = https://github.com/lilicqyu-ship-it/tc275_sbl.git
 	branch = main

@@ -19,7 +19,7 @@ smartcar/
 ├── esp32c6_car/       ESP32-C6 小车主控固件（ESP-IDF）
 ├── smartcar_remote/   ESP32-S3 遥控器（LVGL + proto）
 ├── tc275_car/         TC275 车体控制固件（TriCore/AUTOSAR 风格）
-├── myCarSbl/          TC275 OTA 二级引导（PFlash 双 bank + 自动回滚）
+├── tc275_sbl/          TC275 OTA 二级引导（PFlash 双 bank + 自动回滚）
 ├── contracts/
 │   ├── link/          LINK 通信协议: proto_frames.[ch]（帧格式/命令表/CRC）
 │   └── ota/           SBL↔App 接口: ota_layout.h（槽位/分区）、
@@ -64,8 +64,8 @@ just init
 | contracts/ 文件 | 各仓库副本 |
 |---|---|
 | link/proto_frames.h/.c | esp32c6_car `components/c6_proto/`，smartcar_remote `main/proto/` |
-| ota/ota_layout.h, ota_meta.h, tcfw_bundle.h, ota_keys.h | myCarSbl `mw/ota/`，tc275_car `mw/ota/` |
-| crypto/ed25519v.[ch], sha512.[ch], c6_consts.h | esp32c6_car `components/c6_ota/`，myCarSbl `mw/crypto/`，tc275_car `mw/crypto/` |
+| ota/ota_layout.h, ota_meta.h, tcfw_bundle.h, ota_keys.h | tc275_sbl `mw/ota/`，tc275_car `mw/ota/` |
+| crypto/ed25519v.[ch], sha512.[ch], c6_consts.h | esp32c6_car `components/c6_ota/`，tc275_sbl `mw/crypto/`，tc275_car `mw/crypto/` |
 
 CI：`.github/workflows/contracts.yml` 在 push/PR 时按 submodule 指针拉取四仓库并运行同一校验。
 
@@ -89,7 +89,7 @@ git push origin main --tags
 
 ## Windows 开发环境
 
-TC275 / myCarSbl 只能在 Windows 的 AURIX Development Studio（TASKING）下编译，
+TC275 / tc275_sbl 只能在 Windows 的 AURIX Development Studio（TASKING）下编译，
 ESP32 两仓库在 Windows / macOS 均可。
 
 ```powershell
@@ -104,8 +104,8 @@ cd C:\Code\smartcar; just init; just doctor
 - 根目录放短路径（`C:\Code\smartcar`），避免超 260 字符。
 - `justfile` 在 Windows 固定用 `C:/Program Files/Git/bin/bash.exe`，不用 WSL bash。
 - 换行：五个仓库都有 `.gitattributes`（`eol=lf`，`.bat` 为 CRLF），两平台字节一致。
-- ADS：`File → Import → Existing Projects into Workspace`，选 `tc275_car`（工程名 `myCar`）
-  和 `myCarSbl`，**不要勾 Copy into workspace**，否则改动不在 git 里。
-  `.launch` 里写死了 `C:/Code/TC275/AURIX-v1.10.36-workspace/...` 的 elf 路径和
-  ADS 安装路径，换位置后需在 Debug Configurations 里重选一次 elf。
+- ADS：`File → Import → Existing Projects into Workspace`，选 `tc275_car` 和 `tc275_sbl`
+  （工程名已与目录名一致），**不要勾 Copy into workspace**，否则改动不在 git 里。
+  从旧工作台迁移的：先移除 workspace 里残留的 `myCar`/`myCarSbl` 旧工程再重新导入；
+  Debug Configuration 如 elf 指向旧路径则重选一次（产物现为 `tc275_car.elf`/`tc275_sbl.elf`）。
 - ESP-IDF 用官方 Windows 安装器；`esp32c6_car/flash.bat` 可直接用（串口 `COMx`）。

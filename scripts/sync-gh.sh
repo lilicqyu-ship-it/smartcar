@@ -10,7 +10,7 @@
 set -uo pipefail
 
 OWNER="lilicqyu-ship-it"
-REPOS=(esp32c6_car smartcar_remote tc275_car myCarSbl)
+REPOS=(esp32c6_car smartcar_remote tc275_car tc275_sbl)
 PROJECT_TITLE="Smartcar"
 MAIN_BRANCH="main"
 

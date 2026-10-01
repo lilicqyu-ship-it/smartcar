@@ -44,7 +44,7 @@ contracts-apply:
 # 记录当前四仓库版本组合（bump submodule 指针）；先过契约校验
 lock msg="lock: bump submodule versions":
     bash scripts/check-contracts.sh
-    git add esp32c6_car smartcar_remote tc275_car myCarSbl
+    git add esp32c6_car smartcar_remote tc275_car tc275_sbl
     git diff --cached --quiet || git commit -m "{{msg}}"
 
 # 整车发版：校验契约 -> 锁版本 -> 打总 tag（push 需手动 git push origin main --tags）
