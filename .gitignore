@@ -9,3 +9,6 @@ firmware/dist/**/*.mdf
 .codegraph/
 .kiro/
 /firmware/__pycache__/*.pyc
+
+# 外部工具残留的差异文件（TortoiseGit/对比工具临时补丁等）
+*.diff
