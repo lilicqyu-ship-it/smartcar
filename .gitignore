@@ -2,9 +2,6 @@
 /TriCore Release (TASKING)
 /test/host/out/
 /build/
-/.sconsign.dblite
+/cc[0-9a-f]*
 __pycache__/
 50-tech-assessment.md
-# SCons 命令行构建（site_scons/aurix_tasking.py；如改用入库方案可删此两行）
-/SConstruct
-/site_scons/
