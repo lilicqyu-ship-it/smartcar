@@ -1,26 +1,29 @@
-# CI: host unit tests + firmware build against sdkconfig.defaults
-# (the local dev sdkconfig is untracked/bench-flavored on purpose - CI is the
-# production-flavor gate; releases are cut from the same defaults).
-# The firmware job also runs tools/ci_size_report.py (same as smartcar_remote):
-# flash/RAM usage with free-margin percentages into the job summary, failing
-# the build past the size gates (app <= 90% of the OTA slot, static DIRAM
-# <= 95%, extra images must fit their partition).
-name: CI
+# CI (esp32c6_car): host 单测 + 固件构建（sdkconfig.defaults，生产口味）
+# （本机 sdkconfig 是台架口味故意不入库——CI 是生产口味的门禁；发版也出自同一 defaults）
+# 大小门禁: app <= 90% OTA 槽位、静态 DIRAM <= 95%、extra images 必须装进各自分区
+# （tools/ci_size_report.py，与 smartcar_remote 同款）。
+# monorepo: working-directory 指向 esp32c6_car/；contracts/ 变更同样触发（接口副本的源头）。
+name: CI (esp32c6_car)
 
 on:
   push:
     branches: [main]
+    paths: ["esp32c6_car/**", "contracts/**"]
   pull_request:
+    paths: ["esp32c6_car/**", "contracts/**"]
   workflow_dispatch:
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: esp32c6-car-ci-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   host-tests:
     name: Host unit tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: esp32c6_car
     steps:
       - uses: actions/checkout@v4
 
@@ -30,10 +33,13 @@ jobs:
   firmware:
     name: Firmware build + size gates (IDF v6.1-beta1)
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: esp32c6_car
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0          # no PROJECT_VER override: git describe feeds it
+          fetch-depth: 0          # PROJECT_VER 由 git describe 提供
 
       - name: Cache ESP-IDF v6.1-beta1 and toolchain
         id: idf

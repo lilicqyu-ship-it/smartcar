@@ -1,0 +1,69 @@
+name: CI (smartcar_remote)
+
+# 编译门禁 + 固件大小/资源余量报告。
+# - firmware: 完整 ESP-IDF v6.1 构建（sdkconfig.defaults，门禁的就是入库配置），
+#   scripts/ci_size_report.py 把 flash/RAM 占用与余量百分比写进 job summary，
+#   超门禁直接失败。
+# - host-tests: G1 协议门禁，无需目标板。
+# monorepo: working-directory 指向 smartcar_remote/；contracts/ 变更同样触发。
+
+on:
+  push:
+    branches: [main]
+    paths: ["smartcar_remote/**", "contracts/**"]
+  pull_request:
+    paths: ["smartcar_remote/**", "contracts/**"]
+  workflow_dispatch:
+
+jobs:
+  firmware:
+    name: esp-idf build + size gates
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v6.1
+    defaults:
+      run:
+        working-directory: smartcar_remote
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build (ESP-IDF v6.1, esp32s3)
+        run: |
+          # Job 容器里的步骤走 docker exec，不执行镜像 entrypoint，
+          # IDF 环境需要每步手动 source。
+          . /opt/esp/idf/export.sh
+          idf.py set-target esp32s3
+          idf.py build
+
+      - name: Firmware size & resource margins
+        run: |
+          . /opt/esp/idf/export.sh
+          python scripts/ci_size_report.py \
+            --map build/smartcar_remote.map \
+            --bin build/smartcar_remote.bin \
+            --partitions partitions.csv
+
+      - name: Upload firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-smartcar_remote
+          path: |
+            smartcar_remote/build/smartcar_remote.bin
+            smartcar_remote/build/bootloader/bootloader.bin
+            smartcar_remote/build/partition_table/partition-table.bin
+            smartcar_remote/build/flasher_args.json
+          if-no-files-found: error
+
+  host-tests:
+    name: host proto tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: smartcar_remote
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run proto tests
+        run: make -C test/host check

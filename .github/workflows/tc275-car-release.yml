@@ -1,15 +1,13 @@
-name: Release
+name: Release (tc275_car)
 
-# Tag-driven release. Pushing vX.Y.Z re-runs the host tests first, then
-# creates the GitHub Release with generated notes. Per the repo's version
-# convention (see the v0.2.0 release notes), the 0.x series is pre-production
-# and is published with the prerelease flag; v1.0.0+ publish as full releases.
+# Tag 驱动发版。push app/vX.Y.Z 先跑 host 单测，再创建 GitHub Release
+# （自动生成 notes）。版本约定（见 v0.2.0 release notes）: 0.x 系列为
+# 预生产，带 prerelease 标志发布; v1.0.0+ 为正式发布。
 #
-# Firmware binaries are intentionally NOT attached: the TASKING build is
-# IDE-based and cannot run on hosted runners. Build from the tag.
+# 刻意不附固件二进制: TASKING 构建走 IDE，托管 runner 上无法运行。请从 tag 自行构建。
 on:
   push:
-    tags: ['v*']
+    tags: ['app/v*']
 
 permissions:
   contents: read
@@ -17,7 +15,7 @@ permissions:
 jobs:
   test:
     name: Host tests before publish
-    uses: ./.github/workflows/ci.yml
+    uses: ./.github/workflows/tc275-car.yml
 
   release:
     name: Publish GitHub Release
@@ -26,9 +24,6 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
       - name: Create or update the release for this tag
         env:
           GH_TOKEN: ${{ github.token }}
@@ -36,8 +31,8 @@ jobs:
           TAG="${GITHUB_REF_NAME}"
           ARGS=(--verify-tag --title "$TAG")
           case "$TAG" in
-            v0.*) ARGS+=(--prerelease --latest=false) ;;
-            *)    ARGS+=(--latest) ;;
+            app/v0.*) ARGS+=(--prerelease --latest=false) ;;
+            *)        ARGS+=(--latest) ;;
           esac
           if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
             gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" "${ARGS[@]}"

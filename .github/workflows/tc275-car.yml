@@ -1,0 +1,58 @@
+name: CI (tc275_car)
+
+# Host 侧验证。TASKING 固件编译无法在托管 runner 上进行（专有编译器），
+# CI 覆盖 gcc 能证明的部分: SF 帧编解码、38 字节遥测布局对 C6 侧解码器的
+# 交叉校验、链路时序图的 JSON 源。
+# monorepo: esp32c6_car 就在仓内——遥测交叉校验直接编译仓内 C6 源码，
+# 跨工程字节布局是"编译期锁定"而非复制（doc 22 E13/R12）；C6 侧契约变更
+# 必须在这里炸 CI，而不是在台架上。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "tc275_car/**"
+      - "esp32c6_car/components/c6_proto/**"
+      - "esp32c6_car/components/c6_sf/**"
+      - "contracts/**"
+  pull_request:
+    paths:
+      - "tc275_car/**"
+      - "esp32c6_car/components/c6_proto/**"
+      - "esp32c6_car/components/c6_sf/**"
+      - "contracts/**"
+  workflow_dispatch:
+  workflow_call:   # 被 tc275-car-release.yml 复用，tag 无法带未测代码上线
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: Host tests (gcc, ubuntu)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tc275_car
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: SF frame codec tests
+        run: |
+          mkdir -p test/host/out
+          gcc -std=c99 -Wall -Wextra -Werror -O2 -I . \
+              test/host/test_sf.c mw/sf/sf_frame.c mw/calib/calib_record.c \
+              -o test/host/out/test_sf
+          test/host/out/test_sf
+
+      - name: Telemetry layout tests (C6 decoder cross-check)
+        run: |
+          gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
+              -I ../esp32c6_car/components/c6_proto -I ../esp32c6_car/components/c6_sf \
+              test/host/test_sf_telemetry.c mw/sf/sf_telemetry.c \
+              mw/sf/sf_frame.c ../esp32c6_car/components/c6_proto/proto_frames.c \
+              -o test/host/out/test_sf_telemetry
+          test/host/out/test_sf_telemetry
+
+      - name: Sequence diagram source is valid JSON
+        run: python3 -m json.tool doc/20-design/link-c6.sequence.json > /dev/null

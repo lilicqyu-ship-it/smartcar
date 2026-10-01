@@ -1,4 +1,5 @@
-# 契约门禁：submodule 指针指向的四仓库版本，其共享接口副本必须与 contracts/ 逐字节一致
+# 契约门禁：四工程的共享接口副本必须与 contracts/ 逐字节一致
+# monorepo：无需再拉 submodule；不加 paths 过滤——副本被单方面改坏同样要在这里拦下
 name: contracts
 
 on:
@@ -19,9 +20,5 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive   # 子仓库均为 public，默认 token 即可拉取
       - name: check contracts
         run: bash scripts/check-contracts.sh
-      - name: scripts smoke test
-        run: bash scripts/repos.sh status

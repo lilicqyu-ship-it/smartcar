@@ -1,0 +1,32 @@
+name: CI (tc275_sbl)
+
+# Host 侧验证。TASKING 固件编译无法在托管 runner 上进行（专有编译器），
+# CI 覆盖 gcc 能证明的部分: OTA 启动状态机、OtaMeta 双页元数据、OTA RX
+# 协议与 TCFW 包格式（test/host `make check`；test_vectors.h 已入库，无需
+# 额外 checkout）。
+# monorepo: working-directory 指向 tc275_sbl/；contracts/ 变更同样触发。
+on:
+  push:
+    branches: [main]
+    paths: ["tc275_sbl/**", "contracts/**"]
+  pull_request:
+    paths: ["tc275_sbl/**", "contracts/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: Host tests (gcc, ubuntu)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tc275_sbl
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # CC=gcc 覆盖 Makefile 的台架专用默认值（msys64 路径）。
+      - name: OTA host unit tests
+        run: make -C test/host check CC=gcc
