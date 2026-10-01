@@ -101,14 +101,16 @@ static void vRobotControlTask(void *pvParameters)
         WDG_serviceCpu();
 
         /* Version beacons to C6->S3 (SF EVT 0x24/0x25, surfacing as a
-         * {"t":"tcver"} JSON on the C6): pushed at task start and re-sent
-         * every 5 s so a freshly connected remote always catches one. */
+         * {"t":"tcver"} JSON on the C6): pushed at task start, re-sent
+         * every 5 s so a freshly connected remote always catches one, and
+         * sent at once on a DIAG 0x53/0x24 request (S3 SYSTEM page tap). */
         {
             static uint32 s_lastBeaconMs = 0u;
             static uint8  s_beaconInit   = 0u;
             uint32        nowMs = (uint32)xTaskGetTickCount() * portTICK_PERIOD_MS;
+            uint8         asked = app_ver_take_request();
 
-            if ((!s_beaconInit) || ((nowMs - s_lastBeaconMs) >= 5000u))
+            if ((!s_beaconInit) || (asked != 0u) || ((nowMs - s_lastBeaconMs) >= 5000u))
             {
                 XcoreEvtFrame frame;
                 uint8         appBuf[APP_VER_EVT_LEN];

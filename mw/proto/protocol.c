@@ -9,6 +9,7 @@
 #include "app/robot.h"
 #include "mw/calib/calib_store.h"
 #include "mw/xcore/xcore.h"
+#include "mw/app_version.h"
 #include "com/wifi_at.h"
 
 #include <string.h>
@@ -150,6 +151,15 @@ void PROTO_handleCommand(uint8 cmd, const uint8 *data, uint8 len)
 
     case PROTO_CMD_DPT_REC_CLEAR:
         CALIB_recordClear();
+        break;
+
+    case PROTO_CMD_DIAG:
+        /* Not a driving command: no heartbeat, no fault gating. The beacon
+         * itself is sent by the CPU0 task right after this queue drain. */
+        if ((len >= 1u) && (data[0] == PROTO_DIAG_SUB_VER_REQ))
+        {
+            app_ver_request();
+        }
         break;
 
     default:

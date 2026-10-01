@@ -41,4 +41,10 @@ const char *sbl_version_string(void);
 
 void app_ver_evt_build(uint8 *app_out, uint8 *sbl_out);
 
+/* 按需版本查询（S3 -> C6 -> SPI DIAG 0x53/0x24）：PROTO_handleCommand 置位，
+ * Cpu0 控制任务在同一轮里取走并立即发送 EVT 0x24/0x25。两者都只在 CPU0
+ * 任务上下文调用，无需跨核同步。 */
+void  app_ver_request(void);
+uint8 app_ver_take_request(void);   /* 1 = 有待发请求（读后清零） */
+
 #endif

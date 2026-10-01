@@ -128,7 +128,9 @@ static boolean link_snapshot(void)
  *                                            physical units; the closed loop
  *                                            still lives on CPU1 (motor targets
  *                                            from CPU0 are percent x 10).
- *   SF_CID_DIAG   {u8 op, ...}               op 0x53 / 0x42, no consumer yet
+ *   SF_CID_DIAG   {u8 op, ...}               op 0x53 / 0x42; CPU0 consumes
+ *                                            0x53 sub 0x24 (version request
+ *                                            -> immediate EVT 0x24/0x25)
  *   SF_CID_DPT    {u8 op, ...}               op 0x70..0x79, the bench
  *                                            calibration/DFlash-record family
  *                                            (doc 34 SS9); results and record

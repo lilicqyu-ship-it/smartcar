@@ -39,3 +39,18 @@ void app_ver_evt_build(uint8 *app_out, uint8 *sbl_out)
         sbl_out[APP_VER_EVT_LEN - 1u] = 0u;
     }
 }
+
+static uint8 s_verReq = 0u;   /* CPU0 only (see app_version.h) */
+
+void app_ver_request(void)
+{
+    s_verReq = 1u;
+}
+
+uint8 app_ver_take_request(void)
+{
+    uint8 r = s_verReq;
+
+    s_verReq = 0u;
+    return r;
+}

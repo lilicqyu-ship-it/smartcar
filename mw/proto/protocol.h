@@ -50,6 +50,13 @@
 #define PROTO_CMD_OTA_SWAP        0x64  /* TC275 reboots into the new slot   */
 #define PROTO_CMD_OTA_ABORT       0x65  /* drop the half-written slot        */
 
+/* DIAG family (SF CMD / CID_DIAG {u8 op, ...}, link.c forwards op + rest).
+ * Sub-op 0x24 = version request: S3 {"t":"tcver"} -> C6 queues it and pulls
+ * the IRQ line -> this MCU reads it over SPI and answers at once with the
+ * EVT 0x24/0x25 version beacons instead of waiting for the 5 s period. */
+#define PROTO_CMD_DIAG            0x53
+#define PROTO_DIAG_SUB_VER_REQ    0x24
+
 /* Response: same CMD echoed back, DATA carries result */
 #define PROTO_CMD_STATUS_REPLY    0x40
 
