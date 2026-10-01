@@ -14,6 +14,7 @@
 #include "../proto/proto_frames.h"
 
 typedef struct {
+    lv_obj_t *root;         /* home page container (visibility gate) */
     lv_obj_t *conn;         /* top bar: connection state          */
     lv_obj_t *owner;        /* top bar: control owner             */
     lv_obj_t *speed;        /* big speed value                    */
@@ -140,7 +141,7 @@ static lv_obj_t *info_cell(lv_obj_t *rail, const char *cap, lv_obj_t **cap_out)
     /* one telemetry row of the right rail: small caption over a large value,
      * both fixed to a single line so nothing can wrap into its neighbour */
     lv_obj_t *cell = lv_obj_create(rail);
-    lv_obj_set_size(cell, LV_PCT(100), 46);
+    lv_obj_set_size(cell, LV_PCT(100), 42);
     lv_obj_set_style_bg_opa(cell, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(cell, 0, 0);
     lv_obj_set_style_pad_all(cell, 0, 0);
@@ -169,8 +170,7 @@ static lv_obj_t *info_cell(lv_obj_t *rail, const char *cap, lv_obj_t **cap_out)
 static void stick_timer_cb(lv_timer_t *t)
 {
     (void)t;
-    if (lv_obj_has_flag(lv_obj_get_parent(lv_obj_get_parent(lv_obj_get_parent(s_home.thr_bar))),
-                        LV_OBJ_FLAG_HIDDEN)) {
+    if (s_home.root == NULL || lv_obj_has_flag(s_home.root, LV_OBJ_FLAG_HIDDEN)) {
         return;                     /* home page not visible */
     }
     scr_state_t st;
@@ -191,13 +191,30 @@ void ui_home_create(lv_obj_t *root)
 {
     uint16_t w = bsp_display_get_h_res();
     uint16_t h = bsp_display_get_v_res();
-    lv_obj_set_flex_flow(root, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_flex_align(root, LV_FLEX_ALIGN_START, LV_FLEX_ALIGN_CENTER,
-                          LV_FLEX_ALIGN_CENTER);
+    s_home.root = root;
+
+    /* ---- layout: [ left control column | full-height square stick zone ] ------
+     * The stick owns the right edge at the full panel height (480x480 on the
+     * 800x480 panel) so the right thumb has the biggest possible pad; every
+     * readout and control lives in the left column. */
+    const int ZONE  = h;                /* square stick zone, full height   */
+    const int LW    = w - ZONE;         /* left column width (320 on 800)   */
+    const int BAR_H = 52;
+    const int STOP_H = 60;
+
+    lv_obj_t *lcol = lv_obj_create(root);
+    lv_obj_set_size(lcol, LW, h);
+    lv_obj_align(lcol, LV_ALIGN_TOP_LEFT, 0, 0);
+    lv_obj_set_style_bg_opa(lcol, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(lcol, 0, 0);
+    lv_obj_set_style_radius(lcol, 0, 0);
+    lv_obj_set_style_pad_all(lcol, 0, 0);
+    lv_obj_remove_flag(lcol, LV_OBJ_FLAG_SCROLLABLE);
 
     /* ---- top bar (spec 10: left name, right connection + owner) ---------------- */
-    lv_obj_t *bar = lv_obj_create(root);
-    lv_obj_set_size(bar, LV_PCT(100), 52);
+    lv_obj_t *bar = lv_obj_create(lcol);
+    lv_obj_set_size(bar, LV_PCT(100), BAR_H);
+    lv_obj_align(bar, LV_ALIGN_TOP_MID, 0, 0);
     lv_obj_set_style_bg_color(bar, lv_color_hex(UI_COL_SURFACE), 0);
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, 0);
     lv_obj_set_style_border_side(bar, LV_BORDER_SIDE_BOTTOM, 0);
@@ -205,40 +222,55 @@ void ui_home_create(lv_obj_t *root)
     lv_obj_set_style_border_color(bar, lv_color_hex(UI_COL_ACCENT), 0);
     lv_obj_set_style_border_opa(bar, LV_OPA_60, 0);
     lv_obj_set_style_radius(bar, 0, 0);
+    lv_obj_set_style_pad_all(bar, 0, 0);    /* default theme pad squeezed both sides together */
     lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* accent tick + spaced title: HUD header */
+    /* Fixed horizontal budget (320 px column):
+     *   [10 tick][20..140 title][146..262 status][268..312 gear]
+     * Every label is one line, fixed width, DOTS-truncated, so no string can
+     * grow into its neighbour. */
+    const int TITLE_X = 20, TITLE_W = 120;
+    const int GEAR_W = 44, GEAR_M = 8;
+    const int STAT_W = LW - TITLE_X - TITLE_W - 6 - GEAR_W - GEAR_M - 6;
+
+    /* accent tick + title: HUD header */
     lv_obj_t *tick = lv_obj_create(bar);
     lv_obj_set_size(tick, 4, 24);
     lv_obj_set_style_radius(tick, 1, 0);
     lv_obj_set_style_border_width(tick, 0, 0);
     lv_obj_set_style_bg_color(tick, lv_color_hex(UI_COL_ACCENT), 0);
     lv_obj_set_style_bg_opa(tick, LV_OPA_COVER, 0);
-    lv_obj_align(tick, LV_ALIGN_LEFT_MID, 12, 0);
+    lv_obj_align(tick, LV_ALIGN_LEFT_MID, 10, 0);
     lv_obj_t *title = mk_label(bar, "SMART CAR", F_LG, lv_color_hex(UI_COL_TXT));
-    lv_obj_set_style_text_letter_space(title, 3, 0);
-    lv_obj_align(title, LV_ALIGN_LEFT_MID, 24, -7);
+    lv_obj_set_size(title, TITLE_W, lv_font_get_line_height(F_LG));
+    lv_label_set_long_mode(title, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_align(title, LV_ALIGN_LEFT_MID, TITLE_X, -8);
     lv_obj_t *sub = mk_label(bar, "REMOTE CONSOLE", F_SM, lv_color_hex(UI_COL_ACCENT));
-    lv_obj_set_style_text_letter_space(sub, 2, 0);
-    lv_obj_align(sub, LV_ALIGN_LEFT_MID, 24, 13);
+    lv_obj_set_size(sub, TITLE_W, lv_font_get_line_height(F_SM));
+    lv_label_set_long_mode(sub, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_align(sub, LV_ALIGN_LEFT_MID, TITLE_X, 12);
 
     lv_obj_t *right = lv_obj_create(bar);
-    /* explicit height: LV_SIZE_CONTENT only bounds one child, so the stacked
-     * connection/owner labels would print on top of each other */
-    lv_obj_set_size(right, LV_SIZE_CONTENT, 38);
+    lv_obj_set_size(right, STAT_W, 38);
     lv_obj_set_style_bg_opa(right, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(right, 0, 0);
     lv_obj_set_style_pad_all(right, 0, 0);
     lv_obj_remove_flag(right, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_align(right, LV_ALIGN_RIGHT_MID, -62, 0);
+    lv_obj_align(right, LV_ALIGN_RIGHT_MID, -(GEAR_W + GEAR_M + 6), 0);
     s_home.conn = mk_label(right, "SEARCHING", F_SM, lv_color_hex(UI_COL_DIM));
     s_home.owner = mk_label(right, "NO CONTROL", F_SM, lv_color_hex(UI_COL_WARN));
+    lv_obj_t *st_lbl[2] = { s_home.conn, s_home.owner };
+    for (int i = 0; i < 2; i++) {
+        lv_obj_set_size(st_lbl[i], STAT_W, lv_font_get_line_height(F_SM));
+        lv_label_set_long_mode(st_lbl[i], LV_LABEL_LONG_MODE_DOTS);
+        lv_obj_set_style_text_align(st_lbl[i], LV_TEXT_ALIGN_RIGHT, 0);
+    }
     lv_obj_align(s_home.conn, LV_ALIGN_TOP_RIGHT, 0, 0);
     lv_obj_align(s_home.owner, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
 
     lv_obj_t *gear = lv_button_create(bar);
-    lv_obj_set_size(gear, 44, 44);
-    lv_obj_align(gear, LV_ALIGN_RIGHT_MID, -8, 0);
+    lv_obj_set_size(gear, GEAR_W, GEAR_W);
+    lv_obj_align(gear, LV_ALIGN_RIGHT_MID, -GEAR_M, 0);
     lv_obj_set_style_bg_color(gear, lv_color_hex(UI_COL_SURFACE2), 0);
     lv_obj_set_style_radius(gear, 8, 0);
     lv_obj_set_style_shadow_width(gear, 0, 0);
@@ -250,33 +282,26 @@ void ui_home_create(lv_obj_t *root)
     lv_obj_center(gear_lbl);
     lv_obj_add_event_cb(gear, gear_cb, LV_EVENT_CLICKED, NULL);
 
-    /* ---- body: cockpit = speed/mode | stick with HUD arcs | telemetry rail -------
-     * The stick sits in the middle of the screen (both thumbs reach it) and
-     * is ringed by three live arcs - throttle on the left, steering below,
-     * speed above - so the information you steer by is where you look while
-     * steering, and the space around the pad is no longer dead.  Both side
-     * rails are fixed-width; nothing floats. */
-    int body_h = h - 52 - 56 - 12;
-    const int RAIL = 196;
-    lv_obj_t *body = lv_obj_create(root);
-    lv_obj_set_size(body, LV_PCT(100), body_h + 12);
+    /* ---- left column body: speed card on top, mode | telemetry below --------- */
+    int body_h = h - BAR_H - STOP_H - 12;   /* inner height after 6 px padding */
+    lv_obj_t *body = lv_obj_create(lcol);
+    lv_obj_set_size(body, LW, body_h + 12);
+    lv_obj_align(body, LV_ALIGN_TOP_LEFT, 0, BAR_H);
     lv_obj_set_style_bg_opa(body, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(body, 0, 0);
     lv_obj_set_style_pad_all(body, 6, 0);
     lv_obj_remove_flag(body, LV_OBJ_FLAG_SCROLLABLE);
 
-    /* left rail: speed + mode selector */
-    lv_obj_t *left = lv_obj_create(body);
-    lv_obj_set_size(left, RAIL, body_h);
-    lv_obj_align(left, LV_ALIGN_LEFT_MID, 0, 0);
-    lv_obj_set_style_bg_opa(left, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(left, 0, 0);
-    lv_obj_set_style_pad_all(left, 0, 0);
-    lv_obj_remove_flag(left, LV_OBJ_FLAG_SCROLLABLE);
+    const int SPD_H = 92;
+    const int GAP   = 8;
+    const int CW    = (LW - 12 - GAP) / 2;      /* column width (150 on 800) */
+    const int COL_H = body_h - SPD_H - GAP;
+    const int MB_H  = (COL_H - 22 - 2 * 6) / 3; /* mode button height        */
 
-    lv_obj_t *scard = ui_card(left);
-    lv_obj_set_size(scard, RAIL, 150);
+    lv_obj_t *scard = ui_card(body);
+    lv_obj_set_size(scard, LV_PCT(100), SPD_H);
     lv_obj_align(scard, LV_ALIGN_TOP_MID, 0, 0);
+    lv_obj_remove_flag(scard, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_t *sp_lbl = mk_label(scard, "SPEED", F_SM, lv_color_hex(UI_COL_ACCENT));
     lv_obj_set_style_text_letter_space(sp_lbl, 3, 0);
     lv_obj_align(sp_lbl, LV_ALIGN_TOP_LEFT, 2, 0);
@@ -285,14 +310,23 @@ void ui_home_create(lv_obj_t *root)
     lv_obj_t *unit = mk_label(scard, "m/s", F_MD, lv_color_hex(UI_COL_DIM));
     lv_obj_align(unit, LV_ALIGN_BOTTOM_RIGHT, -2, 0);
 
+    /* mode selector column */
+    lv_obj_t *left = lv_obj_create(body);
+    lv_obj_set_size(left, CW, COL_H);
+    lv_obj_align(left, LV_ALIGN_TOP_LEFT, 0, SPD_H + GAP);
+    lv_obj_set_style_bg_opa(left, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(left, 0, 0);
+    lv_obj_set_style_pad_all(left, 0, 0);
+    lv_obj_remove_flag(left, LV_OBJ_FLAG_SCROLLABLE);
+
     lv_obj_t *mcap = mk_label(left, "DRIVE MODE", F_SM, lv_color_hex(UI_COL_ACCENT));
-    lv_obj_set_style_text_letter_space(mcap, 3, 0);
-    lv_obj_align(mcap, LV_ALIGN_TOP_LEFT, 4, 160);
+    lv_obj_set_style_text_letter_space(mcap, 2, 0);
+    lv_obj_align(mcap, LV_ALIGN_TOP_LEFT, 4, 0);
     static const char *const mtxt[3] = { "ECO", "NORMAL", "SPORT" };
     for (int i = 0; i < 3; i++) {
         lv_obj_t *mb = lv_button_create(left);
-        lv_obj_set_size(mb, RAIL, 52);
-        lv_obj_align(mb, LV_ALIGN_TOP_MID, 0, 184 + i * 58);
+        lv_obj_set_size(mb, CW, MB_H);
+        lv_obj_align(mb, LV_ALIGN_TOP_MID, 0, 22 + i * (MB_H + 6));
         lv_obj_set_style_radius(mb, 8, 0);
         lv_obj_set_style_shadow_width(mb, 0, 0);
         lv_obj_set_style_bg_color(mb, lv_color_hex(UI_COL_SURFACE), 0);
@@ -303,7 +337,7 @@ void ui_home_create(lv_obj_t *root)
         lv_obj_set_style_border_width(mb, 2, LV_STATE_CHECKED);
         lv_obj_add_event_cb(mb, mode_cb, LV_EVENT_CLICKED, (void *)(uintptr_t)i);
         lv_obj_t *ml = mk_label(mb, mtxt[i], F_LG, lv_color_hex(UI_COL_DIM));
-        lv_obj_set_style_text_letter_space(ml, 3, 0);
+        lv_obj_set_style_text_letter_space(ml, 2, 0);
         lv_obj_set_style_text_color(ml, lv_color_hex(UI_COL_ACCENT), LV_STATE_CHECKED);
         lv_obj_add_flag(ml, LV_OBJ_FLAG_EVENT_BUBBLE);
         lv_obj_center(ml);
@@ -311,11 +345,12 @@ void ui_home_create(lv_obj_t *root)
     }
     s_home.mode = lv_obj_get_child(s_home.mode_btn[1], 0);  /* legacy handle */
 
-    /* right rail: telemetry, one fixed row per value */
+    /* telemetry column, right of the mode selector */
     lv_obj_t *rail = ui_card(body);
-    lv_obj_set_size(rail, RAIL, body_h);
-    lv_obj_align(rail, LV_ALIGN_RIGHT_MID, 0, 0);
-    lv_obj_set_style_pad_all(rail, 10, 0);
+    lv_obj_set_size(rail, CW, COL_H);
+    lv_obj_align(rail, LV_ALIGN_TOP_RIGHT, 0, SPD_H + GAP);
+    lv_obj_set_style_pad_all(rail, 8, 0);
+    lv_obj_remove_flag(rail, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_set_flex_flow(rail, LV_FLEX_FLOW_COLUMN);
     lv_obj_set_flex_align(rail, LV_FLEX_ALIGN_SPACE_BETWEEN, LV_FLEX_ALIGN_START,
                           LV_FLEX_ALIGN_START);
@@ -332,17 +367,19 @@ void ui_home_create(lv_obj_t *root)
     s_home.lat    = info_cell(rail, "PING", NULL);
     s_home.loss   = info_cell(rail, "LOSS", NULL);
 
-    /* centre: stick ringed by HUD arcs */
-    lv_obj_t *zone = lv_obj_create(body);
-    int zw = w - 2 * RAIL - 12 - 16;
-    lv_obj_set_size(zone, zw, body_h);
-    lv_obj_align(zone, LV_ALIGN_CENTER, 0, 0);
+    /* right: full-height square stick zone ringed by HUD arcs - throttle on
+     * the left, steering below, speed above */
+    lv_obj_t *zone = lv_obj_create(root);
+    int zw = ZONE;
+    lv_obj_set_size(zone, zw, ZONE);
+    lv_obj_align(zone, LV_ALIGN_RIGHT_MID, 0, 0);
     lv_obj_set_style_bg_opa(zone, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(zone, 0, 0);
-    lv_obj_set_style_pad_all(zone, 0, 0);
+    lv_obj_set_style_radius(zone, 0, 0);
+    lv_obj_set_style_pad_all(zone, 6, 0);
     lv_obj_remove_flag(zone, LV_OBJ_FLAG_SCROLLABLE);
 
-    int ring = body_h - 4;                  /* arcs ring diameter */
+    int ring = ZONE - 12 - 4;               /* arcs ring diameter */
     if (ring > zw - 8) {
         ring = zw - 8;
     }
@@ -390,17 +427,17 @@ void ui_home_create(lv_obj_t *root)
     lv_obj_center(joy);
     lv_timer_create(stick_timer_cb, 33, NULL);
 
-    /* ---- STOP (spec 18: big, fixed, bottom centre) ------------------------------ */
-    lv_obj_t *stop_area = lv_obj_create(root);
-    lv_obj_set_size(stop_area, LV_PCT(100), 56);
+    /* ---- STOP (spec 18: big, fixed, bottom of the control column) --------------- */
+    lv_obj_t *stop_area = lv_obj_create(lcol);
+    lv_obj_set_size(stop_area, LW, STOP_H);
+    lv_obj_align(stop_area, LV_ALIGN_BOTTOM_LEFT, 0, 0);
     lv_obj_set_style_bg_opa(stop_area, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(stop_area, 0, 0);
     lv_obj_set_style_pad_all(stop_area, 0, 0);
     lv_obj_remove_flag(stop_area, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *stop = lv_button_create(stop_area);
-    int sw = (w * 5) / 12;
-    lv_obj_set_size(stop, sw, 50);
+    lv_obj_set_size(stop, LW - 12, 52);
     lv_obj_center(stop);
     lv_obj_set_style_bg_color(stop, lv_color_hex(UI_COL_CRIT), 0);
     lv_obj_set_style_bg_color(stop, lv_color_hex(0xC22F3F), LV_STATE_PRESSED);
