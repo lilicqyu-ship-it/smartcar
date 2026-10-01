@@ -538,7 +538,7 @@ typedef struct {
     lv_obj_t *tile_sub[SUB_NAV_FDIAG + 1];   /* live subtitle per module */
     /* about sub: system topology */
     lv_obj_t *ab_ver[3], *ab_st[3], *ab_dot[3];
-    lv_obj_t *ab_wire[2], *ab_wlbl[2];
+    lv_obj_t *ab_wire[2], *ab_wlbl[2], *ab_wst[2];
     lv_obj_t *ab_up, *ab_heap, *ab_psram, *ab_rtt;
     lv_obj_t *fw_val;
     int fw_taps;
@@ -1253,7 +1253,7 @@ void ui_pages_create_settings(lv_obj_t *root)
     static const char *const nname[3] = { "ESP32-S3", "ESP32-C6", "TC275" };
     static const char *const nrole[3] = { "REMOTE / HMI", "GATEWAY / AP", "VEHICLE MCU" };
     static const char *const nicon[3] = { LV_SYMBOL_IMAGE, LV_SYMBOL_WIFI, LV_SYMBOL_DRIVE };
-    const int NW = 200, NH = 150, NY = 164, GAP = (800 - 3 * NW) / 4;
+    const int NW = 190, NH = 150, NY = 164, GAP = (800 - 3 * NW) / 4;
     for (int i = 0; i < 3; i++) {
         int x = GAP + i * (NW + GAP);
         lv_obj_t *n = ui_card(ab);
@@ -1317,9 +1317,23 @@ void ui_pages_create_settings(lv_obj_t *root)
             lv_label_set_text(s_set.ab_wlbl[i], i == 0 ? "WS" : "SPI");
             lv_obj_set_style_text_font(s_set.ab_wlbl[i], F_SM, 0);
             lv_obj_set_style_text_color(s_set.ab_wlbl[i], lv_color_hex(UI_COL_DIM), 0);
-            lv_obj_set_width(s_set.ab_wlbl[i], GAP);
+            /* the gap between nodes is only ~57 px, too narrow for
+             * "SPI  DOWN" on one line: link name sits above the wire and
+             * its state below, each a fixed one-line box clear of the wire */
+            const int lh = lv_font_get_line_height(F_SM);
+            const int wy = NY + NH / 2 - 1;          /* wire top */
+            lv_obj_set_size(s_set.ab_wlbl[i], GAP, lh);
+            lv_label_set_long_mode(s_set.ab_wlbl[i], LV_LABEL_LONG_MODE_CLIP);
             lv_obj_set_style_text_align(s_set.ab_wlbl[i], LV_TEXT_ALIGN_CENTER, 0);
-            lv_obj_set_pos(s_set.ab_wlbl[i], x + NW, NY + NH / 2 - 24);
+            lv_obj_set_pos(s_set.ab_wlbl[i], x + NW, wy - lh - 6);
+            s_set.ab_wst[i] = lv_label_create(ab);
+            lv_label_set_text(s_set.ab_wst[i], "--");
+            lv_obj_set_style_text_font(s_set.ab_wst[i], F_SM, 0);
+            lv_obj_set_style_text_color(s_set.ab_wst[i], lv_color_hex(UI_COL_DIM), 0);
+            lv_obj_set_size(s_set.ab_wst[i], GAP, lh);
+            lv_label_set_long_mode(s_set.ab_wst[i], LV_LABEL_LONG_MODE_CLIP);
+            lv_obj_set_style_text_align(s_set.ab_wst[i], LV_TEXT_ALIGN_CENTER, 0);
+            lv_obj_set_pos(s_set.ab_wst[i], x + NW, wy + 3 + 6);
         }
     }
 
@@ -1506,8 +1520,10 @@ static void wire_set(int i, bool up, const char *txt)
     if (!lv_color_eq(lv_obj_get_style_bg_color(s_set.ab_wire[i], 0), lv_color_hex(c))) {
         lv_obj_set_style_bg_color(s_set.ab_wire[i], lv_color_hex(c), 0);
     }
-    ui_label_set_text(s_set.ab_wlbl[i], txt);
-    ui_label_set_color(s_set.ab_wlbl[i], lv_color_hex(up ? UI_COL_ACCENT : UI_COL_DIM));
+    lv_color_t tc = lv_color_hex(up ? UI_COL_ACCENT : UI_COL_DIM);
+    ui_label_set_color(s_set.ab_wlbl[i], tc);
+    ui_label_set_text(s_set.ab_wst[i], txt);
+    ui_label_set_color(s_set.ab_wst[i], tc);
 }
 
 static void control_refresh(void)
@@ -1600,8 +1616,8 @@ static void about_refresh(const scr_state_t *st)
     } else {
         node_set(2, "--", st->tc_on ? "STALE" : "OFFLINE", st->tc_on ? UI_COL_WARN : UI_COL_DIM);
     }
-    wire_set(0, ws, ws ? "WS  LIVE" : "WS  DOWN");
-    wire_set(1, ws && st->tc_on, ws && st->tc_on ? "SPI  LIVE" : "SPI  DOWN");
+    wire_set(0, ws, ws ? "LIVE" : "DOWN");
+    wire_set(1, ws && st->tc_on, ws && st->tc_on ? "LIVE" : "DOWN");
 
     uint32_t up = st->uptime_ms / 1000u;
     ui_label_set_fmt(s_set.ab_up, "%02lu:%02lu:%02lu", (unsigned long)(up / 3600u),

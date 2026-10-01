@@ -28,6 +28,34 @@
 
 static const char *TAG = "scr_main";
 
+/* GT1151 release debounce.  The board has no touch INT line, so LVGL polls the
+ * controller every 10 ms; the driver clears the report register after each
+ * read, and a poll that lands before the chip's next scan reads "0 points".
+ * A resting finger therefore produced spurious RELEASED -> PRESSED pairs, and
+ * every one zeroed the stick (THR/STR flashed to 0).  Hold the last pressed
+ * point until the controller has reported no touch for TOUCH_RELEASE_MS. */
+#define TOUCH_RELEASE_MS 60
+static lv_indev_read_cb_t s_touch_read;
+
+static void touch_read_debounced(lv_indev_t *indev, lv_indev_data_t *data)
+{
+    static lv_point_t last_pt;
+    static uint32_t   last_ms;
+    static bool       held;
+
+    s_touch_read(indev, data);
+    if (data->state == LV_INDEV_STATE_PRESSED) {
+        last_pt = data->point;
+        last_ms = lv_tick_get();
+        held = true;
+    } else if (held && lv_tick_elaps(last_ms) < TOUCH_RELEASE_MS) {
+        data->state = LV_INDEV_STATE_PRESSED;   /* gap between scans, not a lift */
+        data->point = last_pt;
+    } else {
+        held = false;
+    }
+}
+
 void app_main(void)
 {
     /* NVS first: settings and the pairing token live there */
@@ -72,6 +100,10 @@ void app_main(void)
     if (touch && lv_indev_get_read_timer(touch)) {
         bsp_display_lock(0);
         lv_timer_set_period(lv_indev_get_read_timer(touch), 10);
+        s_touch_read = lv_indev_get_read_cb(touch);
+        if (s_touch_read) {
+            lv_indev_set_read_cb(touch, touch_read_debounced);
+        }
         bsp_display_unlock();
     }
 
