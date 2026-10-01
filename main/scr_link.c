@@ -198,6 +198,9 @@ static void ws_handle_text(const char *data, int len)
                    strcmp(t->valuestring, "otaswap") == 0 ||
                    strcmp(t->valuestring, "otaerror") == 0) {
             /* calibration results / OTA progress: owned by the service module */
+            if (t->valuestring[0] == 'c' || t->valuestring[0] == 'r') {
+                ESP_LOGI(TAG, "CALJSON %.*s", len > 200 ? 200 : len, data);
+            }
             scr_svc_on_ws_json(t->valuestring, root);
         } else if (strcmp(t->valuestring, "tcver") == 0) {
             /* TC275 version beacon: {"t":"tcver","app":"...","sbl":"..."} */
@@ -240,6 +243,19 @@ static void ws_handle_telemetry(const uint8_t *data, int len)
 
     s_link.rx_cnt++;
     app_state_set_telemetry(&t);
+
+    /* console-only speed trace (2 Hz while anything moves): per-side target vs
+     * measured mm/s straight off the wire, so a wrong encoder sign or a dead
+     * side is visible without the DIAGNOSE page */
+    static int64_t s_tele_log_ms;
+    int64_t now = now_ms();
+    if ((t.v_target_l || t.v_target_r || t.v_meas_l || t.v_meas_r) &&
+        now - s_tele_log_ms >= 500) {
+        s_tele_log_ms = now;
+        ESP_LOGI(TAG, "TELE tgt L=%d R=%d | meas L=%d R=%d | st=%u flt=0x%04X",
+                 t.v_target_l, t.v_target_r, t.v_meas_l, t.v_meas_r,
+                 (unsigned)t.state, (unsigned)t.fault_code);
+    }
 }
 
 /* ---- latency: disable Nagle on the C6 connection ------------------------------------
