@@ -16,19 +16,24 @@
   python firmware/fw.py flash <project> [args…]   烧录（余参透传给各工程入口）
   python firmware/fw.py collect [project]         补充归档到 firmware/dist/<工程>/
   python firmware/fw.py factory [--flash]         SBL+App 出厂整包（合成，可选烧录）
+  python firmware/fw.py ota <project> [options]   OTA：打签包 -> SCFW 暂存进 S3
+                                                  （遥控器 FIRMWARE 页点推送）；
+                                                  --direct 跳过 S3 由 PC 直推
   python firmware/fw.py clean [--yes]             清空 firmware/dist/
 
   project ∈ esp32c6_car | smartcar_remote | tc275_car | tc275_sbl
-  别名: c6 / remote / app / sbl / myCarSbl
+  别名: c6 / r-s3 / app / sbl
 
 环境覆盖（自动探测失败时）: TASKING_TRICORE_HOME（SCons 工具链发现）/ FW_IDF_PROFILE
 """
 import argparse
 import glob
+import hashlib
 import json
 import os
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -293,6 +298,8 @@ BUILDERS = {
 def flash_esp32c6_car(args):
     """全参数透传 flash.py（full/assets/all/mon、-p COMx、-b -m）。"""
     args = args or ["full"]
+    if args[0] != "build" and not {"-p", "--port"} & set(args):
+        args = [*args, "-p", find_chip_port("esp32c6", "C6")]
     return run([sys.executable, ROOT / "esp32c6_car" / "flash.py", *args])
 
 
@@ -309,12 +316,8 @@ def flash_smartcar_remote(args):
             del rest[i:i + 2]
             break
     else:
-        port = detect_serial_port()
-        if not port:
-            die("未识别到遥控器串口（Espressif/CP210x/CH34x VID）；插好板子"
-                "或显式指定: fw.py flash smartcar_remote -p COM7")
+        port = find_chip_port("esp32s3", "S3 遥控器")
         idf_args += ["-p", port]
-        info(f"自动识别串口: {port}")
     idf_args += ["flash"] + rest
     return esp_idf_cmd(ROOT / "smartcar_remote", idf_args)
 
@@ -370,6 +373,376 @@ def cmd_factory(a):
         return rc
     info(f"整包已合成: {out}（烧录: fw.py factory --flash）")
     return collect_one("tc275_sbl") if not a.no_collect else 0
+
+
+# ---------------------------------------------------------------- OTA 推送
+#
+# 默认走 S3 中转（PC 不需要在车网络里）：
+#   fw.py 打签包 -> SCFW 容器写入 S3 暂存分区（smartcar_remote/tools/
+#   stage_fw.py，esptool 走 USB）-> 遥控器 FIRMWARE 页点更新 -> S3 用自己的
+#   token POST /ota/c6 | /ota/tc275。TC275 完成事件经 WS 回 S3。
+# 包契约（复用，不重实现）：
+#   esp32c6_car  POST /ota/c6    payload = C6FW 包（components/c6_ota/ota_self.c）
+#                POST /ota/tc275 payload = TCFW 包（c6_bridge 中继 → TC275 SBL）
+#   包格式见 contracts/ota/tcfw_bundle.h（TCFW 与 C6FW 字节级同构，148 B 头，
+#   ed25519 签名覆盖前 84 B，payload 摘要 = SHA-512 前 32 B）。
+#   SCFW 头：magic/target/size/crc32(zlib)/version/built，与 S3 scr_svc.c 一致。
+#   TC275 写入非活动槽（SBL writeApp 按 槽基址+off 落 flash），swap/回滚
+#   结果经 WS 广播（{"t":"otaswap"}）。
+#   --direct：跳过 S3，PC 直推（需在车网络；C6 台架免 token 由
+#   CONFIG_C6_OTA_NO_AUTH=y 提供，量产关掉后用 --token/--pair）。
+
+OTA_SLOT_A_BASE = 0x80008000        # contracts/ota/ota_layout.h
+OTA_SLOT_B_BASE = 0x80208000
+OTA_SLOT_SIZE   = 0x1F8000
+TCFW_HDR_LEN    = 148
+TCFW_SIGNED_LEN = 84
+OTA_UPLOAD_MAX  = 3 * 1024 * 1024   # C6 侧 OTA_TOTAL_MAX
+DEFAULT_C6_HOST = "192.168.4.1"     # C6 softAP 网关（smartcar_remote SCR_C6_IP 同源）
+
+
+def c6_seed(args):
+    """签名种子路径与内容；默认用 C6 仓库的 dev seed（与两端公钥同源）。"""
+    seed_path = Path(args.seed) if args.seed \
+        else ROOT / "esp32c6_car" / "tools" / "keys" / "ed25519_dev.seed"
+    if not seed_path.exists():
+        die(f"OTA 签名种子不存在: {seed_path}（--seed 覆盖）")
+    return seed_path, bytes.fromhex(seed_path.read_text(encoding="utf-8").strip())
+
+
+def check_dev_pubkey(seed):
+    """种子派生公钥必须等于 contracts/ota/ota_keys.h 的 OTA_KEYS_DEV——
+    SBL/TC275 里烧死的就是它，不一致的包只会白传一趟被拒签。"""
+    text = (ROOT / "contracts" / "ota" / "ota_keys.h").read_text(encoding="utf-8")
+    m = re.search(r"OTA_KEYS_DEV\[OTA_KEYS_DEV_LEN\]\s*=\s*\{(.*?)\}", text, re.S)
+    if not m:
+        return
+    sys.path.insert(0, str(ROOT / "esp32c6_car" / "tools"))
+    import ed25519_ref
+    pub = bytes(int(x, 16) for x in re.findall(r"0x([0-9A-Fa-f]{2})", m.group(1)))
+    if ed25519_ref.secret_to_public(seed) != pub:
+        die("种子公钥与 contracts/ota/ota_keys.h 的 OTA_KEYS_DEV 不一致——设备会拒收该包")
+
+
+def c6fw_bundle(seed_path):
+    """C6 自更新包：委托 esp32c6_car/tools/sign_bundle.py（C6FW 格式真源）。"""
+    repo = ROOT / "esp32c6_car"
+    b = repo / "build"
+    app = None
+    fa = b / "flasher_args.json"
+    if fa.exists():
+        try:
+            f = json.loads(fa.read_text(encoding="utf-8")).get("app_file")
+            app = b / f if f else None
+        except (json.JSONDecodeError, OSError):
+            pass
+    if not (app and app.exists()):
+        app = b / "esp32c6_car.bin"      # IDF 产物名 = 工程名
+    if not app.exists():
+        junk = ("bootloader", "partition", "ota_data", "assets", "_flashed")
+        hits = [p for p in sorted(b.glob("*.bin"))
+                if not any(k in p.name for k in junk)]
+        app = hits[0] if hits else None
+    if not app:
+        die("esp32c6_car 没有可打包的 app .bin（先 fw.py build c6）")
+    out = b / "c6fw.bundle"
+    cmd = [sys.executable, repo / "tools" / "sign_bundle.py",
+           "--c6", str(app), "--seed-file", str(seed_path), "--out", str(out)]
+    if (b / "assets.bin").exists():
+        cmd += ["--assets", str(b / "assets.bin")]
+    if run(cmd, cwd=repo):
+        die("sign_bundle.py 打包失败")
+    return out
+
+
+def tc275_slot_image(hex_path):
+    """App Intel HEX -> OTA 槽内镜像。SBL writeApp 以 槽基址+off 落 flash
+    （tc275_sbl/bsp/flash_ota.c），payload 必须从槽字节 0 起；槽 A/B 构建
+    镜像对称，两种地址都归一化成槽内偏移，空洞补 0xFF（flash 擦除态）。"""
+    sys.path.insert(0, str(sbl_dir() / "tools"))
+    import merge_hex
+    mem = {}
+    lo, hi, _entry = merge_hex.parse_hex(str(hex_path), mem)
+    if lo is None:
+        die(f"{hex_path} 里没有数据记录")
+    for base in (OTA_SLOT_A_BASE, OTA_SLOT_B_BASE):
+        if base <= lo and hi < base + OTA_SLOT_SIZE:
+            break
+    else:
+        die(f"hex 地址 0x{lo:08X}..0x{hi:08X} 不在 OTA 槽范围"
+            f"（0x{OTA_SLOT_A_BASE:08X}+ 或 0x{OTA_SLOT_B_BASE:08X}+）")
+    img = bytearray(b"\xff" * (hi - base + 1))
+    for a, v in mem.items():
+        img[a - base] = v
+    return bytes(img)
+
+
+def tcfw_pack(hex_path, seed):
+    """TCFW 包（contracts/ota/tcfw_bundle.h）：148 B 头 + App 槽内镜像，
+    签名覆盖前 84 B，app_sha = SHA-512 前 32 B。产物落在 hex 旁边。"""
+    sys.path.insert(0, str(ROOT / "esp32c6_car" / "tools"))
+    import ed25519_ref as ed
+    img = tc275_slot_image(hex_path)
+    head = bytearray()
+    head += b"TCFW"
+    head += struct.pack("<BBH", 1, 1, TCFW_HDR_LEN)     # fmt=1, flags bit0=槽无关
+    head += struct.pack("<II", TCFW_HDR_LEN + len(img), len(img))
+    head += hashlib.sha512(img).digest()[:32]
+    head += struct.pack("<I", 0) + bytes(32)            # rsv_len / rsv_sha（TC275 单镜像不用）
+    head += ed.sign(seed, bytes(head))
+    out = hex_path.with_suffix(".tcfw")
+    out.write_bytes(bytes(head) + img)
+    try:
+        shown = out.relative_to(ROOT)
+    except ValueError:
+        shown = out
+    info(f"TCFW 包: {shown}（app {len(img):,} B）")
+    return out
+
+
+def pair_token(host):
+    """车端按钮开窗期间换取 control token；轮询 60 s 覆盖一次按键。"""
+    import urllib.error
+    import urllib.request
+    info("请求配对：按住车端按钮 3 s 打开窗口（60 s 内自动重试）...")
+    deadline = time.time() + 60
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(f"http://{host}/api/pair", timeout=8) as r:
+                j = json.loads(r.read().decode("utf-8", "replace"))
+            if j.get("ok") and j.get("token"):
+                info("配对成功")
+                return j["token"]
+        except (urllib.error.URLError, urllib.error.HTTPError, OSError, ValueError):
+            pass    # 403 no window / busy / 车不在线：窗口期到再试
+        time.sleep(2)
+    die("60 s 内未换到 token（车端窗口未开 / 已被占用 / 车不在线）")
+
+
+def _probe_auth(host, uri, tries=3):
+    """上传中断后用 0 长度 POST 探测 OTA 端点。旧固件（token 门）先查 token
+    就 401；新固件（C6_OTA_NO_AUTH=y）走完 begin 才报错。RST 之后服务端要
+    几秒恢复 accept，所以间隔 2 s 探三次，全失败才算掉线。"""
+    import http.client
+    for i in range(tries):
+        try:
+            conn = http.client.HTTPConnection(host, 80, timeout=5)
+            conn.request("POST", uri, body=b"", headers={"Content-Length": "0"})
+            r = conn.getresponse()
+            r.read()
+            conn.close()
+            return r.status
+        except (OSError, http.client.HTTPException):
+            if i + 1 < tries:
+                time.sleep(2)
+    return None
+
+
+def ota_post(host, uri, token, bundle_path):
+    data = Path(bundle_path).read_bytes()
+    if len(data) > OTA_UPLOAD_MAX:
+        die(f"包 {len(data):,} B 超过 C6 上限 {OTA_UPLOAD_MAX:,} B")
+    info(f"POST http://{host}{uri}  <- {bundle_path.name}（{len(data):,} B）")
+    import http.client
+    conn = http.client.HTTPConnection(host, 80, timeout=120)
+    try:
+        conn.putrequest("POST", f"{uri}?token={token}" if token else uri)
+        conn.putheader("Content-Type", "application/octet-stream")
+        conn.putheader("Content-Length", str(len(data)))
+        conn.endheaders()
+        t0, sent = time.time(), 0
+        while sent < len(data):
+            n = min(4096, len(data) - sent)
+            conn.send(data[sent:sent + n])   # C6 credit window 会在 send 侧背压
+            sent += n
+            print(f"\r  上传 {sent:,}/{len(data):,} B "
+                  f"({sent * 100 // len(data)}%)", end="", flush=True)
+        print(f"  {time.time() - t0:.1f} s")
+        resp = conn.getresponse()
+        body = resp.read().decode("utf-8", "replace")
+    except (OSError, http.client.HTTPException) as e:
+        st = _probe_auth(host, uri)
+        if st == 401:
+            die(f"上传失败: {e}\n"
+                f"  诊断: 车端 OTA 端点返回 401 —— 固件仍开着 token 门。\n"
+                f"  处理: 烧一次新版 C6（just fw-build c6 && just fw-flash c6），\n"
+                f"        或本次加 --pair / --token <hex>。")
+        if st is None:
+            die(f"上传失败: {e}（车端无响应：已重启 / 掉线，等它起来再试）")
+        die(f"上传失败: {e}（车端在线且免鉴权已生效，端点探得 HTTP {st}——疑似链路瞬断，重试）")
+    finally:
+        conn.close()
+    if resp.status == 401:
+        die("C6 要求 control token（该台固件未开台架免鉴权）："
+            "--token <hex> / --pair 换一个；或在 C6 保持 CONFIG_C6_OTA_NO_AUTH=y 重新编译烧录")
+    info(f"HTTP {resp.status}: {body}")
+    ok = resp.status == 200 and '"ok":true' in body
+    if ok and uri.endswith("/ota/tc275"):
+        info("TC275 已收包写入非活动槽；swap / 回滚事件经 WS 广播"
+             '（{"t":"otaswap"}，S3 About / 诊断页可见）')
+    return 0 if ok else 1
+
+
+_C6_VER_RE = re.compile(r'set\(PROJECT_VER\s+"([^"]+)"\)')
+
+
+def fw_version_for(p):
+    """SCFW 头的 version 字段：TC275 读 app_version.h，C6 读 PROJECT_VER。"""
+    if p == "esp32c6_car":
+        m = _C6_VER_RE.search(
+            (ROOT / "esp32c6_car" / "CMakeLists.txt").read_text(encoding="utf-8"))
+        return m.group(1) if m else ""
+    return fw_version(p) or ""
+
+
+def detect_serial_ports():
+    """全部候选串口（Espressif VID 优先 + 常见 usb-serial 模式）。"""
+    out = []
+    try:
+        from serial.tools import list_ports
+        vids = {0x303A, 0x10C4, 0x1A86}
+        out += [x.device for x in list_ports.comports() if x.vid in vids]
+    except ImportError:
+        pass
+    for pat in ("/dev/cu.usbmodem*", "/dev/cu.usbserial*",
+                "/dev/ttyUSB*", "/dev/ttyACM*"):
+        out += glob.glob(pat)
+    return sorted(set(out))
+
+
+# S3 和 C6 都是原生 USB-Serial-JTAG（VID 303A / PID 1001，描述符完全相同），
+# 只有 USB 序列号（= 芯片 MAC）能区分。首次见到某个序列号时用 esptool 探一次
+# 芯片型号（会让该板复位一次），结果按序列号缓存，之后不再复位。
+_CHIP_CACHE = Path.home() / ".cache" / "smartcar-fw" / "port_chips.json"
+_CHIP_RE = re.compile(r"Detecting chip type\.\.\.\s*(ESP32[-\w]*)", re.I)
+_LIST_PORTS_PY = (
+    "import json\n"
+    "from serial.tools import list_ports\n"
+    "print(json.dumps({p.device: p.serial_number for p in list_ports.comports()"
+    " if p.vid}))\n")
+
+
+def _port_serials(py):
+    """{device: USB 序列号}；pyserial 只在 IDF venv 里有。失败返回 {}。"""
+    try:
+        r = subprocess.run([str(py), "-c", _LIST_PORTS_PY],
+                           capture_output=True, text=True, timeout=15)
+        return json.loads(r.stdout) if r.returncode == 0 else {}
+    except (OSError, ValueError, subprocess.TimeoutExpired):
+        return {}
+
+
+def _probe_chip(py, port):
+    """esptool 读芯片型号，如 'esp32s3' / 'esp32c6'；连不上返回 None。"""
+    try:
+        r = subprocess.run([str(py), "-m", "esptool", "--port", port, "chip-id"],
+                           capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    m = _CHIP_RE.search(r.stdout + r.stderr)
+    return m.group(1).lower().replace("-", "") if m else None
+
+
+def find_chip_port(chip, label):
+    """在所有候选串口里找出芯片型号为 chip（'esp32s3' / 'esp32c6'）的那个。
+    只有一个候选时直接用（不复位）；多个时按序列号缓存 / esptool 探测识别。"""
+    ports = detect_serial_ports()
+    if not ports:
+        die(f"未识别到 {label} 串口；插好板子或用 --port / -p 指定")
+    py, _idf, _act = find_idf_env()
+    try:
+        cache = json.loads(_CHIP_CACHE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        cache = {}
+    if len(ports) == 1 or not py.exists():
+        if len(ports) > 1:
+            die(f"有多个串口（{', '.join(ports)}），但找不到 IDF venv 无法识别芯片；"
+                f"用 --port / -p 指定 {label}")
+        # 唯一候选也先查缓存：另一块板拔掉时别把剩下那块当成目标
+        sn = _port_serials(py).get(ports[0]) if py.exists() else None
+        known = cache.get(sn) if sn else None
+        if known and known != chip:
+            die(f"唯一的串口 {ports[0]} 是 {known}，不是 {label}（{chip}）；"
+                f"插上 {label} 或用 --port / -p 指定")
+        info(f"自动识别 {label} 串口: {ports[0]}（唯一候选）")
+        return ports[0]
+    serials = _port_serials(py)
+    seen, hits = {}, []
+    for dev in ports:
+        sn = serials.get(dev)
+        c = cache.get(sn) if sn else None
+        if not c:
+            info(f"探测 {dev} 的芯片型号（该板会复位一次）...")
+            c = _probe_chip(py, dev)
+            if c and sn:
+                cache[sn] = c
+        seen[dev] = c or "?"
+        if c == chip:
+            hits.append(dev)
+    try:
+        _CHIP_CACHE.parent.mkdir(parents=True, exist_ok=True)
+        _CHIP_CACHE.write_text(json.dumps(cache, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+    found = ", ".join(f"{d}={c}" for d, c in seen.items())
+    if len(hits) != 1:
+        die(f"无法唯一确定 {label} 串口（{found}）；用 --port / -p 指定")
+    info(f"自动识别 {label} 串口: {hits[0]}（{found}）")
+    return hits[0]
+
+
+def s3_stage(p, bundle, a):
+    """SCFW 容器写入 S3 暂存分区：委托 smartcar_remote/tools/stage_fw.py
+    （esptool 在 IDF venv 里，系统 python 没有）。写完 S3 重启后自检 CRC，
+    推送动作在遥控器 FIRMWARE 页触发——那是 S3 自己的 token 在推。"""
+    stage_py = ROOT / "smartcar_remote" / "tools" / "stage_fw.py"
+    if not stage_py.exists():
+        die(f"找不到 {stage_py}（smartcar_remote 未检出？）")
+    py, _idf, _act = find_idf_env()
+    if not py.exists():
+        die("需要 ESP-IDF 环境（stage_fw.py 依赖 esptool）；先装 EIM/ESP-IDF")
+    target = "c6" if p == "esp32c6_car" else "tc275"
+    ver = a.version or fw_version_for(p)
+    port = a.port
+    if not port:
+        port = find_chip_port("esp32s3", "S3 遥控器")
+    info(f"经 S3 中转: SCFW 暂存 -> {port}（fw_{target} 分区, version {ver or '-'}, "
+         f"payload {bundle.name}）")
+    rc = run([str(py), stage_py, "--target", target, "--image", str(bundle),
+              "--version", ver, "--port", port])
+    if rc:
+        die(f"暂存失败 (rc={rc})")
+    info("已写入 S3 暂存区：遥控器重启后打开 Settings > FIRMWARE（RESCAN 刷新），"
+         "点对应卡片推送；进度与结果在该页显示，TC275 完成事件经 WS 回报。")
+    return 0
+
+
+def cmd_ota(a):
+    p = require_project(a.project)
+    if p not in ("esp32c6_car", "tc275_car"):
+        die(f"{p} 不支持 OTA：tc275_sbl 从不经 OTA 更新（SBL 区不动）；"
+            f"smartcar_remote 走 idf.py flash")
+    seed_path, seed = c6_seed(a)
+    check_dev_pubkey(seed)
+    if a.file:
+        bundle = Path(a.file)
+        if not bundle.exists():
+            die(f"包不存在: {bundle}")
+    elif p == "esp32c6_car":
+        bundle = c6fw_bundle(seed_path)
+    else:
+        hx = app_hex() or die("tc275_car 没有可打包的 hex（先 fw.py build app）")
+        bundle = tcfw_pack(hx, seed)
+
+    if not a.direct:
+        return s3_stage(p, bundle, a)
+
+    if not a.token and not a.pair:
+        info("直推模式：未给 --token/--pair，按台架免 token 尝试"
+             "（C6 需 CONFIG_C6_OTA_NO_AUTH=y）")
+    token = a.token if a.token else (pair_token(a.host) if a.pair else None)
+    return ota_post(a.host, "/ota/c6" if p == "esp32c6_car" else "/ota/tc275",
+                    token, bundle)
 
 
 # ---------------------------------------------------------------- 归档 / 状态
@@ -468,8 +841,8 @@ def cmd_clean(a):
 def main(argv):
     ap = argparse.ArgumentParser(prog="fw.py", description=__doc__.splitlines()[0],
                                  formatter_class=argparse.RawDescriptionHelpFormatter,
-                                 epilog="工程: " + " | ".join(PROJECTS)
-                                        + "   别名: c6 / remote / app / sbl")
+                                  epilog="工程: " + " | ".join(PROJECTS)
+                                         + "   别名: c6 / r-s3 / app / sbl")
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     sub.add_parser("list", help="各工程构建产物 / 归档状态一览")
@@ -493,12 +866,27 @@ def main(argv):
     fa.add_argument("--flash", action="store_true", help="合成后用 AURIXFlasher 整包烧录")
     fa.add_argument("--no-collect", action="store_true", help="不归档 SBL 侧产物")
 
+    o = sub.add_parser("ota", help="OTA：打签包暂存进 S3（FIRMWARE 页推送）；--direct 为 PC 直推")
+    o.add_argument("project", help="esp32c6_car | tc275_car")
+    o.add_argument("--port", help="S3 遥控器串口（多设备插着时必须指定；省略则唯一候选自动选）")
+    o.add_argument("--version", help="SCFW 头的版本串（默认读工程版本真源）")
+    o.add_argument("--direct", action="store_true",
+                   help="跳过 S3 暂存，PC 直推 C6（需在车网络）")
+    o.add_argument("--host", default=os.environ.get("FW_C6_HOST", DEFAULT_C6_HOST),
+                   help="--direct 时 C6 的 IP（默认 192.168.4.1，FW_C6_HOST 可覆盖）")
+    o.add_argument("--token", help="--direct 时已配对的 control token")
+    o.add_argument("--pair", action="store_true",
+                   help="--direct 时先 POST /api/pair 现场换 token（按住车端按钮 3 s）")
+    o.add_argument("--file", help="跳过打包，直接使用现成的 C6FW/TCFW bundle 文件")
+    o.add_argument("--seed", help="ed25519 种子文件（默认 esp32c6_car dev seed）")
+
     cl = sub.add_parser("clean", help="清空 firmware/dist/")
     cl.add_argument("--yes", action="store_true")
 
     a = ap.parse_args(argv)
     return {"list": cmd_list, "build": cmd_build, "flash": cmd_flash,
-            "collect": cmd_collect, "factory": cmd_factory, "clean": cmd_clean}[a.cmd](a)
+            "collect": cmd_collect, "factory": cmd_factory, "ota": cmd_ota,
+            "clean": cmd_clean}[a.cmd](a)
 
 
 if __name__ == "__main__":

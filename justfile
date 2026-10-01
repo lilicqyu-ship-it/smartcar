@@ -61,7 +61,7 @@ doctor:
     @bash scripts/doctor.sh
 
 # —— 固件统一管理（firmware/fw.py；详见 firmware/README.md）——
-# 工程名: esp32c6_car | smartcar_remote | tc275_car | tc275_sbl（别名 c6/remote/app/sbl）
+# 工程名: esp32c6_car | smartcar_remote | tc275_car | tc275_sbl（别名 c6/r-s3/app/sbl）
 py := if os() == "windows" { "python" } else { "python3" }
 
 # 四工程固件产物 / 归档状态一览
@@ -89,6 +89,12 @@ fw-dist msg="fw(dist): 归档固件镜像（构建产物入库）":
 # SBL+App 出厂整包: 构建两工程 + 合成 factory_full.hex（--flash 顺带烧录）
 fw-factory *args:
     @{{py}} firmware/fw.py factory {{args}}
+
+# OTA（经 S3 中转）: just fw-ota c6 | just fw-ota app —— 打签包写进遥控器暂存分区，
+#   遥控器 Settings > FIRMWARE 页点更新（S3 用自己的 token 推给 C6/TC275）
+#   --direct PC 直推（需在车网络）；--port/--version/--file/--seed 透传 fw.py ota
+fw-ota project *args:
+    @{{py}} firmware/fw.py ota {{project}} {{args}}
 
 # 清空 firmware/dist/ 归档
 fw-clean:
