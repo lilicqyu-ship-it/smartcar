@@ -1,5 +1,7 @@
 # smartcar
 
+[![contracts](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/contracts.yml/badge.svg)](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/contracts.yml) [![version](https://img.shields.io/github/v/tag/lilicqyu-ship-it/smartcar?label=version&sort=semver)](https://github.com/lilicqyu-ship-it/smartcar/tags)
+
 智能车工程的多仓库总控（meta）仓库。四个子仓库以 git submodule 形式挂在这里，
 本仓库本身不含业务代码，负责三件事：
 
