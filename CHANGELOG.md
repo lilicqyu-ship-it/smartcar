@@ -7,6 +7,12 @@
 
 ## [未发布]
 
+### 变更
+- fw.py `flash` / `ota` 默认先增量编译再烧录/打包（一条指令到位，不再烧/推旧构建产物）；`--no-build`（ota 另有 `--file`）跳过编译，flash/ota 内的编译不触发归档
+
+### 修复
+- fw.py `flash` 透传参数（`-m`/`-p`/`--id` 等选项）被 argparse 误拒（改 REMAINDER 原样透传）
+
 ## [1.0.0] - 2026-10-01
 
 首个整车稳定版 tag。本版锁定：esp32c6_car@v1.0.0、smartcar_remote@v1.0.0、tc275_car@v1.0.0、tc275_sbl@v1.0.0（四仓版本号统一升至 1.0.0）。

@@ -13,12 +13,14 @@
 用法（或 just fw-* 配方）:
   python firmware/fw.py list                      各工程构建产物 / 归档状态一览
   python firmware/fw.py build <project>           编译一个工程（成功即自动归档 dist）
-  python firmware/fw.py flash <project> [args…]   烧录（余参透传给各工程入口）
+  python firmware/fw.py flash <project> [args…]   编译 + 烧录（--no-build 跳过编译，
+                                                  直接烧最近构建产物；余参透传）
   python firmware/fw.py collect [project]         补充归档到 firmware/dist/<工程>/
   python firmware/fw.py factory [--flash]         SBL+App 出厂整包（合成，可选烧录）
-  python firmware/fw.py ota <project> [options]   OTA：打签包 -> SCFW 暂存进 S3
+  python firmware/fw.py ota <project> [options]   OTA：编译 + 打签包 -> SCFW 暂存进 S3
                                                   （遥控器 FIRMWARE 页点推送）；
-                                                  --direct 跳过 S3 由 PC 直推
+                                                  --direct 跳过 S3 由 PC 直推；
+                                                  --no-build / --file 跳过编译
   python firmware/fw.py clean [--yes]             清空 firmware/dist/
 
   project ∈ esp32c6_car | smartcar_remote | tc275_car | tc275_sbl
@@ -342,6 +344,16 @@ def cmd_build(a):
 
 def cmd_flash(a):
     p = require_project(a.project)
+    # REMAINDER 会把透传流里的开关一并吞进 args，--no-build 放任何位置都认
+    if "--no-build" in a.args:
+        a.args.remove("--no-build")
+        a.no_build = True
+    if not a.no_build:
+        info(f"{p}: 先编译再烧录（--no-build 跳过，烧最近构建产物；编译不归档）")
+        rc = BUILDERS[p]([])
+        if rc:
+            info(f"{p} 编译失败，未烧录")
+            return rc
     if p == "esp32c6_car":
         return flash_esp32c6_car(a.args)
     if p == "smartcar_remote":
@@ -722,17 +734,24 @@ def cmd_ota(a):
     if p not in ("esp32c6_car", "tc275_car"):
         die(f"{p} 不支持 OTA：tc275_sbl 从不经 OTA 更新（SBL 区不动）；"
             f"smartcar_remote 走 idf.py flash")
-    seed_path, seed = c6_seed(a)
+    seed_path, seed = c6_seed(a)     # 配置类错误（种子/公钥）先暴露，不浪费一次编译
     check_dev_pubkey(seed)
     if a.file:
         bundle = Path(a.file)
         if not bundle.exists():
             die(f"包不存在: {bundle}")
-    elif p == "esp32c6_car":
-        bundle = c6fw_bundle(seed_path)
     else:
-        hx = app_hex() or die("tc275_car 没有可打包的 hex（先 fw.py build app）")
-        bundle = tcfw_pack(hx, seed)
+        if not a.no_build:
+            info(f"{p}: 先编译最新代码再打包（--no-build 打包最近构建产物）")
+            rc = BUILDERS[p]([])
+            if rc:
+                info(f"{p} 编译失败，未打包")
+                return rc
+        if p == "esp32c6_car":
+            bundle = c6fw_bundle(seed_path)
+        else:
+            hx = app_hex() or die("tc275_car 没有可打包的 hex（先 fw.py build app）")
+            bundle = tcfw_pack(hx, seed)
 
     if not a.direct:
         return s3_stage(p, bundle, a)
@@ -853,10 +872,14 @@ def main(argv):
                    help="构建后不归档（默认成功即归档到 firmware/dist/）")
     b.add_argument("args", nargs="*", help="透传给各工程构建入口")
 
-    f = sub.add_parser("flash", help="烧录（余参透传给各工程烧录入口）")
+    f = sub.add_parser("flash", help="编译 + 烧录（--no-build 只烧最近构建产物）")
     f.add_argument("project")
-    f.add_argument("args", nargs="*",
-                   help="esp32c6_car: full|assets|all|mon -p COMx -m；remote: -p COMx monitor；"
+    f.add_argument("--no-build", action="store_true",
+                   help="跳过编译，直接烧最近一次构建的产物")
+    f.add_argument("args", nargs=argparse.REMAINDER,
+                   help="透传给各工程烧录入口（REMAINDER，选项原样过）: "
+                        "esp32c6_car: full|assets|all|mon -p COMx -b -m；"
+                        "remote: -p COMx monitor；"
                         "tc275_car/tc275_sbl: --id N --log x.xml 等 flash.py 参数")
 
     c = sub.add_parser("collect", help="归档产物到 firmware/dist/")
@@ -866,8 +889,10 @@ def main(argv):
     fa.add_argument("--flash", action="store_true", help="合成后用 AURIXFlasher 整包烧录")
     fa.add_argument("--no-collect", action="store_true", help="不归档 SBL 侧产物")
 
-    o = sub.add_parser("ota", help="OTA：打签包暂存进 S3（FIRMWARE 页推送）；--direct 为 PC 直推")
+    o = sub.add_parser("ota", help="OTA：编译+打签包暂存进 S3（FIRMWARE 页推送）；--direct 为 PC 直推")
     o.add_argument("project", help="esp32c6_car | tc275_car")
+    o.add_argument("--no-build", action="store_true",
+                   help="跳过编译，打包最近一次构建的产物（--file 同效）")
     o.add_argument("--port", help="S3 遥控器串口（多设备插着时必须指定；省略则唯一候选自动选）")
     o.add_argument("--version", help="SCFW 头的版本串（默认读工程版本真源）")
     o.add_argument("--direct", action="store_true",

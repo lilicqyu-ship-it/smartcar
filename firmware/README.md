@@ -6,7 +6,8 @@ smartcar 四个工程固件的总入口：一条命令编译、烧录、归档�
 ```bash
 python firmware/fw.py list                    # 各工程产物 / 归档状态一览
 python firmware/fw.py build <project>         # 编译（成功即自动归档 dist；--no-collect 跳过）
-python firmware/fw.py flash <project> [...]   # 烧录（参数透传给各工程入口）
+python firmware/fw.py flash <project> [...]   # 编译 + 烧录一条指令（--no-build 只烧最近构建；参数透传）
+python firmware/fw.py ota <project> [options] # 编译 + 打签包 -> 暂存进 S3（--direct 直推；--no-build/--file 跳过编译）
 python firmware/fw.py collect [project]       # 补充归档到 firmware/dist/
 python firmware/fw.py factory [--flash]       # SBL+App 出厂整包合成（可烧录）
 python firmware/fw.py clean [--yes]           # 清空 firmware/dist/
@@ -15,7 +16,11 @@ python firmware/fw.py clean [--yes]           # 清空 firmware/dist/
 工程名：`esp32c6_car` | `smartcar_remote` | `tc275_car` | `tc275_sbl`，
 别名 `c6` / `remote` / `app` / `sbl`（tc275_sbl 历史上叫 myCarSbl，旧名也认）。
 推荐走 just：`just fw-list` / `just fw-build <project>` / `just fw-flash <project>` /
-`just fw-collect` / `just fw-factory` / `just fw-dist`。
+`just fw-ota <project>` / `just fw-collect` / `just fw-factory` / `just fw-dist`。
+
+`flash` / `ota` 默认**先增量编译**对应工程再烧/再打包——改完代码一条指令到位，
+也不会把旧构建产物烧上板或推上车；`--no-build`（ota 另有 `--file` 直接用现成包）
+跳过编译。flash/ota 里的编译**不触发归档**（归档走 `build` / `collect`）。
 
 ## 目录
 
@@ -56,7 +61,8 @@ commit 精确回到源码。
 | tc275_sbl | `python -m SCons`（同上） | `tc275_sbl/tools/flash.py flash`（自动取 SCons 最新版本化 hex） |
 
 TC275 烧录透传 `flash.py` 的参数：`--id <n>` 选 DAS 端口、`--log x.xml`
-出详细日志等（需 DAS 服务在跑，装 ADS 即有）。
+出详细日志等（需 DAS 服务在跑，装 ADS 即有）。烧录透传参数（`-m`/`-p`/`--id`
+等）原样透传，fw.py 自己的开关只有 `--no-build`。
 
 ### tc275 双仓 SCons 命令行编译的说明
 

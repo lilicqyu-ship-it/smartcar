@@ -72,7 +72,10 @@ fw-list:
 fw-build project *args:
     @{{py}} firmware/fw.py build {{project}} {{args}}
 
-# 烧录固件: just fw-flash <project> [透传参数]（如 just fw-flash esp32c6_car all -m）
+# 一条指令编译+烧录: 默认先增量编译再烧，不会烧到旧产物
+#   --no-build 跳过编译只烧最近构建；编译不触发归档（归档走 fw-build）
+#   透传参数原样转给各工程烧录入口（esp32c6_car all -m / r-s3 -p COM7 monitor / tc275 --id N）
+# 用法: just fw-flash <project> [透传参数]
 fw-flash project *args:
     @{{py}} firmware/fw.py flash {{project}} {{args}}
 
@@ -90,9 +93,10 @@ fw-dist msg="fw(dist): 归档固件镜像（构建产物入库）":
 fw-factory *args:
     @{{py}} firmware/fw.py factory {{args}}
 
-# OTA（经 S3 中转）: just fw-ota c6 | just fw-ota app —— 打签包写进遥控器暂存分区，
+# 一条指令编译+OTA: 编译最新代码打签包写进遥控器暂存分区，
 #   遥控器 Settings > FIRMWARE 页点更新（S3 用自己的 token 推给 C6/TC275）
-#   --direct PC 直推（需在车网络）；--port/--version/--file/--seed 透传 fw.py ota
+#   --no-build 打包最近构建；--direct PC 直推（需在车网络）；--port/--version/--file/--seed 透传 fw.py ota
+# 用法: just fw-ota c6 | just fw-ota app
 fw-ota project *args:
     @{{py}} firmware/fw.py ota {{project}} {{args}}
 
