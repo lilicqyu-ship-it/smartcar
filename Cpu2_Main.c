@@ -44,6 +44,7 @@
 
 #ifdef USE_SPI_LINK
 #include "com/link.h"
+#include "com/ota_app.h"
 #include "mw/xcore/xcore.h"
 #include "bsp/adc.h"
 #include <string.h>
@@ -267,6 +268,7 @@ void core2_main(void)
     /* First rung of the clock ladder: gate G1 is a waveform compatibility test,
      * so it starts at 1 MHz and only climbs on measured error rates (22 SS8). */
     LINK_init(SPIHAL_CLK_1M);
+    OTAAPP_init();                       /* OTA receiver (doc 24 SS5.3)      */
     nextTelMs  = STIME_nowMs() + LINK_TELEMETRY_PERIOD_MS;
     nextDiagMs = STIME_nowMs() + LINK_DIAG_PERIOD_MS;
     nextSpdMs  = STIME_nowMs() + LINK_SPEED_PERIOD_MS;
@@ -274,6 +276,7 @@ void core2_main(void)
     while (1)
     {
         LINK_main();                       /* pump: registers, read, write      */
+        OTAAPP_tick();                     /* self-test confirm (doc 24 SS5.2)  */
 
         if ((sint32)(STIME_nowMs() - nextTelMs) >= 0)
         {

@@ -2,13 +2,29 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | **设计草案（DRAFT）** — 未实现，未经 TASKING 编译/上板验证 |
+| 状态 | **已实现（软件层，App 侧已接线）** — SBL/双 bank linker/OTA 协议栈已落地，myCar 工程已切换槽 A 构建（冒烟链接 .start@0x80008020）并接入 OTA 接收/自检确认：host 单测 G-OTA-1/2 全绿，SBL 经 TASKING（v6.3r1 命令行）编译链接验证 ≤32 KB；**尚未上板**（G-OTA-3/4/5/6 的硬件半边仍待 ADS 工程构建 + 板上验证） |
 | 需求追溯 | 需求 F05（双板 OTA：TC275 双 bank 切换 + 失败自动回滚，签名验签） |
 | 依赖契约 | SF 帧 `mw/sf/sf_frame.h`（OTA_DATA/OTA_CTRL）、C6 `components/c6_ota/bundle.h`（包格式基线） |
 | 硬件 | TC275 AURIX 三核 200 MHz，**2×2 MB PFlash（PF0/PF1 双 bank）**，128 KB DFlash0 + 64 KB DFlash1 |
 | 作者/日期 | 设计评审草案，2026-09-30 |
 
-> ⚠️ 本文是**设计交付**，不含可运行的 SBL/linker 代码。SBL 与双 bank linker 必须在 AURIX Development Studio (TASKING) 环境中实现与验证；本方案给出结构、地址、状态机与验收门禁，供实现时逐项落地。
+> 实现索引（myCarSbl 仓库，2026-09-30 落地）：
+>
+> | 文档章节 | 实现位置 |
+> |---|---|
+> | §3.1 双 bank linker | `Lcf_SBL.lsl`（本工程构建用）、`Lcf_AppA.lsl` / `Lcf_AppB.lsl`（App 工程切换用，冒烟链接已验证 `.start` 分别落在 0x80008020 / 0x80208020） |
+> | §4 OtaMeta 双页 | `mw/ota/ota_meta.[ch]`（纯 C99，LE 线格式）+ `bsp/flash_ota.c`（DFlash 后端，DF0 扇区 13/14） |
+> | §5.1 SBL 决策 | `mw/ota/ota_boot.[ch]`（纯逻辑，host 测）+ `sbl/sbl_boot.c`（跳转/安全态）+ `Cpu0_Main.c`（SBL 入口） |
+> | §5.2 App 自检确认 | `OTABOOT_confirmSelftest()`（App 侧接入点，待 myCar 工程调用） |
+> | §5.3 OTA 接收 | `mw/ota/ota_rx.[ch]`（状态机 + ACK/STATUS，host 测） |
+> | §6 TCFW 包 | `mw/ota/tcfw_bundle.[ch]`（84B 验签 + SHA-512[:32]，与 C6 sign_bundle.py 逐字节一致，host 测） |
+> | §7 PFlash 擦写 | `bsp/flash_ota.[ch]`（IfxFlash 封装：扇区表遍历擦除、32B 页 staging、读回校验） |
+> | 加解密 | `mw/crypto/`（ed25519v/sha512/c6_consts 自 c6_car 逐字拷贝）+ `mw/sf/sf_frame.[ch]`（自 myCar 拷贝） |
+> | App 侧接入（myCar 工程） | `Lcf_Tasking_Tricore_Tc.lsl` 换为槽 A 布局（入口 0x80008020）+ `Lcf_AppB.lsl`；`com/ota_app.[ch]`（OtaRxOps 装配 + 槽位自识别 + §5.2 自检确认）；`com/link.c` OTA 帧分发到 `OTARX_frame`；`Cpu2_Main.c` init/tick；`mw/proto/protocol.h` 补 PROTO_CMD_OTA_*（0x60..0x65）；mw/ota、mw/crypto、bsp/flash_ota 与 SBL 工程同源拷贝 |
+| host 测试 | `test/host/`（282 断言全绿：`make check`）+ `tools/gen_test_vectors.py` |
+> | 构建脚本 | `tools/build_sbl.sh`（本机完整版 TASKING v6.3r1 命令行验证；正式产物仍应从 ADS 出） |
+>
+> 对原设计的**修正**（核对代码/手册后确认，详见各节内标注）：PF1 基址、TCFW 签名范围、§5.1 的 DFlash 磨写细化。
 
 ---
 
@@ -42,7 +58,17 @@
 
 ## 3. PFlash 分区与地址映射（双 bank）
 
-TC275 PFlash：PF0 = 2 MB @ `0xA000_0000`(non-cached) / `0x8000_0000`(cached)，PF1 = 2 MB @ `0xA030_0000` / `0x8030_0000`（具体基址以所用衍生型的存储映射为准，实现时对照 TC27x User Manual "Memory Maps" 章节核实）。
+TC275 PFlash：PF0 = 2 MB @ `0xA000_0000`(non-cached) / `0x8000_0000`(cached)，PF1 = 2 MB @ `0xA020_0000` / `0x8020_0000`。（原文写 0x8030_0000 有误：本工程 `Lcf_Tasking_Tricore_Tc.lsl` 的 tc27D 衍生型定义将 pfls1 映射在 cached 0x80200000 / non-cached 0xA0200000，与 TC27x 存储映射一致，实现以该表为准。）
+
+落地分区（`mw/ota/ota_layout.h` 为唯一地址真源）：
+
+| 区域 | 范围（cached / non-cached） | 大小 | 扇区 |
+|---|---|---|---|
+| SBL | 0x8000_0000..0x8000_7FFF / 0xA000_0000..0xA000_7FFF | 32 KB | PF0 S0+S1 |
+| Slot A | 0x8000_8000..0x801F_FFFF / 0xA000_8000..0xA01F_FFFF | 2040 KB | PF0 S2..S26 |
+| Slot B | 0x8020_8000..0x803F_FFFF / 0xA020_8000..0xA03F_FFFF | 2040 KB | PF1 S2..S26 |
+
+两槽镜像对称（bank 内同偏移、同大小），槽入口 = 槽基址 + 0x20（`.start` 段，镜像 BMHD 复位约定；SBL 读此地址跳入）。注意 PF0 的 BMHD1 物理地址 0x8002_0000 落在 Slot A 内——SBL 构建已用 `IFX_CFG_CPUCSTART_BMI01_NOT_NEEDED` 去掉 bmhd_1 段，AppA 的 lsl 不在那附近安排可加载段。
 
 推荐分区（每 bank 内自洽，两 bank 镜像对称）：
 
@@ -69,7 +95,9 @@ TC275 PFlash：PF0 = 2 MB @ `0xA000_0000`(non-cached) / `0x8000_0000`(cached)，
 
 ## 4. OTA 元数据（DFlash 双页提交，掉电安全）
 
-放 DFlash0（有独立擦写、掉电安全），A/B 双页轮换写，防写入中途掉电损坏：
+放 DFlash0（有独立擦写、掉电安全），A/B 双页轮换写，防写入中途掉电损坏。
+
+落地地址：**DF0 逻辑扇区 13（0xAF01_A000）= 页 0，扇区 14（0xAF01_C000）= 页 1**（TC275 实配 128 KB/16 扇区；扇区 15 已被 myCar 的 calib 记录占用，0..12 预留）。线格式为 24 字节**显式小端**（TriCore 大端，不得结构体直拷），magic 字节序 'T','C','O','M'；CRC-32 覆盖前 20 字节。提交语义：写**非当前页**（seq+1）→ 读回校验 → 生效；旧页不失效（低 seq 影子，天然双副本）。
 
 ```c
 typedef struct {
@@ -102,9 +130,12 @@ EMPTY / WRITING / DOWNLOADED / PENDING_VERIFY / VALID / INVALID
   ├ active 槽 state==PENDING_VERIFY 且 boot_attempts >= 阈值(如3)
   │     → 判定新镜像自检失败 → 回滚: active_slot 切回另一槽(需其为 VALID); 目标槽标 INVALID
   ├ active 槽 state==VALID 或 PENDING_VERIFY(未超阈值)
-  │     → boot_attempts++; 提交; jump 到 active 槽 App 入口
+  │     → PENDING_VERIFY: boot_attempts++; 提交; jump 到 active 槽 App 入口
+  │     → VALID:          直接 jump，**不写元数据**（见下）
   └ 无有效槽 → 停在 SBL 安全态（点错误 LED，等 UART 重刷）
 ```
+
+> 实现细化（`mw/ota/ota_boot.c`）：原文对 VALID 槽也要求"每次上电 attempts++ 并提交"，这会每次上电烧一次 DFlash 擦写却不改变任何后续决策（attempts 只对 PENDING_VERIFY 有意义）。实现改为**仅 PENDING_VERIFY 槔升计数并提交**，VALID 槽零写启动。掉电安全语义不变。
 
 ### 5.2 App 侧自检确认（进入新镜像后）
 新镜像启动后跑自检（三核同步 OK、SPI LINK 起来、看门狗正常）：
@@ -148,14 +179,14 @@ DONE
  148 app.bin ...
 ```
 
-- 验签范围与 C6 完全一致（前 116 字节），可**移植 C6 的 `ed25519v` + `sha512` + bundle 解析器**到 TC275（纯 C99，无 IDF 依赖，`bundle.h` 已声明这点）。
-- SHA 用 SHA-512 截断或 SHA-256？C6 用的是 `sha512.h` 但字段名 `sha256`——实现时**必须核对 C6 实际算法**，两侧一致才验得过。（待办：确认 C6 `bundle.c` 里 hash 实际是 SHA-256 还是 SHA-512/256，本方案按"与 C6 逐字节一致"约束。）
+- **R2 已定论（读 c6_car 代码而非注释）**：签名覆盖**前 84 字节**——`tools/sign_bundle.py` 的 `SIGNED_LEN = 84` 与 `bundle.c` 的 `c6_ed25519_verify(pub, &h[84], h, 84)` 一致；c6 `bundle.h` 头注释里的 "[0, 84+32) 即前 116 字节"是**过时注释**，勿信。载荷摘要是 **SHA-512 截断前 32 字节**（`hashlib.sha512(...).digest()[:32]`），字段名 sha256 是历史命名。TCFW 验签器（`mw/ota/tcfw_bundle.c`）与上述逐字节一致，host 测试用同一 seed 生成的向量对拍通过（G-OTA-1）。
+- C6 的 `ed25519v` + `sha512` + `c6_consts` 已逐字拷贝至 `mw/crypto/`（无堆、纯 C99），TC275 与 C6 两侧共用同一套真源，避免漂移。
 
 ---
 
 ## 7. PFlash 擦写应用层（可写、但无法本地编译）
 
-基于 iLLD `IfxFlash` 封装一个 `bsp/flash_ota.[ch]`：
+已实现：`bsp/flash_ota.[ch]`（SBL 构建内编译通过；上板时序待验）。基于 iLLD `IfxFlash`：
 
 ```c
 boolean FLASHOTA_eraseSlot(uint8 slot);                 /* 擦除整槽(按 PFlash sector 循环) */
@@ -173,9 +204,9 @@ TriCore PFlash 写入硬约束（实现时严格遵守，否则 ECC/时序错）
 
 ---
 
-## 8. link.c / protocol.c 改动点（协议接收层，可 host 测）
+## 8. link.c / protocol.c 改动点（协议接收层，host 测 + myCar 已接入）
 
-1. `link.c:link_dispatch`：新增 `SF_TYPE_OTA_DATA/OTA_CTRL` 分支，不再 `unhandledType++`；解析 CID `OTA_BEGIN/CHUNK/ABORT/SWAP`，转发到 CPU0 的 OTA 编排。
+1. ✅ `link.c:link_dispatch`：新增 `SF_TYPE_OTA_DATA/OTA_CTRL` 分支（不再 `unhandledType++`），转入 `OTARX_frame()`；myCar 的 `com/ota_app.c` 注入全部回调（槽位自识别、flash_ota、元数据、`IfxCpu_triggerSwReset`、`LINK_send`）。全部 OTA 状态驻留 CPU2（链路核），无需跨核加锁；CPU2 看门狗按设计禁用，扇区擦除的长等待不会触发复位。
 2. 新增 `mw/ota/ota_rx.[ch]`：§5.3 状态机 + bundle 验签 + 调 `flash_ota` + 组 `OTA_ACK/OTA_STATUS` 回帧。
 3. `protocol.h`：补齐 `PROTO_CMD_OTA_*`(0x60–0x65) 常量（对齐 C6，见 F7 命令表统一）。
 4. TX 路径：`OTA_ACK`(TYPE_OTA_CTRL,CID 0x32)、`OTA_STATUS`(0x33) 经 link TX 队列回发。
@@ -184,10 +215,10 @@ TriCore PFlash 写入硬约束（实现时严格遵守，否则 ECC/时序错）
 
 ## 9. 验收门禁
 
-| 门 | 内容 | 可自动化？ |
-|---|---|---|
-| G-OTA-1 | bundle 验签器 host 单测：合法包通过、篡改任一字节验签失败、截断包报 TRUNCATED | ✅ host |
-| G-OTA-2 | SF OTA 帧编解码 host 单测：BEGIN/CHUNK/ACK/STATUS 字节布局与 C6 逐字节一致 | ✅ host |
+| 门 | 内容 | 可自动化？ | 状态 |
+|---|---|---|---|
+| G-OTA-1 | bundle 验签器 host 单测：合法包通过、篡改任一字节验签失败、截断包报 TRUNCATED | ✅ host | ✅ `test_tcfw`（9 用例全绿） |
+| G-OTA-2 | SF OTA 帧编解码 host 单测：BEGIN/CHUNK/ACK/STATUS 字节布局与 C6 逐字节一致 | ✅ host | ✅ `test_ota_frames` + `test_ota_rx`（12 场景） |
 | G-OTA-3 | 双 bank linker 各自 build 出可执行 hex | ❌ TASKING |
 | G-OTA-4 | 上板：写 Slot B → SWAP → SBL 跳 B → 自检 VALID | ❌ 上板 |
 | G-OTA-5 | 上板：传输中断/验签失败/自检失败三种回滚路径 | ❌ 上板 |
@@ -197,17 +228,17 @@ TriCore PFlash 写入硬约束（实现时严格遵守，否则 ECC/时序错）
 
 ## 10. 落地顺序建议
 
-1. **P1（我可交付，纯软件+host 测）**：`mw/ota/ota_rx` 协议状态机 + bundle 验签器 + SF OTA 帧回发 + host 单测（G-OTA-1/2）。此时 C6 推 OTA，TC275 能握手、能验签、能明确回 FAILED（而非黑洞丢弃），只是最后 `flash_ota` 返回"未装配"。
-2. **P2（我写代码，你上板验）**：`bsp/flash_ota` 基于 IfxFlash 的擦写实现。
-3. **P3（你在 TASKING 主导）**：SBL 工程 + 双 bank linker + startup 改造（§3.1/§3.2）。
-4. **P4（联调）**：C6↔TC275 端到端 OTA + 回滚 + 掉电测试（G-OTA-4/5/6）。
+1. **P1 ✅（已交付，host 全绿）**：`mw/ota/ota_rx` 协议状态机 + TCFW 验签器 + SF OTA 帧回发 + host 单测（G-OTA-1/2，282 断言）。
+2. **P2 ✅ 代码就绪（待上板）**：`bsp/flash_ota` IfxFlash 擦写（编译通过；擦写时序/跨 bank 取指需板上验证）。
+3. **P3 ✅ 编译验证通过（待 ADS 构建 + 上板）**：SBL 工程（本仓库，`Cpu0_Main.c`→`sbl_boot`）+ 双 bank linker ×3 + CStart 配置（单核启动、去 BMHD1）。命令行 TASKING v6.3r1 验证：SBL 11.2 KB @ 32 KB 区域内，入口 0x80000020。**R1 的 SBL→App 跳转仍需小样上板验证。**
+4. **P4（联调，待做）**：C6↔TC275 端到端 OTA + 回滚 + 掉电测试（G-OTA-4/5/6）。C6 侧还需 TC275 推手（读 STATUS/推 TCFW 分片）与 TCFW 打包工具（改 `sign_bundle.py` 的 magic/载荷即可）。
 
 ---
 
 ## 11. 风险与开放问题
 
-- **R1 reset 向量归属**：改由 SBL 持有 reset、App 经 SBL 跳入，是对现有启动流程的破坏性改动，需改 startup（§3.2）。风险高，务必先在 TASKING 小样验证 SBL→App 跳转。
-- **R2 hash 算法对齐**：C6 `bundle.c` 用 `sha512.h` 但字段名 `sha256`，需确认真实算法，两侧不一致则永远验签失败。→ 实现 P1 前先核对 C6 源码。
+- **R1 reset 向量归属**：代码已落地（SBL 持有 reset @0x80000020，App `.start` 落槽基址+0x20，冒烟链接验证两个槽的地址正确）。风险剩余半边：**App CStart 从"SBL 运行态"二次初始化（时钟 PLL 重配、watchdog 重使能）的上板行为**，小样验证后才算关闭。
+- **R2 hash 算法对齐 ✅ 已关闭**：签名覆盖前 84 字节、载荷摘要 SHA-512[:32]，与 `sign_bundle.py` 逐字节一致（见 §6）。
 - **R3 两份 App 镜像 vs PIC**：TriCore 非 PIC，双槽需两份 linker 输出（构建产物 ×2）。若想单镜像双槽，需 SBL 做地址重定位，复杂度更高，不推荐首版。
 - **R4 擦写取指约束**：擦 Slot X 时不能从 Slot X 取指；建议擦写例程驻 PSPR。
 - **R5 doc §8 规则**：本设计落地为代码时，行为变更需同提交更新 doc 21/22/31 与本文。

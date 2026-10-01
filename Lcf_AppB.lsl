@@ -1,11 +1,12 @@
 /**********************************************************************************************************************
- * Lcf_Tasking_Tricore_Tc.lsl - SLOT A layout for the OTA dual-bank scheme (doc 24 SS3.1)
+ * Lcf_Tasking_Tricore_Tc.lsl - SLOT B layout for the OTA dual-bank scheme (doc 24 SS3.1)
  *
  * Kept under the default file name so the AURIX Studio build picks it up
- * without linker-option changes, but the content places the App in slot A:
- * [0x80008000, 0x80200000), entry at 0x80008020 (".start", where the SBL
+ * without linker-option changes, but the content places the App in slot B:
+ * [0x80208000, 0x80400000), entry at 0x80208020 (".start", where the SBL
  * jumps to - myCarSbl/Lcf_SBL.lsl owns the physical reset vector / BMHD0).
- * Slot B build: switch the linker file to Lcf_AppB.lsl.
+ * NOT part of the default build; select this file in the linker
+ * options when producing an OTA-target (slot B) image.
  * Derived from the stock Infineon template by the slot transform only.
  *********************************************************************************************************************/
 #define LCF_CSA0_SIZE		8k
@@ -57,18 +58,18 @@
 #define LCF_HEAP2_OFFSET	(LCF_USTACK2_OFFSET - LCF_HEAP_SIZE)
 
 /* OTA slot layout (doc 24 SS3.1): the SBL owns the physical reset vector;
- * this App image lives in slot A and is entered at slot base + 0x20. */
-#define LCF_INTVEC0_START	0x801F4000
-#define LCF_TRAPVEC0_START	0x80008100
-#define LCF_TRAPVEC1_START	0x801F6200
-#define LCF_TRAPVEC2_START	0x801F6000
+ * this App image lives in slot B and is entered at slot base + 0x20. */
+#define LCF_INTVEC0_START	0x803F4000
+#define LCF_TRAPVEC0_START	0x80208100
+#define LCF_TRAPVEC1_START	0x803F6200
+#define LCF_TRAPVEC2_START	0x803F6000
 
 #define INTTAB0			(LCF_INTVEC0_START)
 #define TRAPTAB0		(LCF_TRAPVEC0_START)
 #define TRAPTAB1		(LCF_TRAPVEC1_START)
 #define TRAPTAB2		(LCF_TRAPVEC2_START)
 
-#define RESET 0x80008020
+#define RESET 0x80208020
 
 #include "tc1v1_6_x.lsl"
 
@@ -176,15 +177,15 @@ derivative tc27A
 		map (dest=bus:sri, dest_offset=0x70100000, size=24k);
 	}
 	
-	/* App slot only (doc 24 SS3): PF0 above the 32 KB SBL, 2040 KB = bank S2..S26. PF1 / slot B (Lcf_AppB.lsl)
+	/* App slot only (doc 24 SS3): PF1, mirroring slot A, 2040 KB = bank S2..S26. PF0 (SBL + slot A, built from the default-named lsl)
 	 * is not defined, so nothing can be located outside the slot. */
-	memory pfls0_app
+	memory pfls1_app
 	{
 		mau = 8;
 		size = 2040k;
 		type = rom;
-		map     cached (dest=bus:sri, dest_offset=0x80008000,           size=2040k);
-		map not_cached (dest=bus:sri, dest_offset=0xa0008000, reserved, size=2040k);
+		map     cached (dest=bus:sri, dest_offset=0x80208000,           size=2040k);
+		map not_cached (dest=bus:sri, dest_offset=0xa0208000, reserved, size=2040k);
 	}
 	
 	
@@ -473,7 +474,7 @@ derivative tc27A
 	
 	section_layout :vtc:abs18
 	{
-		group  (ordered, run_addr=mem:pfls0_app)
+		group  (ordered, run_addr=mem:pfls1_app)
 		{
 			select ".zrodata*";
 		}
@@ -481,7 +482,7 @@ derivative tc27A
 	
 	section_layout :vtc:linear
 	{		
-		group  bmh_0 (ordered, run_addr=0x80008000)
+		group  bmh_0 (ordered, run_addr=0x80208000)
 		{
 			/* inert data at the slot base: the boot ROM only reads a BMHD
 			 * at 0x80000000 (SBL territory); this just keeps the CStart
@@ -489,16 +490,16 @@ derivative tc27A
 			select "*.bmhd_0";
 			select "*.bmhd_1";
 		}
-		group  reset (ordered, run_addr=0x80008020)
+		group  reset (ordered, run_addr=0x80208020)
 		{
 			select "*.start";
 		}
-		group  interface_const (ordered, run_addr=0x80008040)
+		group  interface_const (ordered, run_addr=0x80208040)
 		{
 			select "*.interface_const";
 		}
 		"__IF_CONST" := addressof(group:ainterface_const);
-		group  a1 (ordered, run_addr=mem:pfls0_app)
+		group  a1 (ordered, run_addr=mem:pfls1_app)
 		{
 			select ".srodata*";
 			select ".ldata*";
@@ -506,15 +507,15 @@ derivative tc27A
 		"_LITERAL_DATA_" := sizeof(group:a1) > 0 ? addressof(group:a1) + 32k : addressof(group:a1) & 0xF0000000 + 32k;
 		"_A1_MEM" = "_LITERAL_DATA_";
 		
-		group  (ordered, run_addr=mem:pfls0_app)
+		group  (ordered, run_addr=mem:pfls1_app)
 		{
 			select ".rodata*";
 		}
-		group  (ordered, run_addr=mem:pfls0_app)
+		group  (ordered, run_addr=mem:pfls1_app)
 		{
 			select ".text*";
 		}
-		group a8 (ordered, run_addr=mem:pfls0_app)
+		group a8 (ordered, run_addr=mem:pfls1_app)
 		{
 			select "(.rodata_a8|.rodata_a8*)";
 		}

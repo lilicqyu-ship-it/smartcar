@@ -39,6 +39,17 @@
 #define PROTO_CMD_DPT_REC_SET     0x73
 #define PROTO_CMD_DPT_REC_CLEAR   0x74
 
+/* OTA commands (doc 24 SS5.3 / F7 command table; values match the C6 side,
+ * c6_car components/c6_proto/proto_frames.h). They travel as SF OTA frames,
+ * not through this UART demo protocol - the constants complete the shared
+ * command table; the SF layer forwards them in link.c. */
+#define PROTO_CMD_OTA_BEGIN       0x60  /* {u32 total, u32 crc32}            */
+#define PROTO_CMD_OTA_CHUNK       0x61  /* {u16 idx, data<=240}              */
+#define PROTO_CMD_OTA_ACK         0x62  /* {u16 idx, u8 result}              */
+#define PROTO_CMD_OTA_STATUS      0x63  /* {u8 state, u8 pct}                */
+#define PROTO_CMD_OTA_SWAP        0x64  /* TC275 reboots into the new slot   */
+#define PROTO_CMD_OTA_ABORT       0x65  /* drop the half-written slot        */
+
 /* Response: same CMD echoed back, DATA carries result */
 #define PROTO_CMD_STATUS_REPLY    0x40
 

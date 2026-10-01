@@ -7,6 +7,8 @@
  */
 #include "com/link.h"
 
+#include "com/ota_app.h"
+#include "mw/ota/ota_rx.h"
 #include "mw/xcore/xcore.h"
 #include "bsp/stime.h"
 
@@ -236,9 +238,20 @@ static void link_dispatch(const SF_Frame *frame)
     uint8 op;
     uint8 speed[2];
 
+    if ((frame->type == SF_TYPE_OTA_DATA) || (frame->type == SF_TYPE_OTA_CTRL))
+    {
+        /* OTA receiver (doc 24 SS5.3): BEGIN/CHUNK/ABORT/SWAP drive the
+         * whole transfer, including the flash writes, right here in the CPU2
+         * link context. ACK/STATUS replies ride LINK_send; a SWAP resets the
+         * MCU into the SBL. Synchronous: the payload is consumed before
+         * this call returns (no copy needed). */
+        OTARX_frame(frame->type, frame->cid, frame->payload, frame->len);
+        return;
+    }
+
     if (frame->type != SF_TYPE_CMD)
     {
-        /* ACK / HBT / OTA / DBG have no consumer in this build yet. Counted, not
+        /* ACK / HBT / DBG have no consumer in this build yet. Counted, not
          * silently dropped, so a C6 that starts sending them shows up in health. */
         g_stats.unhandledType++;
         return;
