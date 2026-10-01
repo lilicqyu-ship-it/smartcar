@@ -26,10 +26,14 @@
 #define CALIB_SECTOR_ADDR \
     (IFXFLASH_DFLASH_START + (15u * 0x2000u))
 
-/* Wait budget for erase/program: datasheet tens of ms; the bound exists so a
- * stuck FMU costs a logged write failure, not a watchdog reset (doc 34
- * SS8.3's pause budget assumes the operation completes). */
-#define CALIB_FLASH_TIMEOUT_MS  200u
+/* Wait budgets. Infineon's Flash_Programming_1_KIT_TC275_LK waits with no
+ * bound at all; a bound exists here only so a stuck FMU costs a logged write
+ * failure, not a hang. The old single 200 ms budget was tight for a DFlash
+ * logical-sector erase (the OTA driver allows 5 s for its erases), so a slow
+ * but successful erase could be reported as a failure: give erase its own
+ * generous budget. The CPU watchdog is serviced inside the wait loop. */
+#define CALIB_ERASE_TIMEOUT_MS  2000u
+#define CALIB_FLASH_TIMEOUT_MS  200u     /* page mode / 8 B page program */
 
 /* Deferred write only once the bench is quiet this long after the trigger
  * (or the last motion sighting), so a save never overlaps motors running
@@ -109,7 +113,8 @@ static void calib_issueWritePage(uint32 pageAddr)
  * that left PROER / OPER / SQER set also counts as a failure. */
 static boolean calib_flashWaitD0(uint8 step)
 {
-    uint32 deadline = STIME_nowMs() + CALIB_FLASH_TIMEOUT_MS;
+    uint32 deadline = STIME_nowMs() +
+                      ((step == 1u) ? CALIB_ERASE_TIMEOUT_MS : CALIB_FLASH_TIMEOUT_MS);
 
     while (FLASH0_FSR.B.D0BUSY != 0u)
     {
