@@ -368,14 +368,14 @@ factory / clean`，详见 [firmware/README.md](../firmware/README.md)。只做�
 |---|---|---|
 | esp32c6_car | 委托 `esp32c6_car/flash.py build`（EIM 自动发现，含 assets） | 委托 `flash.py`（full/assets/all，-p 串口，-m 监视） |
 | smartcar_remote | EIM 环境 + `idf.py build` | `idf.py -p <串口> flash`，串口自动识别 |
-| tc275_car | 解析 ADS 生成的 subdir.mk → 完整版 TASKING 增量重编 | `tc275_sbl/tools/flash.py flash <App槽A.hex>` |
-| tc275_sbl | 委托 `tools/build_sbl.sh` | `tools/flash.py flash Debug/tc275_sbl.hex` |
+| tc275_car | `python -m SCons`（解析 `.cproject` 与 ADS 同源，产物名带版本） | `tc275_sbl/tools/flash.py flash <App槽A.hex>` |
+| tc275_sbl | `python -m SCons`（同上） | `tools/flash.py flash`（自动取 SCons 最新版本化 hex） |
 
-tc275_car 的命令行编译说明：ADS 生成的 makefile 带字面引号目标，make/mktc
-都无法驱动；fw.py 解析生成文件提取每个 .c 的 cctc 命令直接执行，标志与
-IDE 零漂移。**首次需在 ADS 里构建一次**（生成构建文件）；增量只看 .c 的
-mtime，改头文件后 touch 对应 .c。环境变量 `FW_TASKING` / `FW_IDF_PROFILE`
-可覆盖工具路径。
+tc275 双仓的命令行编译统一为 SCons：源集/include/宏/排除表直接解析 `.cproject`，
+编译链接参数复刻 IDE 生成的命令行，与 IDE 零漂移；产物在 `build/tasking-<cfg>/`
+（文件名自动携带 `mw/app_version.h` 里的版本号）。余参透传：`fw.py build tc275_car
+cfg=release opt=-O2 -c`。TASKING 工具链由 SCons 自动发现
+（`TASKING_TRICORE_HOME` 可覆盖）。
 
 ---
 
