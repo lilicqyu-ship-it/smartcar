@@ -7,6 +7,18 @@
 
 ## [未发布]
 
+## [1.0.0] - 2026-10-01
+
+首个整车稳定版 tag。本版锁定：esp32c6_car@v1.0.0、smartcar_remote@v1.0.0、tc275_car@v1.0.0、tc275_sbl@v1.0.0（四仓版本号统一升至 1.0.0）。
+
+### 新增
+- About 页固件版本 tap 刷新全链路：S3 → C6（`{"t":"tcver"}` → SPI DIAG 0x53/0x24）→ TC275 即答版本信标；C6 侧走 /api/health
+- 四仓版本真源（C6 PROJECT_VER / TC275 APP+SBL app_version.h）统一落位 1.0.0
+
+### 修复
+- C6 send_json 状态行补完整状态码（S3 /api/health 超时根因）
+- S3 hello.tc 占位串覆盖 tc_on；WS 连续失败强制重连 Wi-Fi 自愈
+
 ## [0.1.0] - 2026-10-01
 
 首个整车版本 tag。本仓版本即整车总 tag：一次 lock 组合出的四个子仓版本即为一次整车发布，
@@ -26,5 +38,6 @@
 - 四仓命名统一 `<平台>_<功能>`：myCarSbl 仓库改名 tc275_sbl
 - TC275 双仓命令行构建统一 SCons（`python -m SCons`，删除 build_sbl.sh）
 
-[未发布]: https://github.com/lilicqyu-ship-it/smartcar/compare/v0.1.0...HEAD
+[未发布]: https://github.com/lilicqyu-ship-it/smartcar/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/lilicqyu-ship-it/smartcar/releases/tag/v1.0.0
 [0.1.0]: https://github.com/lilicqyu-ship-it/smartcar/releases/tag/v0.1.0
