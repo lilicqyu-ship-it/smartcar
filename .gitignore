@@ -1,4 +1,7 @@
 /TriCore Debug (TASKING)
 /TriCore Release (TASKING)
 /test/host/out/
+/build/
+/.sconsign.dblite
+__pycache__/
 50-tech-assessment.md
