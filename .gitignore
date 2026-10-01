@@ -6,3 +6,5 @@
 firmware/dist/**/*.elf
 firmware/dist/**/*.map
 firmware/dist/**/*.mdf
+.codegraph/
+.kiro/
