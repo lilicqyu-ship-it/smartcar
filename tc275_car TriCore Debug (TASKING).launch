@@ -8,7 +8,7 @@
     <stringAttribute key="EXECUTABLE_PATH" value="${workspace_loc}/tc275_car/TriCore Debug (TASKING)/tc275_car.elf"/>
     <stringAttribute key="PPU_ELF_PATH" value=""/>
     <stringAttribute key="STOP_FUNCTION" value="core0_main"/>
-    <stringAttribute key="SVD" value="C:/infineon/AURIX-Studio-1.10.36/build_system/bundled-artefacts-repo/svd/tc27xdpd/1.2-3/device.svd"/>
+    <stringAttribute key="SVD" value="C:/infineon/AURIX-Studio-1.10.40/build_system/bundled-artefacts-repo/svd/tc27xdpd/1.2-3/device.svd"/>
     <stringAttribute key="org.eclipse.cdt.launch.PROJECT_ATTR" value="tc275_car"/>
     <listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_PATHS">
         <listEntry value="/tc275_car"/>
