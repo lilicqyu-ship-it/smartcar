@@ -95,6 +95,11 @@ extern "C" {
  * DIAG bridge and turns them into UI events in c6_bridge/bridge.c. */
 #define SF_CID_DPT_RESULT     0x22u                /* TYPE_EVT, 23 B calib result  */
 #define SF_CID_DPT_REC        0x23u                /* TYPE_EVT, 15 B record echo   */
+/* Version beacons, TC275 -> C6 -> S3 ({"t":"tcver"} JSON on the C6). Fixed
+ * 24 B NUL-terminated strings; SBL not flashed / pre-version SBL => all-zero
+ * payload. C6 tunnels unknown EVT CIDs unchanged (c6_link sf_to_v2). */
+#define SF_CID_EVT_APP_VER    0x24u                /* TYPE_EVT, 24 B "APPFW ..."   */
+#define SF_CID_EVT_SBL_VER    0x25u                /* TYPE_EVT, 24 B "SBLFW ..."   */
 #define SF_EVT_KIND_PAIR_REPLY 0x01u               /* TYPE_EVT / CID_STATE byte 0  */
 #define SF_CID_OTA_BEGIN      0x30u                /* TYPE_OTA_DATA {u32 total, u32 crc32} */
 #define SF_CID_OTA_CHUNK      0x31u                /* TYPE_OTA_DATA {u16 idx, data<=240}   */

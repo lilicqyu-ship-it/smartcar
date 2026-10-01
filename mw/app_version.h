@@ -1,6 +1,8 @@
 #ifndef MW_APP_VERSION_H
 #define MW_APP_VERSION_H
 
+#include "Ifx_Types.h"
+
 /*
  * 应用固件版本（SemVer）—— 本工程唯一的版本真源。
  *
@@ -31,5 +33,12 @@ const char *app_version_string(void);
 /* 返回 SBL 版本串（"SBLFW tc275_sbl vX.Y.Z"）；SBL 未烧/老 SBL（magic
  * 不符）时返回 NULL。 */
 const char *sbl_version_string(void);
+
+/* 版本事件帧（SF EVT 0x24/0x25）payload：24 B 定长 NUL 结尾字符串。
+ * app_out 覆盖 g_app_version 全串；sbl_out 为 SBL 版本或全零（未烧 SBL）。
+ * 两者长度都恒为 24（XCORE_EVT_MAX_PAYLOAD=32 之内）。 */
+#define APP_VER_EVT_LEN 24u
+
+void app_ver_evt_build(uint8 *app_out, uint8 *sbl_out);
 
 #endif

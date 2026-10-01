@@ -38,6 +38,7 @@
 #include "mw/xcore/xcore.h"
 #include "mw/proto/protocol.h"
 #include "mw/app_version.h"
+#include "mw/sf/sf_frame.h"
 #include "app/robot.h"
 
 #if defined(__TASKING__)
@@ -98,6 +99,44 @@ static void vRobotControlTask(void *pvParameters)
          * watchdog window. */
         CALIB_tick();
         WDG_serviceCpu();
+
+        /* Version beacons to C6->S3 (SF EVT 0x24/0x25, surfacing as a
+         * {"t":"tcver"} JSON on the C6): pushed at task start and re-sent
+         * every 5 s so a freshly connected remote always catches one. */
+        {
+            static uint32 s_lastBeaconMs = 0u;
+            static uint8  s_beaconInit   = 0u;
+            uint32        nowMs = (uint32)xTaskGetTickCount() * portTICK_PERIOD_MS;
+
+            if ((!s_beaconInit) || ((nowMs - s_lastBeaconMs) >= 5000u))
+            {
+                XcoreEvtFrame frame;
+                uint8         appBuf[APP_VER_EVT_LEN];
+                uint8         sblBuf[APP_VER_EVT_LEN];
+                uint8         i;
+
+                app_ver_evt_build(appBuf, sblBuf);
+
+                frame.type = SF_TYPE_EVT;
+                frame.len  = APP_VER_EVT_LEN;
+                frame.cid  = SF_CID_EVT_APP_VER;
+                for (i = 0u; i < APP_VER_EVT_LEN; i++)
+                {
+                    frame.payload[i] = appBuf[i];
+                }
+                (void)XCORE_evtPush(&frame);
+
+                frame.cid = SF_CID_EVT_SBL_VER;
+                for (i = 0u; i < APP_VER_EVT_LEN; i++)
+                {
+                    frame.payload[i] = sblBuf[i];
+                }
+                (void)XCORE_evtPush(&frame);
+
+                s_lastBeaconMs = nowMs;
+                s_beaconInit   = 1u;
+            }
+        }
 
         {
             ProtocolStatus status;

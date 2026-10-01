@@ -57,10 +57,11 @@
  * shared log ring and ASCLIN0 well clear of the 20 ms telemetry traffic. */
 #define LINK_DIAG_PERIOD_MS       500u
 
-/* SDD SS10: fwVer is 0x00MMmmpp. This is the SDD V1.2 baseline build; the
- * buildhash half of the §10 version string has no slot in a u32 and is not
- * carried. */
-#define LINK_FW_VERSION           0x00010200u
+/* SDD SS10: fwVer is 0x00MMmmpp. Derived from mw/app_version.h so the
+ * telemetry slot always matches the firmware version string (the buildhash
+ * half of the §10 version string has no slot in a u32 and is not carried). */
+#include "mw/app_version.h"
+#define LINK_FW_VERSION           ((((uint32)APP_VERSION_MAJOR) << 16) |                                    (((uint32)APP_VERSION_MINOR) << 8) |                                    ((uint32)APP_VERSION_PATCH))
 
 /* Telemetry fields with a measured source in this build are filled, the rest are
  * zero. The zeros are not placeholders: each one names what has to exist first.

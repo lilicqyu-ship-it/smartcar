@@ -18,3 +18,24 @@ const char *sbl_version_string(void)
         return 0;
     return (const char *)p;
 }
+
+void app_ver_evt_build(uint8 *app_out, uint8 *sbl_out)
+{
+    uint8 i;
+
+    for (i = 0u; i < APP_VER_EVT_LEN; i++)
+    {
+        app_out[i] = (uint8)g_app_version[i];
+    }
+    app_out[APP_VER_EVT_LEN - 1u] = 0u;
+
+    {
+        const char *sbl = sbl_version_string();
+
+        for (i = 0u; i < APP_VER_EVT_LEN; i++)
+        {
+            sbl_out[i] = (sbl != 0) ? (uint8)sbl[i] : 0u;
+        }
+        sbl_out[APP_VER_EVT_LEN - 1u] = 0u;
+    }
+}
