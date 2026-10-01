@@ -7,6 +7,10 @@
 
 ## [未发布]
 
+### 修复
+- C6 OTA 期间不再弹全屏 RADIO LOST 告警：上传饿死遥测与"接受后重启等待重连"两个窗口内静默（scr_svc 新增 `scr_svc_ota_quiet_c6()`，90 s 重连宽限；上传失败/宽限超时后告警照常）
+- TC275 断电（WS 仍连接）不再触发 RADIO LOST 全屏告警：告警只跟踪 S3↔C6 无线链路本身，车端离线由 SYSTEM 页 OFFLINE/STALE 与遥测 "--" 呈现（需配合 C6 侧遥测停播修复）
+
 ## [1.0.0] - 2026-10-01
 
 首个稳定版，对齐 `CMakeLists.txt` PROJECT_VER 1.0.0。

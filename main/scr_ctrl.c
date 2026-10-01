@@ -130,12 +130,12 @@ static void radio_lost_exit(void)
 static void safety_watch(const scr_state_t *st)
 {
     /* spec 102: radio lost must be loud and must say the vehicle stopped -
-     * but only for a link that was actually established before, and only
-     * after the loss is SUSTAINED: telemetry hiccups of a few hundred ms
-     * (vehicle boot, AP broadcast pacing) must not strobe a full-screen
-     * overlay on and off.  Stale data still shows "--" immediately (spec
-     * 101); only the overlay waits CONFIG_SCR_ALERT_DEBOUNCE_MS. */
-    bool link_ok = (st->conn == SCR_CONN_CONNECTED) && st->tele_fresh;
+     * but it tracks the S3<->C6 radio link only.  Vehicle-side loss (TC275
+     * powered off while the WS to the C6 stays connected) is not radio loss:
+     * it reads as OFFLINE/STALE on the SYSTEM page and "--" telemetry (spec
+     * 101), never as this overlay.  The debounce still guards brief WS
+     * reconnect blips from strobing the overlay on and off. */
+    bool link_ok = (st->conn == SCR_CONN_CONNECTED);
     static int64_t stale_since;
     if (link_ok) {
         s_flags.link_was_ok = true;
