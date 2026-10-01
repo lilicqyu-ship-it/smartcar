@@ -59,3 +59,44 @@ gh-sync:
 # 检查本机开发环境（git/just/gh/bash 版本、换行与长路径配置）
 doctor:
     @bash scripts/doctor.sh
+
+# —— 固件统一管理（firmware/fw.py；详见 firmware/README.md）——
+# 工程名: esp32c6_car | smartcar_remote | tc275_car | tc275_sbl（别名 c6/remote/app/sbl）
+py := if os() == "windows" { "python" } else { "python3" }
+
+# 四工程固件产物 / 归档状态一览
+fw-list:
+    @{{py}} firmware/fw.py list
+
+# 编译固件: just fw-build <project>（如 just fw-build tc275_sbl --collect）
+fw-build project *args:
+    @{{py}} firmware/fw.py build {{project}} {{args}}
+
+# 烧录固件: just fw-flash <project> [透传参数]（如 just fw-flash esp32c6_car all -m）
+fw-flash project *args:
+    @{{py}} firmware/fw.py flash {{project}} {{args}}
+
+# 归档产物到 firmware/dist/<工程>/<时间戳-g提交号>/（省略 project 则四工程全归档）
+fw-collect project="":
+    @{{py}} firmware/fw.py collect {{project}}
+
+# SBL+App 出厂整包: 构建两工程 + 合成 factory_full.hex（--flash 顺带烧录）
+fw-factory *args:
+    @{{py}} firmware/fw.py factory {{args}}
+
+# 清空 firmware/dist/ 归档
+fw-clean:
+    @{{py}} firmware/fw.py clean --yes
+
+# —— TASKING SCons 直编（tc275_car / tc275_sbl）——
+# 各仓库根目录的 SConstruct 直接解析 .cproject（include/宏/源码排除），
+# 不依赖 ADS 生成文件；需本机装完整版 TASKING TriCore v6.3r1 + pip install scons。
+# 产物在 <仓库>/build/tasking-debug/（elf/hex/map），配置与 ADS Debug 完全同源。
+
+# SCons 编译 tc275_car（余参透传: cfg=release / opt=-O2 / size / -c）
+scons-car *args:
+    cd tc275_car && {{py}} -m SCons -j8 {{args}}
+
+# SCons 编译 tc275_sbl（余参透传: cfg=release / opt=-O2 / size / -c）
+scons-sbl *args:
+    cd tc275_sbl && {{py}} -m SCons -j8 {{args}}

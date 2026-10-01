@@ -22,6 +22,9 @@ just contracts-apply  # 用 contracts/ 覆盖各仓库副本
 just lock     # 记录当前四仓库版本组合（bump 指针）
 just release v1.0.0   # 契约校验 -> 锁版本 -> 打总 tag
 just gh-sync  # 下发 GitHub 统一配置（标签/分支保护/看板）
+just fw-list            # 四工程固件产物 / 归档状态
+just fw-build tc275_car  # 编译固件（esp32c6_car|smartcar_remote|tc275_car|tc275_sbl）
+just fw-flash c6 all -m  # 烧录（串口自动识别；SBL+App 出厂整包: just fw-factory --flash）
 ```
 
 三条铁律：
@@ -73,6 +76,9 @@ smartcar/
 │   ├── repos.sh             # 四子仓库批量 status/sync/push/fix-head
 │   ├── sync-gh.sh           # GitHub 配置批量下发
 │   └── doctor.sh            # 本机环境自检
+├── firmware/               # 固件统一入口（§5.6）
+│   ├── fw.py               # 四工程编译/烧录/归档一条命令（纯 Python 标准库）
+│   └── dist/               # 归档产物：<工程>/<时间戳-g提交号>/ + manifest.json（gitignore）
 ├── .github/workflows/contracts.yml   # CI 门禁：每次 push/PR 自动跑契约校验（Linux+Windows）
 ├── justfile                 # 命令入口（§6 逐条说明）
 ├── .gitattributes           # 全仓 LF；.bat/.cmd 强制 CRLF（跨平台校验一致的前提）
@@ -238,6 +244,34 @@ git push origin main --tags     # release 配方不自动 push，确认后手动
 - 加了新 issue 后跑 `just gh-sync`，看板 [Smartcar](https://github.com/users/lilicqyu-ship-it/projects) 自动收录所有仓库的 open issue（重复跑安全，已在板上的会 skip）。
 - 新增第 5 个子仓库后，改 `scripts/sync-gh.sh` 的 `REPOS` 数组即可批量生效。
 
+### 5.6 场景 F：编译 / 烧录 / 归档固件（firmware/）
+
+四工程的构建烧录方式各不相同（ESP-IDF 环境、TASKING 命令行、AURIXFlasher），
+`firmware/fw.py` 把它们收拢成一套命令，在 smartcar 根目录即可操作：
+
+```bash
+just fw-list                    # 各工程有没有产物、最近构建时间、最新归档
+just fw-build tc275_car         # 编译一个工程（--collect 顺带归档）
+just fw-build sbl --collect     # 别名: c6 / remote / app / sbl
+just fw-flash esp32c6_car       # 烧录（ESP 串口按 USB VID 自动识别，-p COMx 指定）
+just fw-flash c6 all -m         # 透传子命令/参数（assets+固件+监视器）
+just fw-collect                 # 四工程产物全部归档到 firmware/dist/
+just fw-factory                 # SBL + App 槽 A 合成 factory_full.hex（--flash 一步烧录）
+```
+
+归档目录名带**子仓库提交号**（脏工作区加 `-dirty`），manifest.json 记录
+产物清单与来源路径——烧到板子上的固件永远能对回源码版本。
+
+前置条件（§7.5 有细节）：ESP 两工程需 EIM 装的 ESP-IDF v6.1（自动发现）；
+TC275 两工程需完整版 TASKING（ADS 内置版禁止 IDE 外运行）+ 首次在 ADS 里
+构建一次以生成构建文件；TC275 烧录需 DAS 服务在跑。
+
+TC275 两工程另有一条 **SCons 直编路线**（`just scons-car` / `just scons-sbl`）：
+SConstruct 直接解析 `.cproject` 取 include/宏/源码排除，编译链接参数复刻 ADS
+生成命令行，**无需先在 ADS 里构建**；产物在 `<仓库>/build/tasking-debug/`
+（elf/hex/map），与 ADS 产物体积一致（tc275_sbl 逐字节相同）。余参透传：
+`just scons-sbl size`、`just scons-car cfg=release`、`-c` 清理。
+
 ---
 
 ## 6. just 命令手册
@@ -256,6 +290,13 @@ git push origin main --tags     # release 配方不自动 push，确认后手动
 | `just lock` | 契约校验 → bump 四个指针 → 提交 | 校验不过会中止；可带说明 `just lock "接入 0x42 命令"` |
 | `just release <tag>` | lock + 打附注 tag（含四提交号） | 不自动 push：`git push origin main --tags` |
 | `just gh-sync` | 标签/分支保护/看板批量下发 | 需 gh 登录 + 权限（§7.2） |
+| `just fw-list` | 四工程固件产物 / 归档状态一览 | §5.6 |
+| `just fw-build <工程>` | 编译固件 | 工程: esp32c6_car/smartcar_remote/tc275_car/tc275_sbl，别名 c6/remote/app/sbl（§5.6） |
+| `just fw-flash <工程> [参数]` | 烧录固件 | 参数透传各工程入口；ESP 串口自动识别（§5.6） |
+| `just fw-collect [工程]` | 归档产物到 firmware/dist/ | 目录名带子仓库提交号，含 manifest（§5.6） |
+| `just fw-factory` | SBL+App 出厂整包合成 | `--flash` 顺带 AURIXFlasher 整包烧录（§5.6） |
+| `just scons-car` / `just scons-sbl` | TASKING SCons 直编 TC275 工程 | 免 ADS 生成文件；余参透传 `size`/`cfg=release`/`-c`（§5.6） |
+| `just fw-clean` | 清空 firmware/dist/ | |
 
 Windows 注意：justfile 已写死 `windows-shell := Git Bash`；Git 装在非默认路径时临时覆盖：
 `just --shell "D:/Git/bin/bash.exe" --shell-arg -cu status`
@@ -314,6 +355,27 @@ bash scripts/sync-gh.sh [labels|protection|board|all]   # 默认 all，幂等可
 ### 7.4 doctor.sh —— 环境自检
 
 工具版本（git/just/gh/python3）、bash≥4、gh 登录、core.autocrlf、（Windows）longpaths 与路径长度、四个子仓库工作区换行是否 LF（发现 CRLF 会给出修复命令：`git -C <仓库> add --renormalize .`）。
+
+---
+
+### 7.5 fw.py —— 固件统一管理（just fw-* 配方的实现层）
+
+`python firmware/fw.py <命令>`，子命令 `list / build / flash / collect /
+factory / clean`，详见 [firmware/README.md](../firmware/README.md)。只做发现、
+委托与归档，不重复实现各工程的构建烧录：
+
+| 工程 | 编译 | 烧录 |
+|---|---|---|
+| esp32c6_car | 委托 `esp32c6_car/flash.py build`（EIM 自动发现，含 assets） | 委托 `flash.py`（full/assets/all，-p 串口，-m 监视） |
+| smartcar_remote | EIM 环境 + `idf.py build` | `idf.py -p <串口> flash`，串口自动识别 |
+| tc275_car | 解析 ADS 生成的 subdir.mk → 完整版 TASKING 增量重编 | `tc275_sbl/tools/flash.py flash <App槽A.hex>` |
+| tc275_sbl | 委托 `tools/build_sbl.sh` | `tools/flash.py flash Debug/tc275_sbl.hex` |
+
+tc275_car 的命令行编译说明：ADS 生成的 makefile 带字面引号目标，make/mktc
+都无法驱动；fw.py 解析生成文件提取每个 .c 的 cctc 命令直接执行，标志与
+IDE 零漂移。**首次需在 ADS 里构建一次**（生成构建文件）；增量只看 .c 的
+mtime，改头文件后 touch 对应 .c。环境变量 `FW_TASKING` / `FW_IDF_PROFILE`
+可覆盖工具路径。
 
 ---
 

@@ -27,6 +27,9 @@ smartcar/
 ├── scripts/
 │   ├── sync-gh.sh     统一下发 GitHub 标签/分支保护/看板
 │   └── check-contracts.sh  接口副本一致性校验（--apply 用 contracts/ 覆盖副本）
+├── firmware/
+│   ├── fw.py          四工程固件统一入口: 编译/烧录/归档（详见 firmware/README.md）
+│   └── dist/          归档产物（时间戳 + 子仓库提交号，gitignore 不入库）
 └── justfile           批量命令
 ```
 
@@ -48,6 +51,12 @@ just init
 | `just contracts` | 校验接口副本与 contracts/ 一致 |
 | `just contracts-apply` | 用 contracts/ 覆盖各仓库副本（修漂移） |
 | `just gh-sync` | 下发 GitHub 配置（标签/分支保护/看板） |
+| `just fw-list` | 四工程固件产物 / 归档状态一览 |
+| `just fw-build <工程>` | 编译固件（esp32c6_car/smartcar_remote/tc275_car/tc275_sbl） |
+| `just fw-flash <工程>` | 烧录固件（串口自动识别，参数透传各工程入口） |
+| `just fw-collect` | 归档产物到 firmware/dist/（含 manifest 记录源码版本） |
+| `just fw-factory` | SBL+App 出厂整包合成（--flash 顺带烧录） |
+| `just scons-car` / `just scons-sbl` | TASKING SCons 直编 TC275 两工程（免 ADS 生成文件） |
 
 ## 改共享接口的流程
 
@@ -58,6 +67,40 @@ just init
    `smartcar_remote/main/proto/`；
 3. 分别进入两个子仓库提交并 push，各自 CI 验证；
 4. 在 meta 仓库 bump 两个 submodule 指针提交，契约与实现同步闭环。
+
+## 固件编译 / 烧录 / 归档
+
+`firmware/fw.py` 是四工程固件的统一入口（详见 [firmware/README.md](firmware/README.md)）：
+编译委托各工程自己的构建链（ESP-IDF EIM 自动发现；TC275 走完整版 TASKING
+命令行），烧录串口自动识别，产物按 `时间戳-g提交号` 归档进 `firmware/dist/`
+并写 manifest 记录源码版本。出厂整包一条命令：
+
+```bash
+just fw-build tc275_car          # 编译（--collect 顺带归档）
+just fw-flash esp32c6_car        # 烧录（串口自动识别，-p COMx 可指定）
+just fw-factory --flash          # SBL + App 槽 A 合成整包并一次烧录
+```
+
+> tc275_car / tc275_sbl 的命令行编译需本机装完整版 TASKING（ADS 内置版
+> 许可禁止 IDE 外运行）；tc275_car 首次需在 ADS 里构建一次以生成构建文件。
+
+### TC275 的 SCons 直编路线
+
+`just scons-car` / `just scons-sbl`（或进仓库跑 `scons`）走各仓库根目录的
+SConstruct：include 路径、宏、源码排除列表直接解析 `.cproject`，编译/链接
+参数复刻 ADS 生成 makefile 的命令行，**不依赖任何 ADS 生成文件**，
+新 clone 的仓库即可直接命令行全量编译。产物在 `<仓库>/build/tasking-debug/`（elf/hex/map）。
+
+```bash
+just scons-car                   # 全量编译（-j8），增量续编
+just scons-sbl size              # 只看体积（elfsize）
+just scons-car cfg=release       # Release 源集（.cproject 的该配置目前不完整，编不过属正常）
+cd tc275_sbl && scons -c         # 清理
+```
+
+> 两条 TC275 路线并存：`fw-build` 复用 ADS 构建目录（产物即 IDE 所见），
+> SCons 独立成树（`build/`）。tc275_sbl 已验证 SCons 与 ADS 产物体积逐字节
+> 一致；tc275_car 差 <0.1%（ADS 目录构建后源码有改名提交）。
 
 ## 校验覆盖范围
 
