@@ -503,26 +503,26 @@ static void calib_create(lv_obj_t *root)
 
     /* calibration record */
     lv_obj_t *rc = card_at(root, 532, 58, 260, 250, "RECORD");
-    s_cal.rec_src = kv_at(rc, 24, "SOURCE");
-    s_cal.rec_crc = kv_at(rc, 46, "CRC");
-    s_cal.rec_map = kv_at(rc, 68, "INVERT FL FR RL RR");
+    s_cal.rec_src = kv_at(rc, 22, "SOURCE");
+    s_cal.rec_crc = kv_at(rc, 40, "CRC");
+    s_cal.rec_map = kv_at(rc, 58, "INVERT FL FR RL RR");
     lv_obj_t *fk = lbl(rc, "FULL SCALE", F_SM, UI_COL_DIM);
-    lv_obj_align(fk, LV_ALIGN_TOP_LEFT, 0, 98);
+    lv_obj_align(fk, LV_ALIGN_TOP_LEFT, 0, 82);
     lv_obj_t *wk = lbl(rc, "WHEEL mm", F_SM, UI_COL_DIM);
-    lv_obj_align(wk, LV_ALIGN_TOP_LEFT, 0, 136);
+    lv_obj_align(wk, LV_ALIGN_TOP_LEFT, 0, 118);
     for (int i = 0; i < 4; i++) {
         s_cal.adj[i] = btn(rc, (i & 1) ? LV_SYMBOL_PLUS : LV_SYMBOL_MINUS, UI_COL_SURFACE2, 36, 32);
-        lv_obj_align(s_cal.adj[i], LV_ALIGN_TOP_RIGHT, (i & 1) ? 0 : -96, i < 2 ? 90 : 128);
+        lv_obj_align(s_cal.adj[i], LV_ALIGN_TOP_RIGHT, (i & 1) ? 0 : -96, i < 2 ? 78 : 114);
         lv_obj_add_event_cb(s_cal.adj[i], cal_adj_cb, LV_EVENT_CLICKED, (void *)(intptr_t)i);
     }
     s_cal.fs_val = lbl(rc, "--", F_MD, UI_COL_TXT);
     lv_obj_set_width(s_cal.fs_val, 56);
     lv_obj_set_style_text_align(s_cal.fs_val, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(s_cal.fs_val, LV_ALIGN_TOP_RIGHT, -38, 96);
+    lv_obj_align(s_cal.fs_val, LV_ALIGN_TOP_RIGHT, -38, 82);
     s_cal.wd_val = lbl(rc, "--", F_MD, UI_COL_TXT);
     lv_obj_set_width(s_cal.wd_val, 56);
     lv_obj_set_style_text_align(s_cal.wd_val, LV_TEXT_ALIGN_CENTER, 0);
-    lv_obj_align(s_cal.wd_val, LV_ALIGN_TOP_RIGHT, -38, 134);
+    lv_obj_align(s_cal.wd_val, LV_ALIGN_TOP_RIGHT, -38, 118);
     s_cal.read = btn(rc, LV_SYMBOL_DOWNLOAD " READ", UI_COL_SURFACE2, 114, 36);
     lv_obj_align(s_cal.read, LV_ALIGN_BOTTOM_LEFT, 0, -42);
     lv_obj_add_event_cb(s_cal.read, cal_read_cb, LV_EVENT_CLICKED, NULL);

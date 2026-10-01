@@ -146,6 +146,9 @@ static void boot_create(lv_obj_t *scr)
 
         lv_obj_t *n = lv_label_create(row);
         lv_label_set_text(n, BOOT_NAMES[i]);
+        /* explicit colour: the theme's 'card' style would otherwise inject its
+         * own text colour here, which is unreadable on the boot screen bg */
+        lv_obj_set_style_text_color(n, lv_color_hex(UI_COL_TXT), 0);
         lv_obj_set_style_text_font(n, F_MD, 0);
         lv_obj_align(n, LV_ALIGN_LEFT_MID, 0, 0);
 

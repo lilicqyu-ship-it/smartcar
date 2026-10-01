@@ -87,6 +87,14 @@ CONFIG_BSP_LCD_RGB_BOUNCE_BUFFER_HEIGHT=20
 # waits for it) is the real cap; a 33 ms LVGL period added up to a frame of lag.
 CONFIG_LV_DEF_REFR_PERIOD=16
 
+# ---- LVGL default theme: dark mode -------------------------------------------------
+# The UI is a custom dark HUD (ui_theme.h UI_COL_BG = 0x060A12).  Without this the
+# default theme runs in LIGHT mode and bakes text_color = darken(grey,4) = 0x212121
+# into every plain lv_obj container ('card' style) and button ('btn' style), so any
+# label without an explicit colour (boot screen stage names, kv values, button
+# captions) renders near-black on the near-black background.
+CONFIG_LV_THEME_DEFAULT_DARK=y
+
 # ---- LVGL fonts used by the UI hierarchy (spec 54) ---------------------------------
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_16=y
