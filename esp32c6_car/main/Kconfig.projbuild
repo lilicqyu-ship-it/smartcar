@@ -1,0 +1,96 @@
+menu "esp32c6_car project"
+
+    config C6_FACTORY_DEV_OVERRIDE
+        bool "BENCH ONLY: synthesize factory data when NVS is empty"
+        default y
+        help
+            Lets a bench board come up as SD-DEV000 with a fixed password when
+            no production provisioning was written.  MUST be disabled (n) for
+            production builds (LLDD 4.1 FACTORY_WAIT semantics).
+
+    config C6_MAINT_BLE
+        bool "Enable BLE DPT maintenance channel (NimBLE)"
+        default n
+        help
+            LLDD 4.9: NimBLE GATT service for the production fixture.
+            Requires CONFIG_BT_ENABLED=y (build with sdkconfig.maint or set
+            it manually).  Consumer builds keep this off (open question Q3).
+
+    config C6_BENCH_BOD_DISABLE
+        bool "BENCH ONLY: disable brownout detector (weak bench supply)"
+        default n
+        help
+            Brownout fires at Wi-Fi power-up (~400 ms, RF calibration current
+            peak) when the bench supply sags below 2.51 V - the LOWEST
+            threshold level available on ESP32-C6 (SEL_7), so there is no
+            softer step.  This option calls esp_brownout_disable() at the
+            earliest point of app_main.  Risk: flash writes and RF calibration
+            run outside the guaranteed voltage window - bench bring-up only,
+            NEVER for production builds, and fix the supply first if possible.
+
+    config C6_BENCH_CTRL
+        bool "BENCH ONLY: control bypass (no pairing, DRIVE->SET_SPEED, C6 heartbeat)"
+        default n
+        help
+            Bench bring-up shortcut while the TC275 build still refuses 0x50
+            DRIVE and the PAIR channel (tc275_car link_dispatch whitelist).  With
+            this on:  every WS session is promoted to CTRL without a token;
+            v2 DRIVE (0x50 v,omega) is translated on the C6 into SET_SPEED
+            (0x10 left,right percent), the one op CPU0 already executes; and
+            the bridge injects a 0x21 HEARTBEAT every 60 ms so CPU0's 100 ms
+            heartbeat watchdog stays fed.  MUST be disabled (n) for production
+            builds - it removes the pairing gate and changes the wire op.
+
+    config C6_NET_START_DELAY_MS
+        int "Delay before Wi-Fi start (voltage settling, ms)"
+        default 0
+        range 0 5000
+        help
+            Bench mitigation: let the supply recover from the boot surge
+            before the RF power-up peak.  0 = no delay (production default).
+
+    config C6_WIFI_TX_POWER_QDBM
+        int "Max Wi-Fi TX power, 0.25 dBm units (0 = chip default)"
+        default 0
+        range 0 84
+        help
+            Bench mitigation for weak supplies: caps the transmit power and
+            with it the PA current peak (e.g. 40 = 10 dBm).  0 keeps the
+            chip default (~20 dBm) - production stays 0.
+
+    config C6_LEGACY_TCP
+        bool "Enable TCP 8080 legacy raw-frame bridge"
+        default n
+        help
+            LLDD FR-10: proto v2 frames over TCP 8080 for demo clients.
+            Recommended only for the first production batches (Q4).
+
+    config C6_CAPTIVE_PORTAL
+        bool "Auto-popup captive portal (wildcard DNS + probe redirect)"
+        default n
+        help
+            When enabled (y): the wildcard captive DNS hijacks every A query to
+            the AP IP and the HTTP wildcard handler 302-redirects the phone's
+            connectivity probes to "/", so iOS/Android auto-pop the control
+            page in a captive-portal webview.
+
+            When disabled (n, default): no DNS hijack, and the connectivity
+            probes are answered as SUCCESS (iOS "Success" page / Android 204)
+            so the phone reports the network as online and does NOT pop a
+            window.  The user opens the page manually by typing the address
+            (http://192.168.4.1/ or http://mycar.local/ via mDNS).
+
+    config C6_OTA_NO_AUTH
+        bool "OTA endpoints without pair token (bench/dev)"
+        default y
+        help
+            When enabled (y): POST /ota/c6 and /ota/tc275 skip the control
+            token check, so fw.py / bench tools push firmware without the
+            button-window pairing dance.  Safe for the bench because every
+            bundle is still ed25519-verified on-target before any flash
+            write; unauthenticated pushes can only be rejected garbage.
+
+            Production MUST set this to n: the token gate is what keeps an
+            unauthenticated WLAN peer from queuing images at will.
+
+endmenu
