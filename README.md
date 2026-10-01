@@ -1,6 +1,6 @@
 # AURIX SmartDrive（tc275_car）
 
-[![CI](https://github.com/lilicqyu-ship-it/tc275_car/actions/workflows/ci.yml/badge.svg)](https://github.com/lilicqyu-ship-it/tc275_car/actions/workflows/ci.yml)
+[![CI](https://github.com/lilicqyu-ship-it/tc275_car/actions/workflows/ci.yml/badge.svg)](https://github.com/lilicqyu-ship-it/tc275_car/actions/workflows/ci.yml) [![version](https://img.shields.io/github/v/tag/lilicqyu-ship-it/tc275_car?label=version&sort=semver)](https://github.com/lilicqyu-ship-it/tc275_car/releases)
 
 以 **Infineon TC275**（KIT-AURIX-TC275-LITE）为实时运动控制核心、**ESP32-C6**（DevKitC-1 V1.2）为 Wi-Fi 通信模块、**TB6612 四路驱动板（轮趣 D24A）**驱动 4 个 MG310 直流减速电机的智能双轮差速小车。手机通过 Wi-Fi 连接小车的 AP，用网页或自定义二进制协议下发运动指令。
 
