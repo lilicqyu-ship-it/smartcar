@@ -5,6 +5,6 @@
 /.sconsign.dblite
 __pycache__/
 50-tech-assessment.md
-# ADS 后台服务按 workspace 旧记忆生成的构建脚本（本仓用 tools/ 与 ADS GUI，不用 scons）
+# SCons 命令行构建（site_scons/aurix_tasking.py；如改用入库方案可删此两行）
 /SConstruct
 /site_scons/
