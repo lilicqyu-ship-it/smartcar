@@ -1,0 +1,11 @@
+dependencies:
+  # Board support for ESP32-S3-LCD-EV-Board-2 (mainboard MB v1.5 + SUB3):
+  # 4.3" 800x480 RGB LCD (ST7262E43) + GT1151 touch + TCA9554 IO expander
+  # + esp_lvgl_port.  The sub board is selected via Kconfig:
+  #   CONFIG_BSP_LCD_SUB_BOARD_800_480=y   (see sdkconfig.defaults)
+  espressif/esp32_s3_lcd_ev_board: "^4.0.0"
+  # WebSocket client for the C6 gateway (/ws, proto v2 binary frames).
+  espressif/esp_websocket_client: "^1.0.0"
+  # JSON control plane (hello/tc/pong/err, /api/pair).  IDF 6.x moved the
+  # 'json' component into the registry.
+  espressif/cjson: "^1.7.0"
