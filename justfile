@@ -29,6 +29,13 @@ status:
 sync:
     @bash scripts/repos.sh sync
 
+# 修复: 子仓库 fast-forward 后父仓库报 "modified: xxx (new commits)"——
+# 把四个子仓库当前 HEAD 固化进父仓库（只记指针，不走契约校验；发版组合请用 lock）
+pin msg="pin: bump submodule versions":
+    git add esp32c6_car smartcar_remote tc275_car tc275_sbl
+    git diff --cached --quiet || git commit -m "{{msg}}"
+    @echo "当前子仓库组合:" && git submodule status
+
 # 批量 push 当前分支；无 upstream 时自动建立（detached 的仓库跳过）
 push:
     @bash scripts/repos.sh push
