@@ -1,0 +1,16 @@
+[submodule "esp32c6_car"]
+	path = esp32c6_car
+	url = https://github.com/lilicqyu-ship-it/esp32c6_car.git
+	branch = main
+[submodule "smartcar_remote"]
+	path = smartcar_remote
+	url = https://github.com/lilicqyu-ship-it/smartcar_remote.git
+	branch = main
+[submodule "tc275_car"]
+	path = tc275_car
+	url = https://github.com/lilicqyu-ship-it/tc275_car.git
+	branch = main
+[submodule "myCarSbl"]
+	path = myCarSbl
+	url = https://github.com/lilicqyu-ship-it/myCarSbl.git
+	branch = main
