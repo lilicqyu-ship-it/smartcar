@@ -15,6 +15,14 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_partition.h"
+#include "sdkconfig.h"
+
+/* bool Kconfig symbols are undefined when n; fold into a 0/1 constant */
+#ifdef CONFIG_SCR_OTA_NO_AUTH
+#define CONFIG_SCR_OTA_NO_AUTH_ON 1
+#else
+#define CONFIG_SCR_OTA_NO_AUTH_ON 0
+#endif
 #include "esp_http_client.h"
 #include "esp_rom_crc.h"
 #include "cJSON.h"
@@ -192,7 +200,7 @@ bool scr_svc_ota_start(svc_fw_t t, char *why, int why_cap)
         err = "no verified image in the staging area";
     } else if (st.conn != SCR_CONN_CONNECTED || !st.ctrl_role) {
         err = "need a live link holding CTRL";
-    } else if (set.token[0] == '\0') {
+    } else if (!CONFIG_SCR_OTA_NO_AUTH_ON && set.token[0] == '\0') {
         err = "not paired: the C6 rejects OTA without a token";
     } else if (st.tele_fresh && abs(st.speed_mm_s) > OTA_STILL_MM_S) {
         err = "vehicle is moving - stop it first";
@@ -254,7 +262,9 @@ static void ota_run(void)
         ota_set(SVC_OTA_FAILED, 0, "http client init failed (memory)");
         return;
     }
-    esp_http_client_set_header(c, "X-Session-Token", set.token);
+    if (set.token[0] != '\0') {
+        esp_http_client_set_header(c, "X-Session-Token", set.token);
+    }
     esp_http_client_set_header(c, "Content-Type", "application/octet-stream");
 
     ota_set(SVC_OTA_SEND, 0, "uploading");

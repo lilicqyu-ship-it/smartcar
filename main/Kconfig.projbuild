@@ -96,4 +96,14 @@ menu "smartcar_remote"
         int "Vehicle battery critical, percent"
         default 10
 
+    config SCR_OTA_NO_AUTH
+        bool "Push OTA to the C6 without a pair token (bench/dev)"
+        default y
+        help
+            Twin of the C6's CONFIG_C6_OTA_NO_AUTH. When y, the FIRMWARE page
+            pushes staged images even when the remote is not paired; the
+            X-Session-Token header is sent only if a token exists. Images are
+            still ed25519-verified on-target. Production MUST set n together
+            with C6_OTA_NO_AUTH=n.
+
 endmenu
