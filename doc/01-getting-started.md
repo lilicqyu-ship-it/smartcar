@@ -18,8 +18,8 @@
 
 ## 第 1 步：导入并编译 TC275 工程
 
-1. 打开 AURIX Development Studio → `File > Import > General > Existing Projects into Workspace`，选择本仓库根目录（`myCar`）。
-2. **本教程必需的一步**：`myCar > Properties > C/C++ Build > Settings > TASKING C/C++ Compiler > Preprocessor > Defined symbols (-D)`，**临时删除 `USE_SPI_LINK` 这一行**（Debug 与 Release 各一处）。原因：2026-09-26 起该符号是两个 TASKING 配置的默认值，带着它编出来的镜像走 SPI/QSPI3，**里面没有 AT/UART 通路**，第 5 步的手机遥控不会有任何响应。教程做完请把符号加回去（`21 §18 C15`）。
+1. 打开 AURIX Development Studio → `File > Import > General > Existing Projects into Workspace`，选择本仓库根目录（`tc275_car`）。
+2. **本教程必需的一步**：`tc275_car > Properties > C/C++ Build > Settings > TASKING C/C++ Compiler > Preprocessor > Defined symbols (-D)`，**临时删除 `USE_SPI_LINK` 这一行**（Debug 与 Release 各一处）。原因：2026-09-26 起该符号是两个 TASKING 配置的默认值，带着它编出来的镜像走 SPI/QSPI3，**里面没有 AT/UART 通路**，第 5 步的手机遥控不会有任何响应。教程做完请把符号加回去（`21 §18 C15`）。
 3. 选中工程 → `Project > Build Project`，等待输出 `Build finished`。
 
 > 编译错误 `FreeRTOS.h not found` 时，检查 `FreeRtos/` 与 `Configurations/` 是否完整检出——它们是工程的一部分，不需要另外安装。
@@ -28,7 +28,7 @@
 
 ## 第 2 步：烧录并验证最小系统
 
-1. USB 连接 TC275 kit 的调试口，IDE 中点击 `Debug As > myCar TriCore Debug (TASKING)`。
+1. USB 连接 TC275 kit 的调试口，IDE 中点击 `Debug As > tc275_car TriCore Debug (TASKING)`。
 2. 观察三件事：
    - **LED1（P00.5）以 250 ms 周期闪烁** —— FreeRTOS 调度正常；
    - 串口终端（kit 板载 FT2232 对应 COM 口，115200 8N1）打印 `UART initialized`；
@@ -36,7 +36,7 @@
 
 **看到什么算成功：** 灯闪 + `UART initialized` + 回显，三者齐全。
 
-## 第 3 步：给 ESP32-C6 刷 esp-at 固件（仅 demo 教程用；量产为自研 `c6_car` 固件）
+## 第 3 步：给 ESP32-C6 刷 esp-at 固件（仅 demo 教程用；量产为自研 `esp32c6_car` 固件）
 
 使用同机的 esp-at 工程（`C:\Code\TC275\AURIX-v1.10.36-workspace\esp-at`，已配置 target=esp32c6、module_esp32c6_default）：
 

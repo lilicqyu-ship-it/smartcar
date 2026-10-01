@@ -2,9 +2,9 @@
  * ota_keys.h - ed25519 public keys embedded in the TC275 firmware
  *
  * OTA_KEYS_DEV is the DEVELOPMENT key pair, byte-identical to
- * c6_car/components/c6_ota/keys/pub_ed25519_dev.bin so both sides of the
+ * esp32c6_car/components/c6_ota/keys/pub_ed25519_dev.bin so both sides of the
  * bench accept bundles from the same dev seed
- * (c6_car tools/keys/ed25519_dev.seed, used by tools/sign_bundle.py).
+ * (esp32c6_car tools/keys/ed25519_dev.seed, used by tools/sign_bundle.py).
  *
  * Production MUST provision a distinct TC275 key pair: the private seed of
  * the dev pair sits in a git-tracked repo. Swapping the key here and in the

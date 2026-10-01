@@ -10,7 +10,7 @@
  *   - the 20 B DFlash blob layout (doc 34 SS8.1) is shared with mw/calib/
  *     calib_store.c (CPU0, the only core that programs DFlash);
  *   - the EVT 0x22 / 0x23 payload builders (doc 34 SS3.1 / SS9.1) are shared
- *     with CPU0's event push and are byte-identical to c6_car doc 17 SS8.4.
+ *     with CPU0's event push and are byte-identical to esp32c6_car doc 17 SS8.4.
  */
 #ifndef CALIB_RECORD_H
 #define CALIB_RECORD_H
@@ -27,7 +27,7 @@ extern "C" {
 #define CALIB_REC_SET_LEN       12u    /* 0x73 REC_SET body (after the op byte) */
 #define CALIB_JOG_LEN            3u    /* 0x71 MOTOR_JOG body (after the op)    */
 /* EVT 0x22 is {op, status, invert i8x4, delta i32x4, saved} = 23 B. The
- * offsets are those the slave decoder reads (c6_car
+ * offsets are those the slave decoder reads (esp32c6_car
  * components/c6_bridge/bridge.c:bridge_emit_cal: delta at [6..21], saved at
  * [22], minimum length 22 with saved optional). doc 34 SS3.1's "26 B with
  * delta i32x4 at [6..25]" is an arithmetic slip - four i32 are 16 bytes. */

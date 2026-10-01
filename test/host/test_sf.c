@@ -482,7 +482,7 @@ static void test_evt_dpt_round_trip(void)
      * {op, status, invert x4, delta i32 x4, saved} is contiguous, so the
      * length is exactly one byte past the saved index. doc 34 SS3.1's "26 B"
      * was an arithmetic slip that left payload[22..25] uninitialised; the
-     * slave decoder (c6_car bridge.c:bridge_emit_cal) is the reference. */
+     * slave decoder (esp32c6_car bridge.c:bridge_emit_cal) is the reference. */
     CHECK_EQ(CALIB_EVT_RESULT_LEN, 23u);
     CHECK_EQ(CALIB_EVT_RESULT_SAVED, CALIB_EVT_RESULT_LEN - 1u);
     CHECK_EQ(2u + CALIB_REC_WHEELS + (CALIB_REC_WHEELS * 4u) + 1u,

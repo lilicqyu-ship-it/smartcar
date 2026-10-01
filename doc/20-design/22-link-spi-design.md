@@ -7,8 +7,8 @@
 | 日期 | 2026-09-27 |
 | 参考体例 | [21-software-design.md](../20-design/21-software-design.md) §3.7（板间通信选型）、§6（协议）、§16（风险） |
 | 决策范围 | C6↔TC275 主链路物理层 = **SPI**；帧协议 = **新定 SPI 专用 SF 帧**；拓扑 = **TC275 QSPI3 主机 ↔ ESP32-C6 SPI2 从机（`spi_slave_hd`）+ 1 根握手线** |
-| 交付状态 | **设计 + 两侧固件代码 + 文档回写均已落地**：C6 侧见 `c6_car` `22e15f2`（§7.1），TC275 侧见 `com/`+`mw/sf/`（§7.2，2026-09-26 随 SDD V1.3 目录重排迁入目标态目录）。**2026-09-27 链路泵已按台架故障根因简化**（V1.6 §4.2/§5.4：单读快照 + ALIVE 唯一判活 + SEQ 越窗重锁）。SDD **V1.6**、23-wiring.md **V1.11**。主机单测：帧层 2948 断言 + 遥测层 154 断言（跨侧模式；无跨侧 116 项；后者**把从机 `proto_frames.c` 编进同一可执行文件**做双向交叉）。**V1.7 的 DPT 落地（`mw/calib/`、xcore 四块、0x71~0x74 / EVT 0x22/0x23）只过了主机单测，尚未经过 TASKING 构建，也没有台架证据**（34 §11.5）。**TASKING IDE 构建链接已闭合**（2026-09-26，Debug 配置 0 错误）。**未做**：G1 台架波形验证、整车通电联调。**接线形态已确认**：两板之间全部杜邦线直连、无外部元件（含 IRQ 无外部上拉），见 23 §9.3。**UART 板间链路已弃用**（2026-09-26）：Debug/Release 两个 TASKING 配置都定义 `USE_SPI_LINK`，日常构建只产出 SPI 路径 |
-| 前提变化 | ① C6 改为自研固件（`c6_car` 工程），不再受 esp-at 约束；② `c6_car` 的 proto v2 与 myCar 的 demo 异或 CRC 帧**本来就不兼容**，链路换向时一并按 SPI 特性重定帧，成本最低 |
+| 交付状态 | **设计 + 两侧固件代码 + 文档回写均已落地**：C6 侧见 `esp32c6_car` `22e15f2`（§7.1），TC275 侧见 `com/`+`mw/sf/`（§7.2，2026-09-26 随 SDD V1.3 目录重排迁入目标态目录）。**2026-09-27 链路泵已按台架故障根因简化**（V1.6 §4.2/§5.4：单读快照 + ALIVE 唯一判活 + SEQ 越窗重锁）。SDD **V1.6**、23-wiring.md **V1.11**。主机单测：帧层 2948 断言 + 遥测层 154 断言（跨侧模式；无跨侧 116 项；后者**把从机 `proto_frames.c` 编进同一可执行文件**做双向交叉）。**V1.7 的 DPT 落地（`mw/calib/`、xcore 四块、0x71~0x74 / EVT 0x22/0x23）只过了主机单测，尚未经过 TASKING 构建，也没有台架证据**（34 §11.5）。**TASKING IDE 构建链接已闭合**（2026-09-26，Debug 配置 0 错误）。**未做**：G1 台架波形验证、整车通电联调。**接线形态已确认**：两板之间全部杜邦线直连、无外部元件（含 IRQ 无外部上拉），见 23 §9.3。**UART 板间链路已弃用**（2026-09-26）：Debug/Release 两个 TASKING 配置都定义 `USE_SPI_LINK`，日常构建只产出 SPI 路径 |
+| 前提变化 | ① C6 改为自研固件（`esp32c6_car` 工程），不再受 esp-at 约束；② `esp32c6_car` 的 proto v2 与 tc275_car 的 demo 异或 CRC 帧**本来就不兼容**，链路换向时一并按 SPI 特性重定帧，成本最低 |
 
 ---
 
@@ -35,14 +35,14 @@
 | E4 | 官方给的数据通路模型 = **共享寄存器握手**：从机用 `spi_slave_hd_write_buffer()` 发布 5 个 4 字节寄存器（READY_FLAG / MAX_TX_BUF_LEN / MAX_RX_BUF_LEN / TX_READY_BUF_SIZE / RX_READY_BUF_NUM），主机轮询后决定读多少、写多少 | `examples/peripherals/spi_slave_hd/segment_mode/seg_slave/main/app_main.c:36-49,83,98,292-301`；主机侧 `seg_master/main/app_main.c:37-49,140-200` |
 | E5 | **寄存器读值非原子**：SPI 逐字节搬运，从机可能在读的过程中改值 → 官方做法是"连读两次直到相同" | `seg_master/main/app_main.c:146-159` 注释原文："if the value is changed by Slave at this time, Master may get wrong data" |
 | E6 | 从机硬件按命令字节识别 4 类事件（CMD7/CMD8/CMD9/CMDA）并产生中断 | `esp_hal_gpspi/.../spi_slave_hd_hal.c:43-151`（`SPI_LL_INTR_CMD7/8/9/A`） |
-| E7 | TC275 侧 QSPI3 四线可全部落在 LITE kit X1 空闲脚，且与编码器 8 线（P33.0~7 = X2-28~35）**零交集** | `myCar/Libraries/iLLD/TC27D/Tricore/_PinMap/IfxQspi_PinMap.h:160,194,226,287`：`IfxQspi3_SCLK_P33_11_OUT` / `_MTSR_P33_12_OUT` / `_MRST_P33_13_OUT` / `_SLSO5_P23_4_OUT`；空闲清单见 23-wiring.md §9 与记忆脚位表 |
+| E7 | TC275 侧 QSPI3 四线可全部落在 LITE kit X1 空闲脚，且与编码器 8 线（P33.0~7 = X2-28~35）**零交集** | `tc275_car/Libraries/iLLD/TC27D/Tricore/_PinMap/IfxQspi_PinMap.h:160,194,226,287`：`IfxQspi3_SCLK_P33_11_OUT` / `_MTSR_P33_12_OUT` / `_MRST_P33_13_OUT` / `_SLSO5_P23_4_OUT`；空闲清单见 23-wiring.md §9 与记忆脚位表 |
 | E8 | **AURIX TC275 QSPI 没有"命令/地址相位"硬件概念，iLLD 主驱动也没有对应封装**（只有数据相位 + CS/时钟参数） | 全量 grep `Libraries/iLLD/TC27D/Tricore/Qspi` 无 `command_bits/address_bits/IfxQspi_AddrMode` 任何符号 |
-| E9 | **（结论已过时，保留作决策依据）** myCar 工程当时**没有任何** `IfxQspi` 使用点：量产链路的 SPI 侧在 TC275 上是全新代码 → 现已由 `com/spi_hal_pins.c` 补上（原 `Middleware/com/spi_hal_pins.c`，随 SDD V1.3 目录重排迁移） | 采集时点 `App/`、`Bsp/`、`Middleware/` 内 grep `IfxQspi` 无命中；现有 WIFI 链路 = `Middleware/wifi_at.c`（ASCLIN1，P15.0/P15.1）上的 AT 文本 + `Middleware/protocol.c` 的 `AA 55 CMD LEN DATA XOR-CRC` 帧（`PROTO_MAX_PAYLOAD 16`，无 VER/SEQ） |
-| E10 | **（结论已过时，保留作决策依据）** c6_car 当时链路层是纯 UART 实现，且含 UART 专有的波特率协商状态机 → 现已改为 `spi_slave_hd`（`22e15f2`），0x44 状态机与 `C6_LINK_TX/RX_GPIO` 删除（§7.1） | 采集时点 `c6_car/components/c6_link/link.c`（`LINK_UART_NUM UART_NUM_1`、`uart_set_baudrate`、0x44 BAUD REQ/ACK/NAK）；`c6_car/components/c6_link/Kconfig`（`C6_LINK_TX_GPIO default 10` / `RX_GPIO default 11`） |
+| E9 | **（结论已过时，保留作决策依据）** tc275_car 工程当时**没有任何** `IfxQspi` 使用点：量产链路的 SPI 侧在 TC275 上是全新代码 → 现已由 `com/spi_hal_pins.c` 补上（原 `Middleware/com/spi_hal_pins.c`，随 SDD V1.3 目录重排迁移） | 采集时点 `App/`、`Bsp/`、`Middleware/` 内 grep `IfxQspi` 无命中；现有 WIFI 链路 = `Middleware/wifi_at.c`（ASCLIN1，P15.0/P15.1）上的 AT 文本 + `Middleware/protocol.c` 的 `AA 55 CMD LEN DATA XOR-CRC` 帧（`PROTO_MAX_PAYLOAD 16`，无 VER/SEQ） |
+| E10 | **（结论已过时，保留作决策依据）** esp32c6_car 当时链路层是纯 UART 实现，且含 UART 专有的波特率协商状态机 → 现已改为 `spi_slave_hd`（`22e15f2`），0x44 状态机与 `C6_LINK_TX/RX_GPIO` 删除（§7.1） | 采集时点 `esp32c6_car/components/c6_link/link.c`（`LINK_UART_NUM UART_NUM_1`、`uart_set_baudrate`、0x44 BAUD REQ/ACK/NAK）；`esp32c6_car/components/c6_link/Kconfig`（`C6_LINK_TX_GPIO default 10` / `RX_GPIO default 11`） |
 | **E11**（2026-09-26 新增，作废"§3.1/§4.1 原稿的 IOM 上升沿中断"） | **P23.0 在本工程里做不出边沿中断，只能电平轮询**。TC27x 的 GPIO 边沿事件只有两条硬件通路：ERU 或 IOM 输入；两者都不覆盖 P23.x | ① `Libraries/iLLD/TC27D/Tricore/` 下**无 Eru 模块目录**（`ls` 无匹配），TC275 无 ERU；② `_PinMap/` 下**无 `IfxIom_PinMap.h`**（`ls` 无匹配），即 TC27D 没有"GPIO → IOM 输入"的映射表，P23.0 无法作为 IOM 监视输入；③ `Iom/` 全量 grep `initRiseInterrupt\|initFallInterrupt` **零命中**，iLLD 的 IOM 驱动只暴露 LAM/ISM 事件窗（`IfxIom.h` 的 `IfxIom_Lam*` 枚举），源是 GTM/Ccu6 捕获量而非任意 GPIO |
 | **E12**（2026-09-26 新增，前导相位的命令字节已可冻结） | Espressif HD 从机的**上 wire 命令字节**已用本地 IDF 5.4.4 源码确认，1 线模式下就是基命令值（`cmd_mod = 0x00`）：`WRBUF=0x01 / RDBUF=0x02 / WRDMA=0x03 / RDDMA=0x04 / SEG_END=0x05 / EN_QPI=0x06 / WR_END=0x07 / INT0=0x08`。注意 `spi_types.h` 里的 `SPI_CMD_HD_* = BIT(n)` 只是**内部枚举**（WRDMA=0x04、RDDMA=0x08…），不是 wire 值，照抄必错。且 **RDDMA 突发必须以一次 `INT0` 事务收尾、WRDMA 突发必须以 `WR_END` 收尾**，否则从机不释放缓冲 | `components/hal/esp32c6/include/hal/spi_ll.h:81-90`（`SPI_LL_BASE_CMD_HD_*` 实际值）、`:1575-1598`（`spi_ll_get_slave_hd_command()`：1 线时 `cmd_mod=0x00`，返回 `cmd_base \| cmd_mod`）、`:1605-1608`（`dummy_bits` 恒为 8）；对比 `components/hal/include/hal/spi_types.h:67-76`（内部枚举位值）；成对收尾规则见 `components/driver/test_apps/components/esp_serial_slave_link/essl_spi.c:184-250`（`essl_spi_rddma()` 末段后固定调 `essl_spi_rddma_done()`→`INT0`；`essl_spi_wrdma()` 固定调 `essl_spi_wrdma_done()`→`WR_END`）；寄存器地址按**字节**寻址并做 `addr % 72`（同文件 `:104,136`），例 `seg_master/main/app_main.c:37-48` 用 0/4/8/12/16；从机侧 `command_bits=address_bits=dummy_bits=8`、`mode=0`、`SPI_DEVICE_HALFDUPLEX`（`app_main.c:65-82`） |
-| **E13**（2026-09-26 新增，本轮完善 TC275 侧时发现的同名不同义） | 主机侧初版与已烧录的从机固件有**三处常量表分歧**，一律以**从机为准**修正（从机已烧录 = 事实真源）：① `FLAGS` bit1 从机是 `FRAG_END`（一帧的末片），主机原写 `ACK`——ACK 按 §5.2 是 TYPE `0x03`，不是 flag，位值复用会让分片帧被误判；② OTA 控制 CID 为 `0x30 BEGIN / 0x31 CHUNK / 0x32 ACK / 0x33 STATUS / 0x34 SWAP / 0x35 ABORT`（即 v2 CMD−0x30 关系保持），主机原写 `SF_CID_OTA_END` 且缺 `0x35`；③ `SF_ERRSTAT` 位图真值是 `CRC 0x01 / FMT 0x02 / SEQ 0x04 / RXOVFL 0x08 / TXOVFL 0x10 / TRUN 0x20 / LINKLOST 0x40`（各自粘滞），主机原表是臆造值 → G1 读到的错误位会被完全错读 | 从机侧 `c6_car/components/c6_sf/sf_frame.h:37-39,70-75,94-101`；主机侧改动见 §7.2 `sf_frame.h`/`link.h` 行；38 B 遥测偏移另由 `test/host/test_sf_telemetry.c` **直接编译从机 `proto_frames.c`** 做双向交叉验证（154 断言 / 0 失败） |
-| **E14**（2026-09-26 新增，`GEN` 回执的时序契约） | `GEN` 事务**不是** SPI 中断里同步应答的：从机 `cb_buffer_rx()`（ISR）只置 `gen_notif` 标志，真正的 `link_handle_gen()` 在从机链路任务里执行，处理完才 `regs_set_u32(SF_REG_CMDRSP, cmd \| result<<8)` 并 `regs_publish()`。因此主机侧"写 GEN → 读回执"必然跨**两次从机任务调度**，必须带超时而非死等。另两点同源事实：`SF_GEN_NOP(0)` 落到 `default` 分支 → 回执 `result = RSP_UNKNOWN(1)`（不是 OK），正好可当**清粘滞回执的探针**；`CLOCK_SET` 的 payload 单位是 **MHz**（从机 `payload * 1000000u`） | `c6_car/components/c6_link/link.c:561-569`（ISR 置标志）、`:603-607`（任务里处理）、`:484-518`（`link_handle_gen()`，`:510` 的 `* 1000000u`、`:512-514` 的 default→UNKNOWN、`:516` 回执拼装）；主机侧实现 `com/link.c:link_genWriteAndWait()`/`LINK_gen()`/`LINK_setClock()`，超时 `LINK_GEN_TIMEOUT_MS = 20` |
+| **E13**（2026-09-26 新增，本轮完善 TC275 侧时发现的同名不同义） | 主机侧初版与已烧录的从机固件有**三处常量表分歧**，一律以**从机为准**修正（从机已烧录 = 事实真源）：① `FLAGS` bit1 从机是 `FRAG_END`（一帧的末片），主机原写 `ACK`——ACK 按 §5.2 是 TYPE `0x03`，不是 flag，位值复用会让分片帧被误判；② OTA 控制 CID 为 `0x30 BEGIN / 0x31 CHUNK / 0x32 ACK / 0x33 STATUS / 0x34 SWAP / 0x35 ABORT`（即 v2 CMD−0x30 关系保持），主机原写 `SF_CID_OTA_END` 且缺 `0x35`；③ `SF_ERRSTAT` 位图真值是 `CRC 0x01 / FMT 0x02 / SEQ 0x04 / RXOVFL 0x08 / TXOVFL 0x10 / TRUN 0x20 / LINKLOST 0x40`（各自粘滞），主机原表是臆造值 → G1 读到的错误位会被完全错读 | 从机侧 `esp32c6_car/components/c6_sf/sf_frame.h:37-39,70-75,94-101`；主机侧改动见 §7.2 `sf_frame.h`/`link.h` 行；38 B 遥测偏移另由 `test/host/test_sf_telemetry.c` **直接编译从机 `proto_frames.c`** 做双向交叉验证（154 断言 / 0 失败） |
+| **E14**（2026-09-26 新增，`GEN` 回执的时序契约） | `GEN` 事务**不是** SPI 中断里同步应答的：从机 `cb_buffer_rx()`（ISR）只置 `gen_notif` 标志，真正的 `link_handle_gen()` 在从机链路任务里执行，处理完才 `regs_set_u32(SF_REG_CMDRSP, cmd \| result<<8)` 并 `regs_publish()`。因此主机侧"写 GEN → 读回执"必然跨**两次从机任务调度**，必须带超时而非死等。另两点同源事实：`SF_GEN_NOP(0)` 落到 `default` 分支 → 回执 `result = RSP_UNKNOWN(1)`（不是 OK），正好可当**清粘滞回执的探针**；`CLOCK_SET` 的 payload 单位是 **MHz**（从机 `payload * 1000000u`） | `esp32c6_car/components/c6_link/link.c:561-569`（ISR 置标志）、`:603-607`（任务里处理）、`:484-518`（`link_handle_gen()`，`:510` 的 `* 1000000u`、`:512-514` 的 default→UNKNOWN、`:516` 回执拼装）；主机侧实现 `com/link.c:link_genWriteAndWait()`/`LINK_gen()`/`LINK_setClock()`，超时 `LINK_GEN_TIMEOUT_MS = 20` |
 
 **由 E8 得到的关键结论（本方案唯一的真风险）**：TC275 作主机时，E1/E4 所要求的 `8bit CMD + 8bit ADDR + 8bit DUMMY` 前导相位只能用**普通数据字节**在 CS 有效期内连续发出（QSPI 的移位器把 CMD/ADDR/DATA 一律当数据搬）。Espressif 的 HD 从机是否会把这段波形正确解析，属于**必须在台架上一次性验证**的事项，不能靠读手册下结论 → 见 §8 门禁 G1。
 
@@ -208,7 +208,7 @@ loop:
 
 ### 5.3 SEQ / E2E
 
-- 每方向独立 1 字节 SEQ，单调递增（mod 256），接收侧**严格前进窗口** `1 ≤ (seq - last) ≤ 32`（沿用 c6_car `ws_sessions` 的窗口思路，拒绝旧帧与超窗洪水）；
+- 每方向独立 1 字节 SEQ，单调递增（mod 256），接收侧**严格前进窗口** `1 ≤ (seq - last) ≤ 32`（沿用 esp32c6_car `ws_sessions` 的窗口思路，拒绝旧帧与超窗洪水）；
 - **越窗重锁（V1.6，两侧 codec 同规则）**：连续 `SF_SEQ_RELOCK_RUN`(8) 帧越窗即判定"发送端已重启、SEQ 不会自己落回窗口"，**丢弃窗口、下一帧重锁**。对端复位后最坏拒收 8 帧；若没有这条规则，最多要拒收到 u8 回绕（≈224 帧 ≈7.5 s），这是"对端复位后连不上"的另一半根因。`test_sf.c` 的 `test_seq_relock` 覆盖（含"重锁后第一帧立即收下"）；
 - 命令方向：SEQ 不前进即拒收（重放防护，SDD §8.1 的"帧内 SEQ 单调 + 会话 nonce"保留）；
 - 链路级 E2E 由 §4.3 的 `SF_ALIVE`/`SF_TX_PENDING` 寄存器 + SF 帧 SEQ **双层**承担：寄存器保证"数据在不在"，SEQ 保证"这一帧新不新"。
@@ -282,16 +282,16 @@ loop:
 
 ## 7. 两固件改动清单（**两侧代码均已落地**，逐行状态见"实测"列；剩余未做项 = G1 台架门禁）
 
-### 7.1 C6 侧（`c6_car`）—— **已完成**（提交 `22e15f2` 链路换向 + `3f464af` 真机缺陷修复，另有 `c6_car/doc/` 同步）
+### 7.1 C6 侧（`esp32c6_car`）—— **已完成**（提交 `22e15f2` 链路换向 + `3f464af` 真机缺陷修复，另有 `esp32c6_car/doc/` 同步）
 
 | 文件 | 动作 | 实测状态 |
 |---|---|---|
 | `components/c6_link/link.c` | 传输层 UART → `spi_slave_hd`：删 `uart_*`、波特率协商状态机（0x44）、`LINK_UART_NUM`；新增 SPI2 从机初始化（`command/address/dummy=8`、`queue_size`、DMA 通道）、§4.3 寄存器发布、IRQ 脚驱动 | **已完成**：0x43/0x44 在代码里只剩一条"已删除"注释；段缓冲 `LINK_SEG_SIZE=512`、`LINK_RX_BUFFERS=2`；IRQ 为**电平**语义（有帧待取则拉高，`SILENCE_ON` 可强制静默作台架注入） |
 | `components/c6_link/Kconfig` | 删 `C6_LINK_TX/RX_GPIO`（顺带消除与 23-wiring.md §2 GPIO6/7 的既有不一致），增 `C6_LINK_SPI_*_GPIO`（默认 19/18/20/23/21）、`C6_LINK_SPI_CLOCK_HZ`、`C6_LINK_UART_DEBUG`（控制台） | **已完成**：SPI 五线默认值与 23 §9.1 逐脚一致；`C6_LINK_DEBUG_UART_RX/TX_GPIO` 显式固化为 **6/7**（原 10/11 的不一致随之消除）。遗留：`C6_LINK_SPI_IRQ_GPIO` 的 help 文本仍写 "IOM edge IRQ"，与本文 E11（TC275 做不出边沿中断）不符，属 C6 仓库文档瑕疵，待该仓库下轮修正 |
 | `components/c6_link/link.h` | 对外 API（`LINK_send/recv/health`）**签名不变** → `bridge`/`ota_relay` 不感知物理层 | **已完成** |
-| `components/c6_sf/`（新增） | SF 帧编解码（纯 C，主机端可测）；v2↔SF 映射 | **已完成**，但映射位置与原计划不同：落在 `c6_link` 内部而非 `c6_bridge`（差异记录见 `c6_car/doc/14-sf-link.md` D1） |
+| `components/c6_sf/`（新增） | SF 帧编解码（纯 C，主机端可测）；v2↔SF 映射 | **已完成**，但映射位置与原计划不同：落在 `c6_link` 内部而非 `c6_bridge`（差异记录见 `esp32c6_car/doc/14-sf-link.md` D1） |
 | `components/c6_ota/*` | CHUNK 上限 62 B → 240 B（同步 §5.5）；分片计数逻辑随之简化 | **已完成**（`link_send_ota_chunk` 快路径） |
-| `c6_car/doc/04-link.md`、`02-proto.md`、`08-bridge.md` | 同步（UART 段落改为 SPI；波特率协商章节删除） | **已完成**（`b8e12bf`） |
+| `esp32c6_car/doc/04-link.md`、`02-proto.md`、`08-bridge.md` | 同步（UART 段落改为 SPI；波特率协商章节删除） | **已完成**（`b8e12bf`） |
 
 **两侧兼容性静态核对（2026-09-26 第一轮，源码比对）**：`com/link.h` 与 `components/c6_sf/sf_frame.h` 逐项比对结果为——寄存器偏移 `READY/TX_PENDING/RX_ROOM/ALIVE/ERRSTAT/CMDRSP = 0/4/8/12/16/20` 一致、`SF_READY_MAGIC = 0x5F534601` 一致、`SF_MAX_PAYLOAD = 248` 一致、ALIVE 步进 10 ms 对 500 ms 判活窗口一致、主机单段 260 B ≤ 从机段缓冲 512 B 一致。主机侧一次 `RDBUF` 读 24 B（偏移 0..23），从机发布 28 B（含 `GEN` 槽回显）→ 读的是前缀，不冲突。**这只是源码比对，不等于波形通**（G1 未做）。
 
@@ -299,7 +299,7 @@ loop:
 
 **主机侧 `GEN` 下发（原"尚未实现"项，现已补齐）**：`LINK_gen()` / `LINK_setClock()` 已落地（`com/link.c`），语义与时序见 §4.3 与 E14 —— `WRBUF` 写 `SF_REG_GEN(24)` 4 B，NOP 探针清粘滞回执，20 ms 超时计 `genNoAck`。这解锁了 **G4 的 `SILENCE_ON` 故障注入**（台架上可强制从机不拉 IRQ）与 G5 的**运行时档位镜像**（`CLOCK_SET` 只让从机记录诊断，时钟真值仍归主机）。
 
-### 7.2 TC275 侧（`myCar`）—— **2026-09-26 已落地，状态见"实测"列**
+### 7.2 TC275 侧（`tc275_car`）—— **2026-09-26 已落地，状态见"实测"列**
 
 > 目录位置：落地时曾按当时布局放在 `Middleware/` 下，**2026-09-26 随 SDD V1.3 目录重排已迁至目标态 `com/`、`mw/sf/`**，下表路径为现路径。
 
@@ -347,7 +347,7 @@ loop:
 | R9 | 寄存器读非原子（E5） | 主机误判待发长度 | **单读 + 消费端钳位容错**（V1.6 重写）：READY 魔数错 → 静默 `LINK_DOWN` 自愈；`TX_PENDING`/`RX_ROOM` 越界即钳位；判失联只由 ALIVE 承担。原"连读两次相同 + 重试 3 次 + 不可信即判失联"已废弃——从机随时改写寄存器，比对只会把撕裂读放大成"越忙越断连"（§4.2/§5.4） |
 | R10 | C6 自身 OTA 写 flash 期间 SPI 从机是否掉事务 | OTA 过程链路抖动 | 台架实测项；必要时 OTA 写块间隙插入 HBT 保活，或 OTA 期间限速/限动（对齐 SDD R3 的"OTA 中限速 50%"） |
 | R11 | **实物已确认为"杜邦线直连 + 无外部上拉"**（23 §9.3）：IRQ 开漏仅由 TC275 片内上拉撑高 → 边沿慢、驱动阻抗高 → **电平读错**（握手是轮询不是中断，E11） | 偶发空读事务（只耗轮询带宽）、命令下行时延退化 | 2 ms 保活轮询 + 寄存器连读校验兜底；**判活只看 `SF_ALIVE`，不用 IRQ 电平**；量产线束定长屏蔽并补外部上拉后再谈提速档 |
-| R12 | **两侧常量表各自漂移**（E13 已实测发生三次：FLAGS bit1、OTA CID、ERRSTAT 位图）。协议改动后只改一侧、或文档与代码不同步，都会在台架上表现为"莫名 CRC/格式错"或"错误位读反" | 联调期定位成本，且可能只在提速档出现 | ① `sf_frame.h` 与从机 `c6_sf/sf_frame.h` 的常量必须**整表覆盖式**比对，不抽查；② 38 B 载荷由 `test_sf_telemetry.c` 编译对方源码来锁死，**改过 `mw/sf/` 或 `c6_car/components/c6_sf` 必须重跑**；③ 本轮起该测试与门禁 G2 绑定（§8） |
+| R12 | **两侧常量表各自漂移**（E13 已实测发生三次：FLAGS bit1、OTA CID、ERRSTAT 位图）。协议改动后只改一侧、或文档与代码不同步，都会在台架上表现为"莫名 CRC/格式错"或"错误位读反" | 联调期定位成本，且可能只在提速档出现 | ① `sf_frame.h` 与从机 `c6_sf/sf_frame.h` 的常量必须**整表覆盖式**比对，不抽查；② 38 B 载荷由 `test_sf_telemetry.c` 编译对方源码来锁死，**改过 `mw/sf/` 或 `esp32c6_car/components/c6_sf` 必须重跑**；③ 本轮起该测试与门禁 G2 绑定（§8） |
 | Q3 | 20 MHz 是否值得（收益 vs 线束成本） | 量产成本 | 5 MHz 已满足全部指标；20 MHz 仅作探索档，不承诺 |
 | Q4 | 是否要第二根握手线 `TX_RDY` | 时延微优化 | 本版不接，留焊位；G3 数据不支持再评估 |
 
@@ -373,9 +373,9 @@ loop:
 | SDD §16 | R4 | 2 Mbps SI 风险作废，替换为本文 R7–R11（R4 保留为 UART 回退通道项） |
 | SDD §17 | 映射表 | `Middleware/wifi_at.c` → `USE_WIFI_AT 回退通道（非量产链路）`；新增行：`Middleware/protocol.c → mw/sf`（SF 编解码）；`（无）→ com/spi_hal_pins.c`（QSPI3 主机引脚/时钟档） |
 | 23-wiring.md | §9 | 标题"（C6 自研固件预研方案，待拍板）"→"（V1.0 选定链路）"；§9.2 实施要点按本文 §4/§5 重写，删"备忘，未开工" |
-| 23-wiring.md | §2 | 标注"UART 降级为调试控制台/回退通道"；并修正既有不一致：c6_car `Kconfig` 的 `C6_LINK_TX/RX_GPIO` 默认 10/11 与本文 GPIO6/7 记录冲突，自研固件里统一为调试用途并显式写入 Kconfig help |
+| 23-wiring.md | §2 | 标注"UART 降级为调试控制台/回退通道"；并修正既有不一致：esp32c6_car `Kconfig` 的 `C6_LINK_TX/RX_GPIO` 默认 10/11 与本文 GPIO6/7 记录冲突，自研固件里统一为调试用途并显式写入 Kconfig help |
 | SDD §18 | 新增 | 收入 demo 实测出的工程级铁律（0 号向量表、ISR 优先级全局分配、串口属主、裸机时基、SLSO5 唯一可用片选等），使 31-firmware-architecture.md 不再是这些约束的唯一出处 |
-| doc 基线 | 全文档 | 确立 SDD 为唯一设计基准：`ux-performance-plan.md`（结论已并入 SDD §3.5/§11/§14）与 `esp32c6-fw-design.md`/`esp32c6-fw-coding-plan.md`（C6 侧 LLDD 已落在 `c6_car/doc/`）三份文档删除；`11-requirements.md`/`31-firmware-architecture.md`/`01-getting-started.md`/`README.md` 口径对齐（esp-at/UART 降级为 demo 现状与回退通道） |
+| doc 基线 | 全文档 | 确立 SDD 为唯一设计基准：`ux-performance-plan.md`（结论已并入 SDD §3.5/§11/§14）与 `esp32c6-fw-design.md`/`esp32c6-fw-coding-plan.md`（C6 侧 LLDD 已落在 `esp32c6_car/doc/`）三份文档删除；`11-requirements.md`/`31-firmware-architecture.md`/`01-getting-started.md`/`README.md` 口径对齐（esp-at/UART 降级为 demo 现状与回退通道） |
 
 ---
 

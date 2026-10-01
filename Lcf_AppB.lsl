@@ -4,7 +4,7 @@
  * Kept under the default file name so the AURIX Studio build picks it up
  * without linker-option changes, but the content places the App in slot B:
  * [0x80208000, 0x80400000), entry at 0x80208020 (".start", where the SBL
- * jumps to - myCarSbl/Lcf_SBL.lsl owns the physical reset vector / BMHD0).
+ * jumps to - tc275_sbl/Lcf_SBL.lsl owns the physical reset vector / BMHD0).
  * NOT part of the default build; select this file in the linker
  * options when producing an OTA-target (slot B) image.
  * Derived from the stock Infineon template by the slot transform only.

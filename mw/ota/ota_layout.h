@@ -27,7 +27,7 @@
  * bank_base + 0x20). The SBL jumps to exactly that address.
  *
  * DFlash0 sector allocation across the vehicle codebase (must stay unique):
- *   sector 15 0xAF01E000  myCar calib record (mw/calib/calib_store.c)
+ *   sector 15 0xAF01E000  tc275_car calib record (mw/calib/calib_store.c)
  *   sector 14 0xAF01C000  OTA meta page 1 (this file)
  *   sector 13 0xAF01A000  OTA meta page 0 (this file)
  *   sector 12..0          free (doc 24 §4.3 config/black-box reserve)

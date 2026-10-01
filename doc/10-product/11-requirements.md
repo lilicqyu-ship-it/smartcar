@@ -10,7 +10,7 @@ AURIX SmartDrive V1.0 产品需求与功能设计
 
 变更记录：
 V1.1 — Wi-Fi 模块由 ESP8266 更换为 ESP32-C6（运行 Espressif 官方 esp-at AT 固件，AT 指令集向下兼容 ESP8266），接线详见 23-wiring.md
-V1.2 — **板间主链路 UART → SPI**（TC275 QSPI3 主机 ↔ C6 SPI2 从机，1 MHz 起 / 5 MHz 量产基线），UART 降级为调试控制台与回退通道；C6 固件改为自研（`c6_car` 工程），esp-at 退居回退；链路帧分为两段：板间 SF 帧 + 手机 v2 帧。详见 SDD §3.7/§6 与 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。文中 esp-at / UART 相关段落（§2 目标、§3 架构图、§5）描述的是 **V1.1 demo 现状**，保留作为回退通道与产线返工依据。
+V1.2 — **板间主链路 UART → SPI**（TC275 QSPI3 主机 ↔ C6 SPI2 从机，1 MHz 起 / 5 MHz 量产基线），UART 降级为调试控制台与回退通道；C6 固件改为自研（`esp32c6_car` 工程），esp-at 退居回退；链路帧分为两段：板间 SF 帧 + 手机 v2 帧。详见 SDD §3.7/§6 与 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。文中 esp-at / UART 相关段落（§2 目标、§3 架构图、§5）描述的是 **V1.1 demo 现状**，保留作为回退通道与产线返工依据。
 V1.3 — **UART 作为板间链路弃用（2026-09-26 用户决策）**：SPI 是**唯一**板间链路，TC275 的两个 TASKING 构建配置都只编 SPI 路径；UART/esp-at 只保留为 C6 调试控制台与 G1 失败时的**应急返修**（恢复要删 `USE_SPI_LINK` 重编 + C6 重刷 esp-at，双侧动作）。本文上述"回退通道"字样按此理解，验收与排障不再假设 UART 可用；决策依据见 SDD §5.6 末条与 §18 C15。
 
 1. 产品概述
@@ -108,7 +108,7 @@ F14	IWR6843 毫米波雷达	V3.0
 
 V1.0 推荐使用 AP 模式。
 
-量产（V1.2 起）：C6 运行**自研固件**（同级工程 `c6_car/`，其模块级设计见 `c6_car/doc/`），承载 softAP/STA + Captive Portal + HTTP/WS 服务，与 TC275 之间走 SPI + SF 帧；安全逻辑全部留在 TC275，C6 挂死只导致停车。
+量产（V1.2 起）：C6 运行**自研固件**（同级工程 `esp32c6_car/`，其模块级设计见 `esp32c6_car/doc/`），承载 softAP/STA + Captive Portal + HTTP/WS 服务，与 TC275 之间走 SPI + SF 帧；安全逻辑全部留在 TC275，C6 挂死只导致停车。
 
 以下为 V1.0 demo 现状（esp-at 通道，保留作 R7 回退与产线返工）：
 

@@ -1,10 +1,10 @@
-# myCar（AURIX SmartDrive）工程评估报告
+# tc275_car（AURIX SmartDrive）工程评估报告
 
 | 项 | 内容 |
 |---|---|
 | 文档编号 | **12**（域：产品/历史快照；**冻结不更新**，结论已被 `21-software-design.md` 吸收为架构约束） |
 | 评估日期 | 2026-09-26 |
-| 评估对象 | `myCar` 工程（KIT-AURIX-TC275-LITE + ESP32-C6 esp-at + 2×TB6612 四电机差速小车） |
+| 评估对象 | `tc275_car` 工程（KIT-AURIX-TC275-LITE + ESP32-C6 esp-at + 2×TB6612 四电机差速小车） |
 | 基线版本 | `acce1f8`（fix(wifi): 冒号仅在 +IPD 帧头作为分隔符），另含工作区未提交改动（keep-alive / g_activeLink） |
 | 评估范围 | 全部自研代码（三核入口 + App/Middleware/Bsp 共约 2400 行）、FreeRTOS 配置、链接脚本、`.cproject`、仓库内容、doc/ 四篇文档 |
 | 评估方式 | 人工逐行通读全部自研源码 + 构建配置/链接脚本/仓库内容核查 + 文档-代码一致性比对 |

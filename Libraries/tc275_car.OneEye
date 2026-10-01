@@ -8,5 +8,5 @@
         <port plugin="PCom_DAS::DAS" connect="true" system-key="{ADS}"/>
     </interface>
     <config/>
-    <debugBox elf-path="C:\Code\TC275\AURIX-v1.10.36-workspace\myCar\TriCore Debug (TASKING)\myCar.elf"com-interface-id="das-itf" id="elf"/>
+    <debugBox elf-path="C:\Code\smartcar	c275_car\TriCore Debug (TASKING)	c275_car.elf" com-interface-id="das-itf" id="elf"/>
 </root>

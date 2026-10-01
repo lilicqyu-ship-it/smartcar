@@ -32,7 +32,7 @@
  * loop from the bench; 0x72/0x73/0x74 read, write and clear the calibration
  * record in DFlash (doc 34 SS8), echoed on EVT 0x23. They arrive as SF CMD/DPT
  * ops, which link.c forwards verbatim; the phone UI reaches them through the
- * calibration page (c6_car doc 17). */
+ * calibration page (esp32c6_car doc 17). */
 #define PROTO_CMD_DPT_CAL_DIR     0x70
 #define PROTO_CMD_DPT_MOTOR_JOG   0x71
 #define PROTO_CMD_DPT_REC_GET     0x72
@@ -40,7 +40,7 @@
 #define PROTO_CMD_DPT_REC_CLEAR   0x74
 
 /* OTA commands (doc 24 SS5.3 / F7 command table; values match the C6 side,
- * c6_car components/c6_proto/proto_frames.h). They travel as SF OTA frames,
+ * esp32c6_car components/c6_proto/proto_frames.h). They travel as SF OTA frames,
  * not through this UART demo protocol - the constants complete the shared
  * command table; the SF layer forwards them in link.c. */
 #define PROTO_CMD_OTA_BEGIN       0x60  /* {u32 total, u32 crc32}            */

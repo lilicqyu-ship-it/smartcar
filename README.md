@@ -1,4 +1,4 @@
-# AURIX SmartDrive（myCar）
+# AURIX SmartDrive（tc275_car）
 
 [![CI](https://github.com/lilicqyu-ship-it/tc275_car/actions/workflows/ci.yml/badge.svg)](https://github.com/lilicqyu-ship-it/tc275_car/actions/workflows/ci.yml)
 
@@ -53,16 +53,16 @@
 | 10 产品 | [11-requirements.md](doc/10-product/11-requirements.md) · [12-demo-evaluation.md](doc/10-product/12-demo-evaluation.md) | 需求说明书 V1.3 · demo 评估报告（问题基线，冻结快照） |
 | 20 设计/硬件 | [21-software-design.md](doc/20-design/21-software-design.md) · [22-link-spi-design.md](doc/20-design/22-link-spi-design.md) · [23-wiring.md](doc/20-design/23-wiring.md) | **★量产 SDD V1.6（基准，含 §18 工程级实现约束 C1~C15）** · 板间 SPI/SF 链路详细设计 V1.6 · **接线真源 V1.11**（§9.3 = 杜邦线直连无外部元件） |
 | 30 TC275 | [31-firmware-architecture.md](doc/30-tc275/31-firmware-architecture.md) · [32-tc275-dev-guide.md](doc/30-tc275/32-tc275-dev-guide.md) | 当前代码（demo）架构参考 V2.1 · **TC275 开发指南 V1.4**（新增中断/跨核消息/构建烧录/排障） |
-| 40 ESP32-C6 | [41-c6-docs-map.md](doc/40-esp32c6/41-c6-docs-map.md) | C6 侧文档地图：本仓库负责的接口真源 + 指向 `c6_car/doc/` 的 14 篇 LLDD |
+| 40 ESP32-C6 | [41-c6-docs-map.md](doc/40-esp32c6/41-c6-docs-map.md) | C6 侧文档地图：本仓库负责的接口真源 + 指向 `esp32c6_car/doc/` 的 14 篇 LLDD |
 
-已删除的历史文档：`ux-performance-plan.md`（卡顿根因与 Track B 方案，结论全部并入 SDD §3.5/§11/§14）、`esp32c6-fw-design.md` 与 `esp32c6-fw-coding-plan.md`（C6 固件 LLDD，已由同级工程 `c6_car/doc/` 承载）。
+已删除的历史文档：`ux-performance-plan.md`（卡顿根因与 Track B 方案，结论全部并入 SDD §3.5/§11/§14）、`esp32c6-fw-design.md` 与 `esp32c6-fw-coding-plan.md`（C6 固件 LLDD，已由同级工程 `esp32c6_car/doc/` 承载）。
 
 ## 目录结构
 
 2026-09-26 起按 SDD §3.4 目标态目录组织（demo 布局 `App/ Middleware/ Bsp/` 已重排；`app/robot.c→mission+drive_policy`、`rt/motor_algo→servo` 等文件级拆分仍属后续里程碑）：
 
 ```
-myCar/
+tc275_car/
 ├── Cpu0_Main.c            # CPU0 入口：XCORE 初始化 + FreeRTOS 任务（blinky/echo/robot 控制任务）
 ├── Cpu1_Main.c            # CPU1 入口：MOTOR_ALGO_run() 1 kHz 裸机超循环（电机算法）
 ├── Cpu2_Main.c            # CPU2 入口：板间链路裸机超循环（默认 = USE_SPI_LINK 的 QSPI3 SF 帧泵；删符号才走 wifi_at AT/UART）
@@ -83,7 +83,7 @@ myCar/
 | 器件 | 型号 | 说明 |
 |---|---|---|
 | 主控 | KIT-AURIX-TC275-LITE | TriCore 三核 TC275，115200 调试串口见接线图 |
-| Wi-Fi | ESP32-C6-DevKitC-1 V1.2 | 板载双 Type-C + 5V→3.3V LDO；量产固件为自研 `c6_car`（SPI 从机），esp-at 只作应急返修镜像 |
+| Wi-Fi | ESP32-C6-DevKitC-1 V1.2 | 板载双 Type-C + 5V→3.3V LDO；量产固件为自研 `esp32c6_car`（SPI 从机），esp-at 只作应急返修镜像 |
 | 电机驱动 | TB6612 四路驱动稳压模块（轮趣 D24A） | 单板驱动 4 电机；编码器信号经 J4（E1/E2）、J6（E3/E4）引出 |
 | 电源 | 2S~3S 电池 + DC-DC 5V ≥1A | 5V 轨同时供 TC275 与 C6（详见接线图 §5） |
 | 电机 | 轮趣 MG310 直流减速电机 ×4 | 内置 13 PPR 霍尔 AB 编码器（×4 = 52 计数/电机转，×20.409 ≈ 1061.27 计数/轮转），48 mm 橡胶胎；差速双轮布局，每侧 2 电机并联驱动逻辑 |
@@ -127,7 +127,7 @@ myCar/
 - ✅ **速度闭环已落地（2026-09-27 / F02，SDD V1.7 §5.2）**：新增 `rt/servo.c`（每侧 PI：前馈 + 抗饱和积分 ±30% duty + 输出钳位 ±1000；**编码器 `alive` 无效时整侧回退开环斜坡**——编码器线没接也能跑），`rt/motor_algo` 1 kHz 接入（目标斜坡 → servo → TB6612，急停/失联看门狗不变），控制台运动时有 1 Hz `SRV=` 行。**`g_encInvert` 判向从"纸面标定"转正**：运行时可写（`ENCODER_setInvert`）+ `0x70` 命令台架自动判向（CPU1 脉冲法，结果 `ENCCAL=` 行，**需四轮离地**，见 23-wiring.md §8.4）。**增益为待标定初值**，`motor_guard`（堵转/滑差/欠压）仍未做
 - ✅ **编码器测速已接入数据链（v0.2.1 / F03）**：`rt/encoder.c`（CPU1）用 GTM TIM0 八通道 TIEM 双边沿中断 + 软件 ×4 正交（该器件上 UDC 硬件正交计数不可用，见 23-wiring.md §8.3 的纠错），已挂进 `Cpu1_Main.c` 1 kHz 超循环；实测车速经 `mw/xcore` 编码器块出车：CPU0 状态回复在 `enc.alive` 时用实测速度替换命令回显（`Cpu0_Main.c`），CPU2 遥测填 `vMeasLeft/Right`、`odoSessionMm` 与 `vTargetL/R`（`Cpu2_Main.c`）。**固件与数据通路已闭合，仅 8 根编码器线待接**（方案 P33.0~7 ↔ X2-28~35，详见 23-wiring.md §8、SDD §5.1）；`odoTotalMm` 仍留 0（需 DFlash 持久化）
 - ✅ **电池电压采集已落地（2026-09-27 / SDD V1.9，`23-wiring.md §5.5`）**：D24A 板内电池分压（R13 10k + R15 1k = **VIN/11**）从 **J6-1** 接 kit **X2-23（AN4 = VADC G0 CH4，X2-16~27 空闲模拟脚列）**；新增 `bsp/adc.c/.h`（CPU1）：VADC 询问式单发转换（12 bit、采样 1 µs、LOSUP=3.3 V 轨）、100 Hz + 1/16 EMA，经 xcore 出遥测 `batteryMv/batteryPct`（**pct 按 3S 估算，节数 2S/3S 确认后改 `ADC_BATT_CELLS`**）；`.cproject` 已解除 `Vadc` 驱动排除。**验收动作：万用表量 J6-1（≈VIN/11）与 X2-15（≈3300 mV）各一次**；欠压保护动作仍属 `motor_guard` 未做项
-- 📋 C6 侧自研固件在同级工程 `c6_car/`（审查修复未提交）
+- 📋 C6 侧自研固件在同级工程 `esp32c6_car/`（审查修复未提交）
 - 📋 版本路线与量产里程碑：11-requirements.md 路线图（编码器闭环 → IMU → 毫米波雷达）对应 SDD §15 M0–M4
 
 ## 构建

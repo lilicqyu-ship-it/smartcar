@@ -20,7 +20,7 @@
  *   148  app image ...
  *
  * Crypto facts pinned against the C6 side (doc 24 risk R2, resolved by
- * reading c6_car code, not comments): the signature covers the FIRST 84
+ * reading esp32c6_car code, not comments): the signature covers the FIRST 84
  * bytes (tools/sign_bundle.py SIGNED_LEN = 84; the "first 116 bytes" wording
  * in c6 bundle.h's header comment is stale), and payload digests are
  * SHA-512[:32] despite the field names saying sha256. This module matches

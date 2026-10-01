@@ -6,7 +6,7 @@
 
 配套文档：11-requirements.md（产品需求 V1.2）、[21-software-design.md](../20-design/21-software-design.md)（量产 SDD V1.8，**设计基准**）、[22-link-spi-design.md](../20-design/22-link-spi-design.md)（SPI 链路详细设计，V1.6）
 
-ESP32-C6 固件工程：**自研** `C:\Code\TC275\AURIX-v1.10.36-workspace\c6_car`（ESP-IDF）；`esp-at` 工程仅作 UART **应急返修**参考（UART 作为板间链路已弃用，见 §2）
+ESP32-C6 固件工程：**自研** `C:\Code\TC275\AURIX-v1.10.36-workspace\esp32c6_car`（ESP-IDF）；`esp-at` 工程仅作 UART **应急返修**参考（UART 作为板间链路已弃用，见 §2）
 
 ESP32-C6 硬件板卡：**ESP32-C6-DevKitC-1 V1.2**（ESP32-C6-WROOM-1/-1U 模组，8 MB flash，板载 5V→3.3V LDO、USB-UART 桥 + 原生 USB 双 Type-C 口、BOOT/RST 按键、GPIO8 地址彩灯）
 
@@ -20,7 +20,7 @@ ESP32-C6 硬件板卡：**ESP32-C6-DevKitC-1 V1.2**（ESP32-C6-WROOM-1/-1U 模�
 
 | 通道 | 见 | 实物状态 |
 |---|---|---|
-| **板间主链路 SPI**（QSPI3 主 ↔ C6 SPI2 从 + IRQ，5 线 + 共地） | §9.1 | ✅ **已按 §9.1 完成接线**。**两侧固件均已实现**：C6 侧 = `c6_car` `22e15f2`（`spi_slave_hd` 从机，已提交）；TC275 侧 = `com/` + `mw/sf/`，**且 `USE_SPI_LINK` 已定义进 Debug 与 Release 两个 TASKING 构建配置（2026-09-26 UART 板间链路弃用，SDD §5.6/§18 C15），SPI 是日常构建唯一产出的板间链路**。**IDE 构建链接闭合已达成（2026-09-26，Debug 0 错误）**。下一步：G1 波形门禁 |
+| **板间主链路 SPI**（QSPI3 主 ↔ C6 SPI2 从 + IRQ，5 线 + 共地） | §9.1 | ✅ **已按 §9.1 完成接线**。**两侧固件均已实现**：C6 侧 = `esp32c6_car` `22e15f2`（`spi_slave_hd` 从机，已提交）；TC275 侧 = `com/` + `mw/sf/`，**且 `USE_SPI_LINK` 已定义进 Debug 与 Release 两个 TASKING 构建配置（2026-09-26 UART 板间链路弃用，SDD §5.6/§18 C15），SPI 是日常构建唯一产出的板间链路**。**IDE 构建链接闭合已达成（2026-09-26，Debug 0 错误）**。下一步：G1 波形门禁 |
 | 板间 UART（ASCLIN1 ↔ GPIO6/7） | §2 | ✅ 已接，**线不拆**。**2026-09-26 起该通道作为板间链路已弃用**（SDD §5.6 末条 / §18 C15）：现在只承担 **C6 调试控制台**；G1 失败时的应急返修要同时做两件事——TC275 删除 `USE_SPI_LINK` 重编 + C6 重刷 esp-at |
 | 电机 PWM/方向 8 线 + STBY | §3 / §4 | ✅ 已接，实车验证 |
 | 编码器 8 线（P33.0~7 / X2-28~35） | §8.2 | 🔌 **固件已实现**（`rt/encoder.c`，GTM TIM0 TIEM ×4 软件正交，优先级 16~23）；待按本表接线 + §8.4 台架判向 |
@@ -87,7 +87,7 @@ flowchart LR
     BAT --> DRV
 ```
 
-> **V1.5 现状标注（V1.10 更新口径）**：`QSPI3 ↔ C6 SPI2`（§9.1 五线 + 共地）**已按接线表完成实物接线**；`ASCLIN1 ↔ GPIO6/7` UART 线**保留不拆**，仅作 C6 调试控制台（作为板间链路已于 2026-09-26 弃用，见 §2 与 SDD §18 C15）。**两侧 SPI 固件代码均已落地**：C6 侧 `c6_car` 已完成 `spi_slave_hd` 从机改造（提交 `22e15f2`，UART 时代的 0x44 波特率协商与 `C6_LINK_TX/RX_GPIO` 已删除）；TC275 侧 `USE_SPI_LINK` **已定义进 Debug 与 Release 两个 TASKING 构建配置**，日常构建唯一产出的板间链路就是 SPI。**通电联调尚未做过**：链路启用与波形兼容性由 G1 门禁把关（见 [22-link-spi-design.md](../20-design/22-link-spi-design.md) §8）。编码器 8 线见 §8（尚未接线，待确认）。
+> **V1.5 现状标注（V1.10 更新口径）**：`QSPI3 ↔ C6 SPI2`（§9.1 五线 + 共地）**已按接线表完成实物接线**；`ASCLIN1 ↔ GPIO6/7` UART 线**保留不拆**，仅作 C6 调试控制台（作为板间链路已于 2026-09-26 弃用，见 §2 与 SDD §18 C15）。**两侧 SPI 固件代码均已落地**：C6 侧 `esp32c6_car` 已完成 `spi_slave_hd` 从机改造（提交 `22e15f2`，UART 时代的 0x44 波特率协商与 `C6_LINK_TX/RX_GPIO` 已删除）；TC275 侧 `USE_SPI_LINK` **已定义进 Debug 与 Release 两个 TASKING 构建配置**，日常构建唯一产出的板间链路就是 SPI。**通电联调尚未做过**：链路启用与波形兼容性由 G1 门禁把关（见 [22-link-spi-design.md](../20-design/22-link-spi-design.md) §8）。编码器 8 线见 §8（尚未接线，待确认）。
 
 ---
 
@@ -96,7 +96,7 @@ flowchart LR
 > **状态变更（V1.3）**：本节描述的 ASCLIN1 ↔ C6 UART 接线**保留不拆**，用途为 C6 自研固件的 115200 调试控制台。引脚与流控信息仍按 esp-at 时代记录，供返工查阅。
 > **状态变更（V1.10，2026-09-26 用户决策）**：UART **不再是板间链路**——`USE_SPI_LINK` 已定义进 TC275 的 Debug 与 Release 两个 TASKING 构建配置，AT/UART 分支只在手动删除该符号时才编译（SDD §5.6 末条、§18 C15）。若 G1 波形门禁失败需要临时恢复这条通道，动作是**双侧**的：TC275 删符号重编烧录 + C6 重刷 `esp-at` 镜像（`AT+UART_CUR=115200,8,1,0,0` 关流控），按一次刷机的代价排计划，不是改一行 `#ifdef`。
 >
-> **已消除的不一致（V1.5 核对）**：`c6_car/components/c6_link/Kconfig` 原 `C6_LINK_TX_GPIO default 10` / `C6_LINK_RX_GPIO default 11` 与本节记录的 **GPIO6(RX)/GPIO7(TX)** 冲突。C6 侧 SPI 改造（提交 `22e15f2`）时**已删除**这两项，改为显式的 `C6_LINK_DEBUG_UART_RX_GPIO default 6` / `C6_LINK_DEBUG_UART_TX_GPIO default 7`，与本节和实物接线一致。UART 通道现在只剩调试控制台用途。
+> **已消除的不一致（V1.5 核对）**：`esp32c6_car/components/c6_link/Kconfig` 原 `C6_LINK_TX_GPIO default 10` / `C6_LINK_RX_GPIO default 11` 与本节记录的 **GPIO6(RX)/GPIO7(TX)** 冲突。C6 侧 SPI 改造（提交 `22e15f2`）时**已删除**这两项，改为显式的 `C6_LINK_DEBUG_UART_RX_GPIO default 6` / `C6_LINK_DEBUG_UART_TX_GPIO default 7`，与本节和实物接线一致。UART 通道现在只剩调试控制台用途。
 
 ESP32-C6 esp-at 固件的 AT 通道是 **UART1**（不是 ESP8266 的 UART0），默认引脚如下（来自 esp-at `docs/en/Get_Started/Hardware_connection.rst` ESP32-C6 章节）。DevKitC-1 排针位置见官方 User Guide 引脚图（引脚号以板端丝印为准）：
 
@@ -350,7 +350,7 @@ D24A 板编码器引出（原理图已核对）：**J4**（电机 1/2）= E1A:J4
 
 ## 9. SPI 链路接线（V1.0 选定主链路：TC275 QSPI3 主机 ↔ C6 SPI2 从机，**实物已接线**）
 
-背景：C6 改自研固件（`c6_car`）后不再受 esp-at 约束，板间主链路从 UART 换向 **SPI**。拓扑与安全模型沿用量产 SDD §3.7：TC275 = 唯一时序主人（提供 SCLK 与硬件 CS），C6 = `spi_slave_hd` 从机 + 1 根 IRQ 握手线；C6 死机只会导致"主机事务超时 → 判失联 → 受控停车"，不可能导致失控。链路层帧为**新定 SF 帧**（4 字节对齐、段内多帧、FRAG 位），事务模型/寄存器映射/验证门禁见 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。
+背景：C6 改自研固件（`esp32c6_car`）后不再受 esp-at 约束，板间主链路从 UART 换向 **SPI**。拓扑与安全模型沿用量产 SDD §3.7：TC275 = 唯一时序主人（提供 SCLK 与硬件 CS），C6 = `spi_slave_hd` 从机 + 1 根 IRQ 握手线；C6 死机只会导致"主机事务超时 → 判失联 → 受控停车"，不可能导致失控。链路层帧为**新定 SF 帧**（4 字节对齐、段内多帧、FRAG 位），事务模型/寄存器映射/验证门禁见 [22-link-spi-design.md](../20-design/22-link-spi-design.md)。
 
 ### 9.1 接线表（TC275 QSPI3 主 ↔ ESP32-C6 SPI2 从机 HD）—— **已按本表完成实物接线（2026-09-26）**
 
@@ -385,13 +385,13 @@ D24A 板编码器引出（原理图已核对）：**J4**（电机 1/2）= E1A:J4
 
 ### 9.2 实施要点（对应改动清单见 22-link-spi-design.md §7）
 
-> **当前进度（V1.8，口径随 V1.11 更新）**：实物接线已完成（§9.1）；**两侧固件代码均已落地**——TC275 侧 `com/` + `mw/sf/` + `Cpu2_Main.c`（22 号文档 §7.2），C6 侧 `c6_car` `spi_slave_hd` 从机（提交 `22e15f2`，22 号文档 §7.1）。**TASKING IDE 构建链接闭合已达成（2026-09-26，Debug 0 错误）**。**UART 板间链路已弃用**：`USE_SPI_LINK` 定义进 Debug 与 Release 两个 TASKING 配置，构建产出的就是 SPI 路径（§2）。但**从未通电联调过**，G1 波形门禁未过。以下"事务模型/帧"两条是**两侧代码共同遵循的契约**，"验证"一项是**唯一未完成的主线**。
+> **当前进度（V1.8，口径随 V1.11 更新）**：实物接线已完成（§9.1）；**两侧固件代码均已落地**——TC275 侧 `com/` + `mw/sf/` + `Cpu2_Main.c`（22 号文档 §7.2），C6 侧 `esp32c6_car` `spi_slave_hd` 从机（提交 `22e15f2`，22 号文档 §7.1）。**TASKING IDE 构建链接闭合已达成（2026-09-26，Debug 0 错误）**。**UART 板间链路已弃用**：`USE_SPI_LINK` 定义进 Debug 与 Release 两个 TASKING 配置，构建产出的就是 SPI 路径（§2）。但**从未通电联调过**，G1 波形门禁未过。以下"事务模型/帧"两条是**两侧代码共同遵循的契约**，"验证"一项是**唯一未完成的主线**。
 
 - **事务模型**：半双工定长事务，前导相位 `CMD(8)+ADDR(8)+DUMMY(8)`，数据相位长度取 4 的倍数（从机硬约束）。C6 用 `spi_slave_hd_write_buffer()` 发布 **6 个 u32 读寄存器**（`SF_READY/SF_TX_PENDING/SF_RX_ROOM/SF_ALIVE/SF_ERRSTAT/SF_CMDRSP` = 偏移 0/4/8/12/16/20），另有偏移 **24 的 `SF_GEN` 是唯一由主机写的寄存器**（`WRBUF` 写 4 B `{cmd,p0,p1,p2}`，用于 `RESET_LINK/SILENCE_ON·OFF/CLOCK_SET`，22 号文档 §4.3 + E14）；从机地址空间共 28 B，主机每次 `RDBUF` 只读前 24 B 前缀。主机轮询寄存器后决定读/写；**寄存器读非原子（22 号文档 E5 仍是事实）→ 主机单读快照 + 消费端钳位容错**（2026-09-27 起，22 号文档 V1.6 §4.2：原"连读两次取相同值"继承规范在从机每段完成/10 ms 都改写寄存器的实况下会"越忙越误判失联"，已废弃；判失联只看 `SF_ALIVE`）。**线上命令字节以 `spi_ll.h` 的 `SPI_LL_BASE_CMD_HD_*` 为准**（`WRBUF 0x01 / RDBUF 0x02 / WRDMA 0x03 / RDDMA 0x04 / SEG_END 0x05 / WR_END 0x07 / INT0 0x08`）：一次 `RDDMA` 突发必须由**额外的 `INT0` 事务**收尾、`WRDMA` 突发由 `WR_END` 收尾，否则从机永不释放缓冲（22 号文档 E12；`spi_types.h` 里的 `BIT(n)` 是内部枚举，照抄到线上必错）。
 - **谁发起**：TC275 主机是唯一发起方。C6 有帧待出 → 更新寄存器并拉 IRQ → TC275 泵**每圈采样 P23.0 电平**，线为高即开读事务；线为低时 2 ms 保活轮询。注：**P23.0 做不出边沿中断**（TC275 无 ERU，P23.x 不在 IOM 监视输入内，见 22 号文档 E11），所以电平轮询是主路径而非兜底。遥测方向由 TC275 按 20 ms 周期主动写。代价：命令下行最坏时延 = 轮询周期 + 事务 ≈ 2.3 ms（50 ms 预算内）。
 - **帧**：LINK 段用新定 **SF 帧**（`0x5A | VER | TYPE | SEQ | FLAGS | LEN(u16LE) | CID | 载荷 | CRC16`，段末补 0 到 4 倍数）；`FLAGS` 只有 `bit0=FRAG / bit1=FRAG_END`，**bit2..7 保留必须发 0**，且 **ACK 不是 flag**（它是 `TYPE=0x03`）。V1.0 因 `LEN≤248` → 整帧 padded **≤260 B = 单段上限刚好**（8 头 + 248 载荷 + 2 CRC = 258 → 补齐 260），一帧必然落在一个段内，**一定不分片**，两个位恒为 0；代价是最长帧独占一段（段内多帧只在短帧时才凑得下）。手机 WS 段仍是 v2 帧，C6 bridge 做字段级映射；OTA CHUNK 上限 62 B → 240 B。遥测方向 `TYPE=0x02/CID=0x10` 是**固定 38 B**、与 v2 `0x41` 逐字节相同（从机复用 v2 解码器）——**短一个字节就从机整帧丢弃，手机页面全无数据**。
 - **TC275 代码（V1.5 已落地，2026-09-26 第二轮按已烧录 C6 固件契约完善；现位于 SDD §3.4 目标态目录）**：`com/spi_hal_pins.c`（QSPI3 主机 + P23.0 电平采样 + 定长事务）、`com/link.c`（握手寄存器 + 事务泵 + **按 TYPE/CID 白名单的命令下行** + 38 B 遥测上行 + `LINK_gen/LINK_setClock` 控制面；**2026-09-27 泵简化**：单读快照 + 消费端钳位、失联只由 `SF_ALIVE` 500 ms 判定、READY 沿仅重锁 RX）、`mw/sf/sf_frame.c`（SF 编解码，含 SEQ 越窗 8 帧重锁）、`mw/sf/sf_telemetry.c`（38 B 遥测 codec）；主机单测两份都在 `test/host/`（帧层 2948 断言、遥测层 154 断言且编译从机解码器交叉验证）。挂载在 `Cpu2_Main.c` 的 `#ifdef USE_SPI_LINK` 分支。**QSPI3 的 TX/RX/ER 三个 ISR 声明在 0 号向量表、优先级 6/9/10**（SDD §18 C1/C2）。**构建默认口径（2026-09-26 起）**：`USE_SPI_LINK` 已定义进 `TriCore Debug (TASKING)` 与 `TriCore Release (TASKING)` 两个配置，日常构建产出的就是上面这条 SPI 路径；`com/wifi_at.c` 的 AT/UART 分支只在手动删掉该符号时才参与编译，定位是 G1 失败的应急返修 + C6 调试控制台（SDD §5.6 末条、§18 C15、本文 §2）。开关极性翻正（默认 SPI、UART 需显式 `-D USE_WIFI_AT`）排在 G1 之后。**G1 未过不因弃用 UART 而消失**：SPI 波形兼容性仍未台架证明。
-- **C6 代码（已完成，`c6_car` `22e15f2`）**：`components/c6_link/link.c` 传输层 UART → `spi_slave_hd`，`components/c6_sf/` 承担 SF 编解码（v2↔SF 映射落在 c6_link 内部而非 bridge，差异记录见 `c6_car/doc/14-sf-link.md` D1）；0x44 波特率协商状态机与 `C6_LINK_TX/RX_GPIO` 已删除，`link.h` 对外 API 签名不变。**两侧常量核对结论（重要）**：偏移/magic/上限/段长一致，但主机侧初版有三处同名不同义（`FLAGS bit1`、OTA CID 缺 `0x35`、`ERRSTAT` 整张位表）+ 两处行为级缺陷（分派不看 CID、遥测只发 6 B），**已全部按从机更正**，证据与教训见 22 号文档 §2 E13/E14 与 SDD §18 C11~C13。
+- **C6 代码（已完成，`esp32c6_car` `22e15f2`）**：`components/c6_link/link.c` 传输层 UART → `spi_slave_hd`，`components/c6_sf/` 承担 SF 编解码（v2↔SF 映射落在 c6_link 内部而非 bridge，差异记录见 `esp32c6_car/doc/14-sf-link.md` D1）；0x44 波特率协商状态机与 `C6_LINK_TX/RX_GPIO` 已删除，`link.h` 对外 API 签名不变。**两侧常量核对结论（重要）**：偏移/magic/上限/段长一致，但主机侧初版有三处同名不同义（`FLAGS bit1`、OTA CID 缺 `0x35`、`ERRSTAT` 整张位表）+ 两处行为级缺陷（分派不看 CID、遥测只发 6 B），**已全部按从机更正**，证据与教训见 22 号文档 §2 E13/E14 与 SDD §18 C11~C13。
 - **唯一硬风险（R7）**：AURIX QSPI 没有命令/地址相位概念、iLLD 主驱动亦无封装，前导相位只能用数据字节模拟；Espressif HD 从机是否接受该波形**必须台架先验**（G1：两台 ESP32 跑官方例程抓参考波形逐位比对）。退路：① C6 自写寄存器级从机驱动（纯数据相位 + 固定段长）；② 回退 §2 的 UART 链路——**该链路已于 2026-09-26 弃用**，走这条退路要删 `USE_SPI_LINK` 重编 + 两侧重刷镜像，不再是一行 `#ifdef`（SDD §18 C15）。
 - 若后续要双/四线提速，还需补 WP/HOLD 两脚（C6 GPIO14/15，TC275 需 QSPI3 备用数据线方案），本版不考虑。
 
@@ -403,7 +403,7 @@ D24A 板编码器引出（原理图已核对）：**J4**（电机 1/2）= E1A:J4
 
 | # | 后果 | 代码上的硬性要求 |
 |---|---|---|
-| 1 | **IRQ 的高电平只由 TC275 片内上拉撑起来**：`com/spi_hal_pins.c` 里 `IfxPort_setPinModeInput(SPIHAL_IRQ_PORT, SPIHAL_IRQ_PIN, IfxPort_InputMode_pullUp)`；C6 侧 `c6_car/components/c6_link/link.c` 反而显式写了 `GPIO_PULLUP_DISABLE`（其注释假设"external 10k"，**与实物不符**，属该仓库待更正的注释）。也就是说这根线是"开漏 + 片内弱上拉"，不是被电阻硬拉到 3V3。 | 驱动阻抗高 → 边沿慢、抗扰弱。该脚**只做静态电平判读**（泵每圈 `IfxPort_getPinState`），**不得**在其上加任何时序假设、边沿计数或"跳变即事件"的逻辑（22 号文档 E11/C9 已经说明边沿中断在 P23.x 上做不出来）。 |
+| 1 | **IRQ 的高电平只由 TC275 片内上拉撑起来**：`com/spi_hal_pins.c` 里 `IfxPort_setPinModeInput(SPIHAL_IRQ_PORT, SPIHAL_IRQ_PIN, IfxPort_InputMode_pullUp)`；C6 侧 `esp32c6_car/components/c6_link/link.c` 反而显式写了 `GPIO_PULLUP_DISABLE`（其注释假设"external 10k"，**与实物不符**，属该仓库待更正的注释）。也就是说这根线是"开漏 + 片内弱上拉"，不是被电阻硬拉到 3V3。 | 驱动阻抗高 → 边沿慢、抗扰弱。该脚**只做静态电平判读**（泵每圈 `IfxPort_getPinState`），**不得**在其上加任何时序假设、边沿计数或"跳变即事件"的逻辑（22 号文档 E11/C9 已经说明边沿中断在 P23.x 上做不出来）。 |
 | 2 | 读到毛刺高是**可能的**，代价只是多开一次空读事务 | 这是可接受路径，不要为此加去抖/确认轮次的复杂度；但要接受"IRQ 为高 ≠ 一定有帧"，读事务仍必须由 `SF_TX_PENDING` 决定读多少（22 §4.2 序 2）。 |
 | 3 | C6 复位/未启动期间 GPIO21 的态取决于该脚复位默认值（**未逐项核过**）：线可能被内部下拉拉低，也可能被 TC275 片内上拉保持为高 | 两种情况的后果都是无害的（读高 → 空读事务 + 寄存器读回 0x00/0xFF → 事务超时；读低 → 退化为 2 ms 保活轮询）。因此**判活只看 `SF_ALIVE` 是否推进，绝不能用 IRQ 电平当"从机在不在"的判据**。 |
 | 4 | MISO（P33.13 / `IfxQspi3_MRSTD_P33_13_IN`）同样配成 `IfxPort_InputMode_pullUp`，从机未驱动期间读回的是**片内上拉出来的电平**，不是数据 | 不得把"全 0xFF"解释成从机在位的证据（0xFF 在这里是电气默认态而不是应答）。判定按 22 号文档 V1.6 §4.2/§5.4 的新口径（2026-09-27 起）：快照单读、撕裂值消费端钳位，`READY` 魔数错静默 `LINK_DOWN` 自愈，**判死只由 `SF_ALIVE` 500 ms 判定**，而不是靠单一魔数。 |

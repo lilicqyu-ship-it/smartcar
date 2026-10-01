@@ -1,7 +1,7 @@
 /*
  * tcfw_bundle.c - TCFW streaming verifier (doc 24 §6)
  *
- * Structure follows c6_car components/c6_ota/bundle.c closely (same feed
+ * Structure follows esp32c6_car components/c6_ota/bundle.c closely (same feed
  * loop shape, signature-at-header, digest-at-finish); differences are the
  * TCFW magic, the single-payload layout, an explicit I/O error state for
  * flash write failures, and no heap - the caller owns the context.

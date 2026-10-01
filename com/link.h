@@ -90,7 +90,7 @@ extern "C" {
 #define LINK_CMD_DATA_MAX     PROTO_MAX_PAYLOAD
 
 /* Slave side error bits published in LINK_REG_ERRSTAT. These are the slave's
- * own definitions (c6_car components/c6_sf/sf_frame.h SF_ERR_*), each sticky
+ * own definitions (esp32c6_car components/c6_sf/sf_frame.h SF_ERR_*), each sticky
  * with a saturating counter behind it; 22 SS4.3 keeps the same table. */
 #define LINK_ERRSTAT_SLAVE_CRC       0x00000001u
 #define LINK_ERRSTAT_SLAVE_FMT       0x00000002u
@@ -174,7 +174,7 @@ boolean LINK_send(uint8 type, uint8 cid, const uint8 *payload, uint8 len);
  * The payload is the fixed 38 byte proto v2 0x41 layout from
  * mw/sf/sf_telemetry.h, and the length is not negotiable: the slave
  * drops every TEL frame that is not exactly that CID with at least
- * SF_TELEMETRY_LEN bytes (c6_car components/c6_link/link.c:sf_to_v2), so a short
+ * SF_TELEMETRY_LEN bytes (esp32c6_car components/c6_link/link.c:sf_to_v2), so a short
  * telemetry payload is not "less information", it is no information.
  *
  * This call owns the E2E sequence field, so a producer that hands over a filled

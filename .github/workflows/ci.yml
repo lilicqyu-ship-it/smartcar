@@ -19,7 +19,7 @@ jobs:
     name: Host tests (gcc, ubuntu)
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout myCar
+      - name: Checkout tc275_car
         uses: actions/checkout@v4
 
       # The telemetry test compiles the slave's own proto_frames.c so the
@@ -31,7 +31,7 @@ jobs:
         with:
           repository: lilicqyu-ship-it/esp32c6_car
           ref: main
-          path: c6_car
+          path: esp32c6_car
 
       - name: SF frame codec tests
         run: |
@@ -44,9 +44,9 @@ jobs:
       - name: Telemetry layout tests (C6 decoder cross-check)
         run: |
           gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
-              -I c6_car/components/c6_proto -I c6_car/components/c6_sf \
+              -I esp32c6_car/components/c6_proto -I esp32c6_car/components/c6_sf \
               test/host/test_sf_telemetry.c mw/sf/sf_telemetry.c \
-              mw/sf/sf_frame.c c6_car/components/c6_proto/proto_frames.c \
+              mw/sf/sf_frame.c esp32c6_car/components/c6_proto/proto_frames.c \
               -o test/host/out/test_sf_telemetry
           test/host/out/test_sf_telemetry
 

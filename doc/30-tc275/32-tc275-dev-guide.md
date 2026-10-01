@@ -26,7 +26,7 @@
 
 **切换链路固件（SPI ↔ 已弃用的 UART）**：`Cpu2_Main.c` 用 `USE_SPI_LINK` 分流。**当前状态（2026-09-26 决策：UART 板间链路弃用）**：`TriCore Debug (TASKING)` 与 `TriCore Release (TASKING)` 两个配置的 `-D` 列表里**都已经有** `USE_SPI_LINK`，所以日常构建只会产出 SF-over-SPI 路径（`com/link.c` 泵）；AT/UART 分支**不再是任何配置的默认**，只在手动删掉该符号时才参与编译。删除/恢复入口：`Project > Properties > C/C++ Build > Settings > TASKING C/C++ Compiler > Preprocessor > Defined symbols (-D)`。两个 **GCC 配置没有这个符号**，本工程不以 GCC 构建——若有人用 GCC 出镜像，拿到的是已弃用的 UART 分支，别据此判断链路行为。开关极性翻正（默认 SPI、UART 需显式 `-D USE_WIFI_AT`）仍排在 G1 之后（`22 §7.2`、`21 §5.6`）。**G1 未过这件事不因弃用 UART 而消失**：SPI 波形兼容性还没被台架证明，而回退现在要"删符号重编 + C6 重刷 esp-at"两侧都动（`21 §18 C15`）。
 
-**SF 层的主机单测**（不需要 TriCore 工具链，**改过 `mw/sf/` 或 `c6_car/components/c6_sf|c6_proto` 必须跑**）。本机用 MSYS2/MinGW gcc（若在 Git Bash 里报共享库错误，先 `export PATH="/c/msys64/mingw64/bin:$PATH"`），在**仓库根目录**执行：
+**SF 层的主机单测**（不需要 TriCore 工具链，**改过 `mw/sf/` 或 `esp32c6_car/components/c6_sf|c6_proto` 必须跑**）。本机用 MSYS2/MinGW gcc（若在 Git Bash 里报共享库错误，先 `export PATH="/c/msys64/mingw64/bin:$PATH"`），在**仓库根目录**执行：
 
 ```bash
 # ① 帧编解码（2948 断言，含 400 万随机字节风暴、SEQ 越窗重锁 test_seq_relock，
@@ -38,9 +38,9 @@ gcc -std=c99 -Wall -Wextra -Werror -O2 -I . \
 # ② 38 B 遥测布局（跨侧模式 154 断言；不带交叉为 116 项）—— 加 -DC6_CROSS_CHECK 会把**从机自己的**
 #    proto_frames.c 编进同一个可执行文件做双向交叉，这才是跨侧证据
 gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
-    -I ../c6_car/components/c6_proto -I ../c6_car/components/c6_sf \
+    -I ../esp32c6_car/components/c6_proto -I ../esp32c6_car/components/c6_sf \
     test/host/test_sf_telemetry.c mw/sf/sf_telemetry.c \
-    mw/sf/sf_frame.c ../c6_car/components/c6_proto/proto_frames.c \
+    mw/sf/sf_frame.c ../esp32c6_car/components/c6_proto/proto_frames.c \
     -o test/host/out/test_sf_telemetry.exe && ./test/host/out/test_sf_telemetry.exe
 ```
 
@@ -52,7 +52,7 @@ gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
 
 | 通道 | 位置 | 用途 |
 |---|---|---|
-| 调试 | TC275 kit X4 micro-USB（一根线：供电 + DAS 调试 + 虚拟 COM） | `Debug As > myCar TriCore Debug (TASKING)` |
+| 调试 | TC275 kit X4 micro-USB（一根线：供电 + DAS 调试 + 虚拟 COM） | `Debug As > tc275_car TriCore Debug (TASKING)` |
 | 控制台串口 | kit 板载 FT2232 虚拟 COM，**115200 8N1** | ASCLIN0（P14.0/P14.1 **板内互连，没有引到外接排针**，想外接打印是不可能的） |
 | 存活指示 | LED1 = P00.5（blinky 250 ms 翻转） | 三核调度是否活着 |
 | C6 调试控制台口 | mikroBUS pin13(TX=P15.0)/pin14(RX=P15.1) ↔ DevKitC-1 J1-5/6 | **不是板间链路**（UART 已于 2026-09-26 弃用，`21 §18 C15`）；只出 C6 控制台日志，也是"删 `USE_SPI_LINK` 重编"时的应急返修口 |
@@ -145,7 +145,7 @@ CPU1/CPU2 打印 = 整行拷进日志环（1 KB，满则整行丢弃），由 CP
 ## 9. 提交前自检（文档同步义务）
 
 - [ ] 改了引脚 → `23` 的表与接线状态一览同步；确认没和 `21 §18 C7` 的固定片选冲突
-- [ ] 改了帧/命令/超时数值 → `21 §6` 与（涉及链路时）`22 §5` 同步；**涉及 `mw/sf/` 或 `c6_car/components/c6_sf|c6_proto` 常量/布局的，必须重跑 §1 两份主机单测并贴出断言数**（`21 §18 C11`：文档写"两侧一致"不算验证）
+- [ ] 改了帧/命令/超时数值 → `21 §6` 与（涉及链路时）`22 §5` 同步；**涉及 `mw/sf/` 或 `esp32c6_car/components/c6_sf|c6_proto` 常量/布局的，必须重跑 §1 两份主机单测并贴出断言数**（`21 §18 C11`：文档写"两侧一致"不算验证）
 - [ ] 加了 ISR → `21 §18 C2` 优先级表登记
 - [ ] 加了**常驻循环 / 长期占核的任务** → 该核看门狗已开（CPU0、CPU1），必须带上 `WDG_serviceCpu()` 喂狗点，且只能用 `bsp/wdg.h` 的那对 clear+set（`21 §18 C8`）
 - [ ] 加了跨核通道 → `31 §4` + `21 §5.5`

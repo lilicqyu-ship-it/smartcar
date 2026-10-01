@@ -5,7 +5,7 @@
  * into SDD SS6.1a. The ESP32-C6 side implements the same layout (c6_sf); any
  * change here must be written back to both documents and to that component.
  *
- * Hard rules (same contract as c6_car components/c6_proto/proto_frames.h):
+ * Hard rules (same contract as esp32c6_car components/c6_proto/proto_frames.h):
  *   - Pure C99: stdint/stddef/string only, no OS/iLLD/IDF headers, no dynamic
  *     memory. Compiles verbatim for TriCore, RISC-V and the host unit tests.
  *   - All multi-byte wire fields are EXPLICIT LITTLE-ENDIAN (TriCore is big
@@ -68,7 +68,7 @@ extern "C" {
 #define SF_TYPE_VND           0x0Fu
 
 /* CID values inside a TYPE (doc 22 SS5.2). The payload shapes below are what the
- * C6 side actually puts on the wire (c6_car components/c6_link/link.c:v2_to_sf),
+ * C6 side actually puts on the wire (esp32c6_car components/c6_link/link.c:v2_to_sf),
  * and they are NOT uniform: only the three "op prefixed" channels carry a
  * command byte, the other two are the v2 payload verbatim. A receiver that
  * assumes payload[0] is always a command executes a configuration key as one.

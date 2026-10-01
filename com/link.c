@@ -101,7 +101,7 @@ static boolean link_snapshot(void)
  *
  * c6_link puts the v2 command byte in payload[0] for the DRV/DIAG/DPT families,
  * but for CFG and PAIR it copies the v2 payload verbatim and lets the CID carry
- * the identity of the message (c6_car components/c6_link/link.c:v2_to_sf). A
+ * the identity of the message (esp32c6_car components/c6_link/link.c:v2_to_sf). A
  * dispatch that assumed "payload[0] is always a command" would therefore execute
  * a configuration key or the first byte of a pairing token as if it were a drive
  * command - the one mistake on this link that can move the car.
@@ -123,7 +123,7 @@ static boolean link_snapshot(void)
  *                                            an arbitrary differential. The mix
  *                                            normalises at 600 mm/s / 300 deg/s
  *                                            (the joystick's full deflection,
- *                                            c6_car assets_src/app.js) instead of
+ *                                            esp32c6_car assets_src/app.js) instead of
  *                                            waiting for the SS11 kinematics in
  *                                            physical units; the closed loop
  *                                            still lives on CPU1 (motor targets
@@ -145,7 +145,7 @@ static boolean link_snapshot(void)
 #define LINK_OP_DRIVE           0x50u
 
 /* Full-deflection anchors of the joystick mix: 600 mm/s and 300 deg/s both
- * normalise to 100 % (c6_car assets_src/app.js joyMove). Sign convention:
+ * normalise to 100 % (esp32c6_car assets_src/app.js joyMove). Sign convention:
  * w > 0 is CCW (left turn), so the right wheel gets the +w share. */
 #define LINK_DRIVE_V_FULL       600
 #define LINK_DRIVE_W_FULL       300

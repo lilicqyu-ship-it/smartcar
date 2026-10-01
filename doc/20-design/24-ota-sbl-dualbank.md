@@ -2,25 +2,25 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | **已实现（软件层，App 侧已接线）** — SBL/双 bank linker/OTA 协议栈已落地，myCar 工程已切换槽 A 构建（冒烟链接 .start@0x80008020）并接入 OTA 接收/自检确认：host 单测 G-OTA-1/2 全绿，SBL 经 TASKING（v6.3r1 命令行）编译链接验证 ≤32 KB；**尚未上板**（G-OTA-3/4/5/6 的硬件半边仍待 ADS 工程构建 + 板上验证） |
+| 状态 | **已实现（软件层，App 侧已接线）** — SBL/双 bank linker/OTA 协议栈已落地，tc275_car 工程已切换槽 A 构建（冒烟链接 .start@0x80008020）并接入 OTA 接收/自检确认：host 单测 G-OTA-1/2 全绿，SBL 经 TASKING（v6.3r1 命令行）编译链接验证 ≤32 KB；**尚未上板**（G-OTA-3/4/5/6 的硬件半边仍待 ADS 工程构建 + 板上验证） |
 | 需求追溯 | 需求 F05（双板 OTA：TC275 双 bank 切换 + 失败自动回滚，签名验签） |
 | 依赖契约 | SF 帧 `mw/sf/sf_frame.h`（OTA_DATA/OTA_CTRL）、C6 `components/c6_ota/bundle.h`（包格式基线） |
 | 硬件 | TC275 AURIX 三核 200 MHz，**2×2 MB PFlash（PF0/PF1 双 bank）**，128 KB DFlash0 + 64 KB DFlash1 |
 | 作者/日期 | 设计评审草案，2026-09-30 |
 
-> 实现索引（myCarSbl 仓库，2026-09-30 落地）：
+> 实现索引（tc275_sbl 仓库，2026-09-30 落地）：
 >
 > | 文档章节 | 实现位置 |
 > |---|---|
 > | §3.1 双 bank linker | `Lcf_SBL.lsl`（本工程构建用）、`Lcf_AppA.lsl` / `Lcf_AppB.lsl`（App 工程切换用，冒烟链接已验证 `.start` 分别落在 0x80008020 / 0x80208020） |
 > | §4 OtaMeta 双页 | `mw/ota/ota_meta.[ch]`（纯 C99，LE 线格式）+ `bsp/flash_ota.c`（DFlash 后端，DF0 扇区 13/14） |
 > | §5.1 SBL 决策 | `mw/ota/ota_boot.[ch]`（纯逻辑，host 测）+ `sbl/sbl_boot.c`（跳转/安全态）+ `Cpu0_Main.c`（SBL 入口） |
-> | §5.2 App 自检确认 | `OTABOOT_confirmSelftest()`（App 侧接入点，待 myCar 工程调用） |
+> | §5.2 App 自检确认 | `OTABOOT_confirmSelftest()`（App 侧接入点，待 tc275_car 工程调用） |
 > | §5.3 OTA 接收 | `mw/ota/ota_rx.[ch]`（状态机 + ACK/STATUS，host 测） |
 > | §6 TCFW 包 | `mw/ota/tcfw_bundle.[ch]`（84B 验签 + SHA-512[:32]，与 C6 sign_bundle.py 逐字节一致，host 测） |
 > | §7 PFlash 擦写 | `bsp/flash_ota.[ch]`（IfxFlash 封装：扇区表遍历擦除、32B 页 staging、读回校验） |
-> | 加解密 | `mw/crypto/`（ed25519v/sha512/c6_consts 自 c6_car 逐字拷贝）+ `mw/sf/sf_frame.[ch]`（自 myCar 拷贝） |
-> | App 侧接入（myCar 工程） | `Lcf_Tasking_Tricore_Tc.lsl` 换为槽 A 布局（入口 0x80008020）+ `Lcf_AppB.lsl`；`com/ota_app.[ch]`（OtaRxOps 装配 + 槽位自识别 + §5.2 自检确认）；`com/link.c` OTA 帧分发到 `OTARX_frame`；`Cpu2_Main.c` init/tick；`mw/proto/protocol.h` 补 PROTO_CMD_OTA_*（0x60..0x65）；mw/ota、mw/crypto、bsp/flash_ota 与 SBL 工程同源拷贝 |
+> | 加解密 | `mw/crypto/`（ed25519v/sha512/c6_consts 自 esp32c6_car 逐字拷贝）+ `mw/sf/sf_frame.[ch]`（自 tc275_car 拷贝） |
+> | App 侧接入（tc275_car 工程） | `Lcf_Tasking_Tricore_Tc.lsl` 换为槽 A 布局（入口 0x80008020）+ `Lcf_AppB.lsl`；`com/ota_app.[ch]`（OtaRxOps 装配 + 槽位自识别 + §5.2 自检确认）；`com/link.c` OTA 帧分发到 `OTARX_frame`；`Cpu2_Main.c` init/tick；`mw/proto/protocol.h` 补 PROTO_CMD_OTA_*（0x60..0x65）；mw/ota、mw/crypto、bsp/flash_ota 与 SBL 工程同源拷贝 |
 | host 测试 | `test/host/`（282 断言全绿：`make check`）+ `tools/gen_test_vectors.py` |
 > | 构建脚本 | `tools/build_sbl.sh`（本机完整版 TASKING v6.3r1 命令行验证；正式产物仍应从 ADS 出） |
 >
@@ -71,7 +71,7 @@ TC275 PFlash：PF0 = 2 MB @ `0xA000_0000`(non-cached) / `0x8000_0000`(cached)，
 两槽镜像对称（bank 内同偏移、同大小），槽入口 = 槽基址 + 0x20（`.start` 段，镜像 BMHD 复位约定；SBL 读此地址跳入）。注意 PF0 的 BMHD1 物理地址 0x8002_0000 落在 Slot A 内——SBL 构建已用 `IFX_CFG_CPUCSTART_BMI01_NOT_NEEDED` 去掉 bmhd_1 段，AppA 的 lsl 不在那附近安排可加载段。
 
 **整包烧录**：SBL 与 App 各自独立链接，出厂/调试器一次烧录用
-`myCarSbl/tools/merge_hex.py` 在 Intel-HEX 层合成（地址互不重叠，重叠即
+`tc275_sbl/tools/merge_hex.py` 在 Intel-HEX 层合成（地址互不重叠，重叠即
 拒绝；合并入口 = SBL 0x80000020；可选 `--bin` 出整片二进制，空隙 0xFF）。
 
 推荐分区（每 bank 内自洽，两 bank 镜像对称）：
@@ -101,7 +101,7 @@ TC275 PFlash：PF0 = 2 MB @ `0xA000_0000`(non-cached) / `0x8000_0000`(cached)，
 
 放 DFlash0（有独立擦写、掉电安全），A/B 双页轮换写，防写入中途掉电损坏。
 
-落地地址：**DF0 逻辑扇区 13（0xAF01_A000）= 页 0，扇区 14（0xAF01_C000）= 页 1**（TC275 实配 128 KB/16 扇区；扇区 15 已被 myCar 的 calib 记录占用，0..12 预留）。线格式为 24 字节**显式小端**（TriCore 大端，不得结构体直拷），magic 字节序 'T','C','O','M'；CRC-32 覆盖前 20 字节。提交语义：写**非当前页**（seq+1）→ 读回校验 → 生效；旧页不失效（低 seq 影子，天然双副本）。
+落地地址：**DF0 逻辑扇区 13（0xAF01_A000）= 页 0，扇区 14（0xAF01_C000）= 页 1**（TC275 实配 128 KB/16 扇区；扇区 15 已被 tc275_car 的 calib 记录占用，0..12 预留）。线格式为 24 字节**显式小端**（TriCore 大端，不得结构体直拷），magic 字节序 'T','C','O','M'；CRC-32 覆盖前 20 字节。提交语义：写**非当前页**（seq+1）→ 读回校验 → 生效；旧页不失效（低 seq 影子，天然双副本）。
 
 ```c
 typedef struct {
@@ -183,7 +183,7 @@ DONE
  148 app.bin ...
 ```
 
-- **R2 已定论（读 c6_car 代码而非注释）**：签名覆盖**前 84 字节**——`tools/sign_bundle.py` 的 `SIGNED_LEN = 84` 与 `bundle.c` 的 `c6_ed25519_verify(pub, &h[84], h, 84)` 一致；c6 `bundle.h` 头注释里的 "[0, 84+32) 即前 116 字节"是**过时注释**，勿信。载荷摘要是 **SHA-512 截断前 32 字节**（`hashlib.sha512(...).digest()[:32]`），字段名 sha256 是历史命名。TCFW 验签器（`mw/ota/tcfw_bundle.c`）与上述逐字节一致，host 测试用同一 seed 生成的向量对拍通过（G-OTA-1）。
+- **R2 已定论（读 esp32c6_car 代码而非注释）**：签名覆盖**前 84 字节**——`tools/sign_bundle.py` 的 `SIGNED_LEN = 84` 与 `bundle.c` 的 `c6_ed25519_verify(pub, &h[84], h, 84)` 一致；c6 `bundle.h` 头注释里的 "[0, 84+32) 即前 116 字节"是**过时注释**，勿信。载荷摘要是 **SHA-512 截断前 32 字节**（`hashlib.sha512(...).digest()[:32]`），字段名 sha256 是历史命名。TCFW 验签器（`mw/ota/tcfw_bundle.c`）与上述逐字节一致，host 测试用同一 seed 生成的向量对拍通过（G-OTA-1）。
 - C6 的 `ed25519v` + `sha512` + `c6_consts` 已逐字拷贝至 `mw/crypto/`（无堆、纯 C99），TC275 与 C6 两侧共用同一套真源，避免漂移。
 
 ---
@@ -208,9 +208,9 @@ TriCore PFlash 写入硬约束（实现时严格遵守，否则 ECC/时序错）
 
 ---
 
-## 8. link.c / protocol.c 改动点（协议接收层，host 测 + myCar 已接入）
+## 8. link.c / protocol.c 改动点（协议接收层，host 测 + tc275_car 已接入）
 
-1. ✅ `link.c:link_dispatch`：新增 `SF_TYPE_OTA_DATA/OTA_CTRL` 分支（不再 `unhandledType++`），转入 `OTARX_frame()`；myCar 的 `com/ota_app.c` 注入全部回调（槽位自识别、flash_ota、元数据、`IfxCpu_triggerSwReset`、`LINK_send`）。全部 OTA 状态驻留 CPU2（链路核），无需跨核加锁；CPU2 看门狗按设计禁用，扇区擦除的长等待不会触发复位。
+1. ✅ `link.c:link_dispatch`：新增 `SF_TYPE_OTA_DATA/OTA_CTRL` 分支（不再 `unhandledType++`），转入 `OTARX_frame()`；tc275_car 的 `com/ota_app.c` 注入全部回调（槽位自识别、flash_ota、元数据、`IfxCpu_triggerSwReset`、`LINK_send`）。全部 OTA 状态驻留 CPU2（链路核），无需跨核加锁；CPU2 看门狗按设计禁用，扇区擦除的长等待不会触发复位。
 2. 新增 `mw/ota/ota_rx.[ch]`：§5.3 状态机 + bundle 验签 + 调 `flash_ota` + 组 `OTA_ACK/OTA_STATUS` 回帧。
 3. `protocol.h`：补齐 `PROTO_CMD_OTA_*`(0x60–0x65) 常量（对齐 C6，见 F7 命令表统一）。
 4. TX 路径：`OTA_ACK`(TYPE_OTA_CTRL,CID 0x32)、`OTA_STATUS`(0x33) 经 link TX 队列回发。

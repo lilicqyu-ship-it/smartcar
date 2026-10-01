@@ -6,8 +6,8 @@
 | 域 | TC275 侧（3x） |
 | 状态 | **V1.4（已落地）**（2026-09-30：**编码器硬件刻度修正**——实物 MG310 编码器为 13 PPR 霍尔 AB（×4 = 52 计数/电机转，×20.409 减速 = 1061.27 计数/轮转，48 mm 胎 = 0.1421 mm/计数），§8.1 默认 `wheelDiaMm` 65→**48**（`CALIB_WHEELDIA_DEF`/`ENCODER_WHEEL_DIA_MM` 同批，范围 [30,200] 不变）；换算公式一字未动。V1.3（已落地）（2026-09-27：**§13 新增闭环使能门**——`rt/motor_algo.c` 新增 `g_closedLoopOk`：方向记录 `src=0`（首次烧录 / 校验失败回落 / 0x74 REC_CLEAR）时**强制开环等价**（SERVO `measValid=FALSE` 复用：duty=目标、清积分），把 23 §8.4 一直写着的"校验失败按开环等价行为运行"从口头规定变成固件强制执行，消除"编码器已接线但方向未标定 → 闭环正反馈跑飞"（原点回中电机仍转动的台架现象，§1 证据的延伸）；0x70 DONE / 0x73 REC_SET 自动开门、0x74 关门，门随 RecordLive version 边沿翻转并各打一行日志；§5.3 重写（按 src 分上电行为，删除 M3 完成前"每次上电重跑 0x70"旧口径）、§5.2/§7.2/§10/§12 同步。V1.2 = **§3 M2a + §8 M3' + §9 DPT 命令族全部编码完成**——新增 `mw/calib/`（记录编解码 + CPU0 DFlash 持久化）、xcore 四个新块、`rt/encoder` 参数运行时化、`rt/motor_algo` 结果发布/BUSY 拒绝/jog、0x71~0x74 入口、CPU2 EVT 出站队列；§11 = 实现清单与 5 条偏差（D1 0x22 由 CPU0 组帧、D5 长度 23 B），§12 = 三条待裁决（DF0 真实扇区数、`.cproject` 的 Flash 排除、台架验收）。V1.1 = 追加 §8 DFlash 持久化（取代 §4 bake-in 为正式方案）、§9 DPT 命令族 0x71~0x74 与逐电机 jog、§10 验收追加；V1.0 = 首版） |
 | 代码基线 | `main`（含 F02 `73058cd` servo/判向 + F04 `658209b` 电池遥测）之上的本轮工作树 |
-| 读者 | 在 myCar 作业的 AI / 开发者（实施 M2a/M3 前**必读**，按 [33-ai-codebase-guide.md](33-ai-codebase-guide.md) 进入） |
-| 跨库配套 | [c6_car/doc/17-calib-ui.md](../../../../c6_car/doc/17-calib-ui.md)（标定 Web UI 需求；本文 §3 的帧契约与该文档 §4 是同一份协议的两端） |
+| 读者 | 在 tc275_car 作业的 AI / 开发者（实施 M2a/M3 前**必读**，按 [33-ai-codebase-guide.md](33-ai-codebase-guide.md) 进入） |
+| 跨库配套 | [esp32c6_car/doc/17-calib-ui.md](../../../../esp32c6_car/doc/17-calib-ui.md)（标定 Web UI 需求；本文 §3 的帧契约与该文档 §4 是同一份协议的两端） |
 | 上位文档 | [21 §5.2/§15.3](../20-design/21-software-design.md)（伺服与速度标定）、[22 §5.1/§5.4](../20-design/22-link-spi-design.md)（SF 帧）、[23 §8.4](../20-design/23-wiring.md)（判向规程真源）、[31](31-firmware-architecture.md)（现状架构） |
 
 > **定位**：判向标定功能在 TC275 侧的**单一真源入口**——§2 说清"现在有什么"（F02 已落地，勿重复造轮子），§3/§4 说清"还缺什么、怎么补"（M2a 结果回传帧 / M3 符号固化），§5 沉淀台架硬知识。与 21/22/23 冲突时按 [00-index §3](../../00-index.md) 裁决顺序取权威。
@@ -43,7 +43,7 @@ SPD= 0 43 29926 1              ← "空闲"状态右轮累计转出 29.9 m（odo
 
 | 跳 | 位置 | 行为 |
 |---|---|---|
-| 1 | 上游（c6_car） | v2 命令 0x70 经 `c6_link` 映射为 SF `TYPE_CMD(0x01)` + `CID_DPT(0x04)`，`payload[0]=op=0x70` |
+| 1 | 上游（esp32c6_car） | v2 命令 0x70 经 `c6_link` 映射为 SF `TYPE_CMD(0x01)` + `CID_DPT(0x04)`，`payload[0]=op=0x70` |
 | 2 | [com/link.c:243](../../../com/link.c) | CPU2 `link_dispatch`：CID 白名单 `DRIVE/DIAG/DPT` 放行 → `link_forward(0x70,…)` 入 xcore 命令队列（8 深） |
 | 3 | [mw/proto/protocol.c:110](../../../mw/proto/protocol.c) | CPU0 `PROTO_handleCommand` case `PROTO_CMD_DPT_CAL_DIR`(0x70) → `XCORE_dirCalibRequest()`。**设计如此：不发心跳、不受故障锁存门禁**（台架工具，急停由 CPU1 标定分支自行中止） |
 | 4 | [rt/motor_algo.c:343](../../../rt/motor_algo.c) | CPU1 1kHz 环 `XCORE_dirCalibConsume()` 消费请求 → `MOTOR_ALGO_calibStart()` |
@@ -69,7 +69,7 @@ SPD= 0 43 29926 1              ← "空闲"状态右轮累计转出 29.9 m（odo
 
 ## 3. 需求 M2a：标定结果回传帧（本仓库实施部分）
 
-### 3.1 SF 帧契约（与 c6_car 17 号 §4.1 同一份协议）
+### 3.1 SF 帧契约（与 esp32c6_car 17 号 §4.1 同一份协议）
 
 | 字段 | 值 |
 |---|---|
@@ -114,7 +114,7 @@ boolean XCORE_calibResultTake(XcoreCalibResult *res);       /* CPU0：锁内读+
 - 发送失败（TX 队列满）→ 帧**留在队头**，下个 20 ms 节拍重试到发出为止；一次标定恰好一帧（CPU0 侧有 hold 机制保证写 flash 完成前不发 0x22）。
 - 无标定发生时零流量。
 
-### 3.5 验证与文档同步（myCar 红线：改行为同批改文档）
+### 3.5 验证与文档同步（tc275_car 红线：改行为同批改文档）
 
 - **主机单测**：SF 层动了 `sf_frame.h`（新增 CID 常量）+ payload 编解码 → [test/host/test_sf.c](../../../test/host/test_sf.c) 补 EVT 0x22 往返用例，按 [33 §7](33-ai-codebase-guide.md) 命令跑绿。xcore 块与 CPU1/CPU2 钩子无主机单测（依赖 iLLD/FreeRTOS 桩之外的真实核间行为）——**声明：此改动未被单测覆盖，需台架验证**。
 - 同批更新：`22 §5.1/§5.4`（CID 载荷契约表登记 0x22）、`21 §5.2`（判向功能补结果回传）、`31`（xcore 通道表加 CalibResult、DPT 段补回传）、`23 §8.4`（规程补"结果经 UI 显示"）、本文件状态。
@@ -237,7 +237,7 @@ LINKERR=/LINKDBG= 18 值             变化或异常时（state/irq/clk/ready/�
 
 ## 8 · V1.1 追加：DFlash 持久化（M3'，正式方案）
 
-> **变更说明**：V1.0 §4 曾以 ENDINIT/OTA 风险为由排除 NVM 持久化；V1.1 按用户需求改为**必须持久化**（标定数据 = 电机位置、运动方向、算法参数）。风险用 §8.3 的写时机与停顿预算控制，§4 bake-in 降级为应急路径。跨库协议见 §9 与 c6_car 17 号 §8.4。
+> **变更说明**：V1.0 §4 曾以 ENDINIT/OTA 风险为由排除 NVM 持久化；V1.1 按用户需求改为**必须持久化**（标定数据 = 电机位置、运动方向、算法参数）。风险用 §8.3 的写时机与停顿预算控制，§4 bake-in 降级为应急路径。跨库协议见 §9 与 esp32c6_car 17 号 §8.4。
 
 ### 8.1 存储介质与记录布局
 
@@ -294,7 +294,7 @@ LINKERR=/LINKDBG= 18 值             变化或异常时（state/irq/clk/ready/�
 
 ## 9 · V1.1 追加：DPT 命令族扩展（0x71~0x74）与逐电机 jog
 
-### 9.1 命令表（与 c6_car 17 号 §8.4 同源；v2→SF 映射零改动，入口全在 `PROTO_handleCommand` 新 case）
+### 9.1 命令表（与 esp32c6_car 17 号 §8.4 同源；v2→SF 映射零改动，入口全在 `PROTO_handleCommand` 新 case）
 
 | op | 名称 | payload（LE） | TC275 行为 | 应答 |
 |---|---|---|---|---|
@@ -307,7 +307,7 @@ LINKERR=/LINKDBG= 18 值             变化或异常时（state/irq/clk/ready/�
 - 0x71~0x74 与 0x70 一样走 DPT CID 白名单（link.c 无需改），但**语义分层**：0x71 属驱动类（故障门禁），0x70/0x72/0x73/0x74 属台架工具类（无门禁，同 §2.1 口径）；
 - 0x70~0x79 之外的 op 仍落 `default` 忽略。
 
-#### 9.1.1 事件载荷逐字节表（TC275 → C6；与 c6_car 17 号 §4.1/§8.4 同一份契约）
+#### 9.1.1 事件载荷逐字节表（TC275 → C6；与 esp32c6_car 17 号 §4.1/§8.4 同一份契约）
 
 **EVT `0x22` 标定结果（23 B，`SF_TYPE_EVT` / `SF_CID_DPT_RESULT`）**
 
@@ -415,8 +415,8 @@ typedef struct { boolean valid; XcoreCalibRecord rec; } XcoreRecordLive; /* CPU0
 
 - **C1 · DF0 大小两说**：iLLD 逻辑扇区表 48 个（至 `0xAF05FFFF`）vs 21 §4.1 "DFlash0 128 KB"。**未裁决**——落点选在扇区 15 使两种读法都成立。裁决前 21 §4.3 的配置页不得进入扇区 15，OTA（§9）不得使用 DF0 高位扇区。→ §12 Q1
 - **C2 · `IfxFlash` 模块此前在 `.cproject` 的 excluding 名单里**（`Libraries/iLLD/TC27D/Tricore/Flash` 与 `Flash/Std`，`IfxFlash.c` 不参与编译）。本实现只用 `IFX_INLINE` 原语（`clearStatus/enterPageMode/loadPage/writePage/eraseSector`），不需要该 `.c` 里的符号；**但已顺手把 Debug 配置的这两项 excluding 解除并补上 include 路径**（更稳，且与 IDE 的"include 路径须存在"检查一致），**IDE 构建仍须实证一次**。→ §12 Q2
-- **C3 · 0x22 长度算错**：见 D5。对端 `c6_car` 已在 `doc/17-calib-ui.md` §4.1 与 `bridge.c:bridge_emit_cal` 用 23 B（`saved` 在 `[22]`，`n>=23` 才读），主机单测现按"字段偏移 + 长度下限"两侧对齐。
-- **C4 · `0x71~0x74` 在 c6_car 的常量表里另有名字**（`proto_frames.h`：0x71 `DPT_LED` / 0x72 `DPT_MOTOR_RUN` / 0x73 `DPT_ENC_READ` / 0x74 `DPT_CAL`）。同一个字节两仓库两名，与 §3 记录的 0x70 双语义同源；c6 侧 `c6_link/link.c:285` 按 `0x70..0x79` **整段**路由到 `CID_DPT`，故通道无冲突，但**页面与 C6 代码不得真的发送 LED/MOTOR_RUN 语义**——只能按本文 §9.1 的四个新语义发。
+- **C3 · 0x22 长度算错**：见 D5。对端 `esp32c6_car` 已在 `doc/17-calib-ui.md` §4.1 与 `bridge.c:bridge_emit_cal` 用 23 B（`saved` 在 `[22]`，`n>=23` 才读），主机单测现按"字段偏移 + 长度下限"两侧对齐。
+- **C4 · `0x71~0x74` 在 esp32c6_car 的常量表里另有名字**（`proto_frames.h`：0x71 `DPT_LED` / 0x72 `DPT_MOTOR_RUN` / 0x73 `DPT_ENC_READ` / 0x74 `DPT_CAL`）。同一个字节两仓库两名，与 §3 记录的 0x70 双语义同源；c6 侧 `c6_link/link.c:285` 按 `0x70..0x79` **整段**路由到 `CID_DPT`，故通道无冲突，但**页面与 C6 代码不得真的发送 LED/MOTOR_RUN 语义**——只能按本文 §9.1 的四个新语义发。
 - **C5 · 写入期间的中断掩蔽**：`CALIB_tick` 的保存序列整段 `__disable()`（最长 ≈ 擦除 + 3 页编程 + 回读，预算内几十 ms）。CPU0 的 FreeRTOS tick 与 UART RX 在此期间挂起；三核取指都在 PFlash0（`Lcf_*.lsl` 未把任何段放进 DF0），故 CPU1/CPU2 不停顿。喂狗在轮询循环内持续服务，超时上限仍按失败处理。
 - **C6 · 保存失败无重试上限**（实现取舍，原稿未规定）：`g_pending` 只在**写成功**后清零，擦除或编程失败则每 `CALIB_WRITE_IDLE_MS`(500 ms) 再试一次，**不设次数上限**。意图是"标定结果不能悄悄丢"；代价是 FMU 永久故障时 CPU0 会周期性关中断几十 ms（表现为链路 20 ms 遥测偶发抖动）。台架若见到规律性停顿而 `saved` 始终 =2，即命中此路径，应先修 flash 而不是加计数器。
 - **C7 · 只有 `TriCore Debug (TASKING)` 一个配置能编这批代码**：读 `.cproject` 得到 —— Release (TASKING) 的 include 路径列表里**没有** `com`、`rt`、`mw/sf`、`mw/calib`（只有 `app/bsp/mw/mw/xcore/mw/proto`），并且**仍排除** `Flash`/`Flash/Std`；两个 GCC 配置同样没有这批路径。也就是说 Release 从 SF 链路落地那次起就与源码脱节（它定义了 `USE_SPI_LINK` 却找不到 `com/link.h`），本轮只是又多欠一项。**本轮不动 Release/GCC 配置**（构建配置改动风险大、且无人验证过 Release 产物）；要用 Release 出镜像前先补 include 路径 + 解除 Flash 排除。→ §12 Q4

@@ -2,7 +2,7 @@
  * test_sf_telemetry.c - host tests for the 38 byte SF telemetry payload
  *
  * Why this file exists: the slave drops every TEL frame that is not exactly
- * CID_TELEMETRY with at least 38 bytes (c6_car components/c6_link/link.c:
+ * CID_TELEMETRY with at least 38 bytes (esp32c6_car components/c6_link/link.c:
  * sf_to_v2), and the TC275 side used to send six. A six byte payload was not
  * "less telemetry", it was no telemetry at all - so the layout here is tested
  * against the C6's own decoder rather than against a copy of my expectations.
@@ -13,13 +13,13 @@
  *       mw/sf/sf_frame.c -o test/host/out/test_sf_telemetry.exe \
  *       && test/host/out/test_sf_telemetry.exe
  *
- * With the cross-check against the sibling c6_car checkout (recommended, it is
+ * With the cross-check against the sibling esp32c6_car checkout (recommended, it is
  * the part that tests the contract and not just the encoder). proto_frames.c
  * compiles warning free but is third party here, hence -Werror is dropped:
  *   gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
- *       -I ../c6_car/components/c6_proto -I ../c6_car/components/c6_sf \
+ *       -I ../esp32c6_car/components/c6_proto -I ../esp32c6_car/components/c6_sf \
  *       test/host/test_sf_telemetry.c mw/sf/sf_telemetry.c \
- *       mw/sf/sf_frame.c ../c6_car/components/c6_proto/proto_frames.c \
+ *       mw/sf/sf_frame.c ../esp32c6_car/components/c6_proto/proto_frames.c \
  *       -o test/host/out/test_sf_telemetry.exe
  */
 #include <stdio.h>

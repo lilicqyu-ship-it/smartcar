@@ -17,7 +17,7 @@
 
 ## 1. 30 秒全局：这是什么
 
-双固件产品的 TC275 侧。**Infineon TC275 三核**做实时运动控制，**ESP32-C6** 做 Wi-Fi 通信（独立仓库 `c6_car`）。手机 → Wi-Fi → C6 → **板间 SPI（SF 帧）** → TC275 → 驱动 4 个 MG310 有刷直流电机（差速双轮，每侧 2 电机并联）。
+双固件产品的 TC275 侧。**Infineon TC275 三核**做实时运动控制，**ESP32-C6** 做 Wi-Fi 通信（独立仓库 `esp32c6_car`）。手机 → Wi-Fi → C6 → **板间 SPI（SF 帧）** → TC275 → 驱动 4 个 MG310 有刷直流电机（差速双轮，每侧 2 电机并联）。
 
 **三核职责（铁律，不要跨核乱放代码）：**
 
@@ -36,7 +36,7 @@
 目录按 SDD §3.4 组织（`app/`=应用、`rt/`=实时域、`com/`=通信域、`mw/`=中间件、`bsp/`=板级）。
 
 ```
-myCar/
+tc275_car/
 ├── Cpu0_Main.c   CPU0 入口：XCORE_init → FreeRTOS 任务(blinky/echo/robot)；启用 CPU 看门狗
 ├── Cpu1_Main.c   CPU1 入口：MOTOR_init → ENCODER_init → MOTOR_ALGO_run()（永不返回）
 ├── Cpu2_Main.c   CPU2 入口：LINK_init → 超循环 LINK_main + 20ms 遥测（#ifdef USE_SPI_LINK）
@@ -170,11 +170,11 @@ gcc -std=c99 -Wall -Wextra -Werror -O2 -I . \
     test/host/test_sf.c mw/sf/sf_frame.c mw/calib/calib_record.c \
     -o test/host/out/test_sf && test/host/out/test_sf
 
-# 38 字节遥测布局 + 与 C6 从机解码器交叉验证（需同级 c6_car 仓库）
+# 38 字节遥测布局 + 与 C6 从机解码器交叉验证（需同级 esp32c6_car 仓库）
 gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
-    -I c6_car/components/c6_proto -I c6_car/components/c6_sf \
+    -I esp32c6_car/components/c6_proto -I esp32c6_car/components/c6_sf \
     test/host/test_sf_telemetry.c mw/sf/sf_telemetry.c mw/sf/sf_frame.c \
-    c6_car/components/c6_proto/proto_frames.c -o test/host/out/test_sf_telemetry && test/host/out/test_sf_telemetry
+    esp32c6_car/components/c6_proto/proto_frames.c -o test/host/out/test_sf_telemetry && test/host/out/test_sf_telemetry
 ```
 
 **固件构建**：只能在 AURIX Development Studio（TASKING 编译器）里构建 `TriCore Debug (TASKING)`，**主机/CI 无法编译固件**（专有编译器）。AI 不要假装能在命令行编出固件；能做的是保证主机单测通过 + 代码符合 iLLD/MISRA 习惯。

@@ -1,7 +1,7 @@
 /*
  * flash_ota.c - IfxFlash-backed implementation of bsp/flash_ota.h
  *
- * The command sequences mirror the proven DFlash pattern of myCar's
+ * The command sequences mirror the proven DFlash pattern of tc275_car's
  * mw/calib/calib_store.c (clearStatus -> enterPageMode -> loadPage ->
  * writePage -> waitUnbusy, eraseSector -> waitUnbusy), extended for the
  * 32-byte PFlash page (4 x loadPage2X32) and the per-bank busy bits.
