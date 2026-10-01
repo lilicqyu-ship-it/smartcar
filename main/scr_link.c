@@ -618,8 +618,6 @@ static void link_monitor_task(void *arg)
              * back as the normal {"t":"tcver"} beacon (ws_handle_text) */
             if (!scr_link_send_text("{\"t\":\"tcver\"}")) {
                 ESP_LOGW(TAG, "tcver request not sent");
-            } else {
-                ESP_LOGI(TAG, "tcver request sent");
             }
         }
 

@@ -6,7 +6,6 @@
 #include "esp_system.h"
 #include "esp_heap_caps.h"
 #include "esp_app_desc.h"
-#include "esp_log.h"
 #include "sdkconfig.h"
 #include <bsp/esp-bsp.h>
 
@@ -718,7 +717,6 @@ static void node_tap_cb(lv_event_t *e)
         s_set.ver_phase[0] = VER_OK;            /* local: always immediate */
         s_set.ver_until[0] = now + VER_BANNER_MS;
     } else if (!ws || (i == 2 && !st.tc_on)) {
-        ESP_LOGW("ui_sys", "node %d refresh refused locally (ws=%d tc_on=%d)", i, ws, st.tc_on);
         s_set.ver_phase[i] = VER_FAIL;          /* nothing to ask */
         s_set.ver_until[i] = now + VER_BANNER_MS;
     } else {
