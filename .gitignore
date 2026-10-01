@@ -5,3 +5,6 @@
 /.sconsign.dblite
 __pycache__/
 50-tech-assessment.md
+# ADS 后台服务按 workspace 旧记忆生成的构建脚本（本仓用 tools/ 与 ADS GUI，不用 scons）
+/SConstruct
+/site_scons/
