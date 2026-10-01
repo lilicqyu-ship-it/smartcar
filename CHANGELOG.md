@@ -7,6 +7,19 @@
 
 ## [未发布]
 
+## [1.0.0] - 2026-10-01
+
+首个稳定版，对齐 `CMakeLists.txt` PROJECT_VER 1.0.0。
+
+### 新增
+- About 页节点卡 tap 刷新固件版本：S3 本地 / C6 走 /api/health / TC275 走 `{"t":"tcver"}` 请求链（含超时与结果横幅）
+- TC275 卡双行显示 APP + SBL 版本；信标缺失时 APP 回退遥测 fw_ver
+- 版本号统一 v 前缀显示
+
+### 修复
+- hello.tc 占位字符串不再覆盖 tc_on（真实在线信标先于 hello 广播；遥测帧自证链路在线）
+- WS 连续 3 次失败强制重连 Wi-Fi（应对 C6 重启后 STA 假在线）
+
 ## [0.1.0] - 2026-10-01
 
 首个版本 tag，对齐 `CMakeLists.txt` PROJECT_VER 0.1.0（proto v2 对接 esp32c6_car + tcver 版本显示）。
@@ -30,5 +43,6 @@
 - HUD 改版后真机上的三处标签布局溢出
 - Settings 页补返回 Home 的页头
 
-[未发布]: https://github.com/lilicqyu-ship-it/smartcar_remote/compare/v0.1.0...HEAD
+[未发布]: https://github.com/lilicqyu-ship-it/smartcar_remote/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/lilicqyu-ship-it/smartcar_remote/releases/tag/v1.0.0
 [0.1.0]: https://github.com/lilicqyu-ship-it/smartcar_remote/releases/tag/v0.1.0
