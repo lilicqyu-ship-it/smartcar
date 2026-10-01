@@ -23,9 +23,17 @@ APPLY=0
 CHECKS=(
   "link/proto_frames.h  esp32c6_car/components/c6_proto/proto_frames.h smartcar_remote/main/proto/proto_frames.h"
   "link/proto_frames.c  esp32c6_car/components/c6_proto/proto_frames.c smartcar_remote/main/proto/proto_frames.c"
-  "ota/ota_layout.h     myCarSbl/mw/ota/ota_layout.h"
-  "ota/ota_meta.h       myCarSbl/mw/ota/ota_meta.h"
-  "ota/tcfw_bundle.h    myCarSbl/mw/ota/tcfw_bundle.h"
+  # SBL↔App：两侧必须一致，否则槽位/元数据/包头解析错位只能上板才发现
+  "ota/ota_layout.h     myCarSbl/mw/ota/ota_layout.h  tc275_car/mw/ota/ota_layout.h"
+  "ota/ota_meta.h       myCarSbl/mw/ota/ota_meta.h    tc275_car/mw/ota/ota_meta.h"
+  "ota/tcfw_bundle.h    myCarSbl/mw/ota/tcfw_bundle.h tc275_car/mw/ota/tcfw_bundle.h"
+  "ota/ota_keys.h       myCarSbl/mw/ota/ota_keys.h    tc275_car/mw/ota/ota_keys.h"
+  # 验签实现：C6 / SBL / App 三方共用同一份 ed25519 + SHA-512
+  "crypto/ed25519v.h    esp32c6_car/components/c6_ota/ed25519v.h  myCarSbl/mw/crypto/ed25519v.h  tc275_car/mw/crypto/ed25519v.h"
+  "crypto/ed25519v.c    esp32c6_car/components/c6_ota/ed25519v.c  myCarSbl/mw/crypto/ed25519v.c  tc275_car/mw/crypto/ed25519v.c"
+  "crypto/sha512.h      esp32c6_car/components/c6_ota/sha512.h    myCarSbl/mw/crypto/sha512.h    tc275_car/mw/crypto/sha512.h"
+  "crypto/sha512.c      esp32c6_car/components/c6_ota/sha512.c    myCarSbl/mw/crypto/sha512.c    tc275_car/mw/crypto/sha512.c"
+  "crypto/c6_consts.h   esp32c6_car/components/c6_ota/c6_consts.h myCarSbl/mw/crypto/c6_consts.h tc275_car/mw/crypto/c6_consts.h"
 )
 
 fail=0
