@@ -37,6 +37,7 @@
 #include "mw/calib/calib_store.h"
 #include "mw/xcore/xcore.h"
 #include "mw/proto/protocol.h"
+#include "mw/app_version.h"
 #include "app/robot.h"
 
 #if defined(__TASKING__)
@@ -179,6 +180,7 @@ void core0_main(void)
     /* UART was brought up before CALIB_init above; say so now that the
      * scheduler-free init phase is done. */
     UART_println("UART initialized");
+    UART_println(g_app_version);   /* "APPFW tc275_car vX.Y.Z" (mw/app_version.h) */
 
 
     /* Configure LED1 as push-pull output */

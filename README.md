@@ -78,6 +78,15 @@ tc275_car/
 └── doc/                   # 本项目文档
 ```
 
+## 固件版本（mw/app_version.h 为唯一真源）
+
+`mw/app_version.[ch]` 定义 SemVer（当前 0.2.2）。发布流程：bump 宏 → 提交 →
+打同名 git tag（如 `v0.2.2`）。版本可见性：
+
+- 启动横幅经 ASCLIN0 打印（`APPFW tc275_car vX.Y.Z`）；
+- SCons（命令行构建）产物名自动带版本：`build/tasking-debug/tc275_car_v0.2.2.elf/.hex/.map`；
+- 产物内可检索：`strings tc275_car_v0.2.2.elf | grep APPFW`。
+
 ## 硬件清单
 
 | 器件 | 型号 | 说明 |
