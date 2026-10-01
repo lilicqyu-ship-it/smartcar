@@ -8,3 +8,4 @@ firmware/dist/**/*.map
 firmware/dist/**/*.mdf
 .codegraph/
 .kiro/
+/firmware/__pycache__/*.pyc
