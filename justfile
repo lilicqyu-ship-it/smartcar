@@ -1,5 +1,7 @@
-# smartcar 多仓库总控
-# 四个子仓库在 .gitmodules 中固定 branch=main；本仓库只做总控/清单/契约。
+# smartcar 固件 monorepo 总控
+# 四个固件工程（esp32c6_car / smartcar_remote / tc275_car / tc275_sbl）与 contracts/
+# 共享接口、firmware/fw.py 工具链同仓管理：一次提交一次推送，git status 只会有真实
+# 文件差异；版本 tag 带工程前缀（c6/ r-s3/ app/ sbl/，与 fw.py 工程别名一致）。
 #
 # 跨平台：所有配方只调用 bash + scripts/*.sh，不用 shebang 配方。
 # Windows 上必须是 Git Bash —— 裸 "bash" 在 Windows 常解析到 WSL 的
@@ -12,60 +14,18 @@ set windows-shell := ["C:/Program Files/Git/bin/bash.exe", "-cu"]
 default:
     @just --list
 
-# 新机器一键还原 4 个子仓库（clone 本仓库后先跑这个），并切回 main 避免 detached HEAD 上提交丢失
-init:
-    git submodule update --init --recursive
-    bash scripts/repos.sh fix-head
-
-# 所有子仓库切到 main（submodule update 后默认是 detached HEAD）
-fix-head:
-    @bash scripts/repos.sh fix-head
-
-# 四仓库状态一览：分支 / 未提交文件数 / 未推送提交数 / 最新提交
-status:
-    @bash scripts/repos.sh status
-
-# 批量 fetch --all --prune；在分支上的仓库顺手 fast-forward
-sync:
-    @bash scripts/repos.sh sync
-
-# 修复: 子仓库 fast-forward 后父仓库报 "modified: xxx (new commits)"——
-# 把四个子仓库当前 HEAD 固化进父仓库（只记指针，不走契约校验；发版组合请用 lock）
-pin msg="pin: bump submodule versions":
-    git add esp32c6_car smartcar_remote tc275_car tc275_sbl
-    git diff --cached --quiet || git commit -m "{{msg}}"
-    @echo "当前子仓库组合:" && git submodule status
-
-# 批量 push 当前分支；无 upstream 时自动建立（detached 的仓库跳过）
-push:
-    @bash scripts/repos.sh push
-
-# 校验各仓库接口副本与 contracts/ 一致（CI 门禁同款）
+# 校验各工程接口副本与 contracts/ 一致（CI 门禁同款）
 contracts:
     @bash scripts/check-contracts.sh
 
-# 用 contracts/ 覆盖各仓库副本；之后需在各子仓库分别提交
+# 用 contracts/ 覆盖各工程副本；接口变更与副本同步放进同一个提交
 contracts-apply:
     @bash scripts/check-contracts.sh --apply
 
-# 记录当前四仓库版本组合（bump submodule 指针）；先过契约校验
-lock msg="lock: bump submodule versions":
-    bash scripts/check-contracts.sh
-    git add esp32c6_car smartcar_remote tc275_car tc275_sbl
-    git diff --cached --quiet || git commit -m "{{msg}}"
-
-# 整车发版：校验契约 -> 锁版本 -> 打总 tag（push 需手动 git push origin main --tags）
-release tag: (lock "release: " + tag)
-    git tag -a "{{tag}}" -m "smartcar {{tag}}: $(git submodule status | awk '{print $2"@"$3}' | tr '\n' ' ')"
-    @echo "tagged {{tag}}"
-
-# 批量下发 GitHub 配置：统一标签 / 分支保护 / 看板
-gh-sync:
-    @bash scripts/sync-gh.sh all
-
-# 检查本机开发环境（git/just/gh/bash 版本、换行与长路径配置）
-doctor:
-    @bash scripts/doctor.sh
+# 打工程版本 tag（例: just tag c6 v1.0.1 → tag c6/v1.0.1；push 后触发对应 Release workflow）
+tag proj ver:
+    git tag -a "{{proj}}/{{ver}}" -m "{{proj}} {{ver}}"
+    @echo "已建 tag {{proj}}/{{ver}}——git push origin {{proj}}/{{ver}} 后触发 Release"
 
 # —— 固件统一管理（firmware/fw.py；详见 firmware/README.md）——
 # 工程名: esp32c6_car | smartcar_remote | tc275_car | tc275_sbl（别名 c6/r-s3/app/sbl）
@@ -112,9 +72,9 @@ fw-clean:
     @{{py}} firmware/fw.py clean --yes
 
 # —— TASKING SCons 直编（tc275_car / tc275_sbl）——
-# 各仓库根目录的 SConstruct 直接解析 .cproject（include/宏/源码排除），
+# 各工程根目录的 SConstruct 直接解析 .cproject（include/宏/源码排除），
 # 不依赖 ADS 生成文件；需本机装完整版 TASKING TriCore v6.3r1 + pip install scons。
-# 产物在 <仓库>/build/tasking-debug/（elf/hex/map），配置与 ADS Debug 完全同源。
+# 产物在 <工程>/build/tasking-debug/（elf/hex/map），配置与 ADS Debug 完全同源。
 
 # SCons 编译 tc275_car（余参透传: cfg=release / opt=-O2 / size / -c）
 scons-car *args:
@@ -123,3 +83,13 @@ scons-car *args:
 # SCons 编译 tc275_sbl（余参透传: cfg=release / opt=-O2 / size / -c）
 scons-sbl *args:
     cd tc275_sbl && {{py}} -m SCons -j8 {{args}}
+
+# 检查本机开发环境（git/just/gh/bash 版本、换行与长路径配置）
+doctor:
+    @bash scripts/doctor.sh
+
+# —— 旧多仓架构遗留 ——
+# 批量下发 GitHub 配置到四个旧工程仓库（统一标签/分支保护/看板）；
+# 旧仓库在 GitHub 归档（archive）后可连同 scripts/sync-gh.sh 一起删除
+gh-sync:
+    @bash scripts/sync-gh.sh all

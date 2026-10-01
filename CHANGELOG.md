@@ -8,6 +8,13 @@
 ## [未发布]
 
 ### 变更
+- **仓库架构 monorepo 化**：四个固件工程（esp32c6_car / smartcar_remote / tc275_car / tc275_sbl）
+  以 subtree 保历史并入本仓（各仓原提交号全部保留可追溯），退役 submodule 总控架构——
+  一次提交一次推送、跨工程改动原子化，`git status` 不再有 "(new commits)" 指针噪音；
+  CI 收编至根目录按 paths 触发（tc275_car 的 C6 交叉校验改用仓内源码）；
+  版本 tag 加工程前缀（c6/ r-s3/ app/ sbl/，与 fw.py 别名一致）；
+  justfile 退役 init/status/sync/push/fix-head/lock/pin 配方，新增 tag 配方；
+  旧工程仓库在 GitHub 归档只读，历史 tag 仍可从旧仓库查阅
 - fw.py `flash` / `ota` 默认先增量编译再烧录/打包（一条指令到位，不再烧/推旧构建产物）；`--no-build`（ota 另有 `--file`）跳过编译，flash/ota 内的编译不触发归档
 
 ### 修复

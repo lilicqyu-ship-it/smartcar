@@ -36,10 +36,8 @@ if (( is_win )); then
 fi
 
 echo "== 工作区 =="
-for r in esp32c6_car smartcar_remote tc275_car tc275_sbl; do
-    if [[ ! -e "$r/.git" ]]; then fail "$r 未初始化（just init）"; continue; fi
-    n="$(git -C "$r" ls-files --eol | grep -c 'w/crlf' || true)"
-    [[ "$n" == 0 ]] && pass "$r 工作区换行 LF" || warn "$r 有 $n 个 CRLF 文件（git -C $r add --renormalize . 后检查）"
-done
+# monorepo: 四工程以普通目录同仓管理，换行检查按路径过滤一次完成
+n="$(git ls-files --eol -- esp32c6_car smartcar_remote tc275_car tc275_sbl | grep -c 'w/crlf' || true)"
+[[ "$n" == 0 ]] && pass "工作区换行 LF" || warn "有 $n 个 CRLF 文件（git add --renormalize . 后检查）"
 
 exit $ok
