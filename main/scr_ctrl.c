@@ -11,6 +11,7 @@
 #include "scr_settings.h"
 #include "scr_link.h"
 #include "scr_ctrl.h"
+#include "scr_svc.h"
 #include "proto/proto_frames.h"
 
 typedef struct {
@@ -140,6 +141,13 @@ static void safety_watch(const scr_state_t *st)
         s_flags.link_was_ok = true;
         stale_since = 0;
         radio_lost_exit();
+    } else if (s_flags.link_was_ok && scr_svc_ota_quiet_c6()) {
+        /* C6 OTA: the bulk upload can starve telemetry, and an accepted image
+         * reboots the C6 - the FIRMWARE page already narrates both, so the
+         * full-screen overlay would only cover it.  Reset the debounce so a
+         * link that is still down once the OTA ends (FAILED, or the reconnect
+         * grace window expired) alerts on schedule instead of instantly. */
+        stale_since = 0;
     } else if (s_flags.link_was_ok) {
         int64_t now = esp_timer_get_time() / 1000;
         if (stale_since == 0) {

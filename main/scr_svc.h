@@ -109,6 +109,10 @@ void scr_svc_rescan_stage(void);
 /* OTA: returns false (and fills why) when a precondition fails */
 bool scr_svc_ota_start(svc_fw_t t, char *why, int why_cap);
 void scr_svc_get_ota(svc_ota_t *out);
+/* True while a C6-target OTA makes an S3<->C6 link drop expected (upload
+ * starving telemetry, or the C6 rebooting into an accepted image within the
+ * reconnect grace window).  scr_ctrl keeps the RADIO LOST overlay quiet. */
+bool scr_svc_ota_quiet_c6(void);
 
 /* diag polling is only active while the diag page is visible */
 void scr_svc_diag_poll_enable(bool on);

@@ -46,6 +46,10 @@ static const char *TAG = "scr_svc";
 #define STAGE_HDR_SIZE      4096u
 #define TC_WAIT_MS          90000
 #define OTA_STILL_MM_S      50
+/* C6 accepted the image -> reboot delay + boot + softAP up + the S3 side
+ * (10 s RX watchdog, WS retries, maybe a Wi-Fi re-association).  Within this
+ * window a dead S3<->C6 link is the expected OTA reboot, not RADIO LOST. */
+#define C6_RECONNECT_GRACE_MS 90000
 
 #define SCFW_MAGIC          "SCFW"
 
@@ -73,6 +77,7 @@ static struct {
     int64_t      diag_ok_ms;
     volatile bool diag_enabled;
     svc_cal_t    cal;
+    int64_t      ota_done_ms;   /* C6 OTA reached DONE (reboot grace anchor) */
     uint8_t      io[OTA_CHUNK];     /* only touched by the svc task */
 } s;
 
@@ -163,6 +168,9 @@ static void ota_set(svc_ota_phase_t ph, uint8_t pct, const char *msg)
     LOCK();
     s.ota.phase = ph;
     s.ota.pct = pct;
+    if (ph == SVC_OTA_DONE && s.ota.target == SVC_FW_C6) {
+        s.ota_done_ms = now_ms();
+    }
     if (msg) {
         strlcpy(s.ota.msg, msg, sizeof(s.ota.msg));
     }
@@ -180,6 +188,22 @@ void scr_svc_get_ota(svc_ota_t *out)
     }
     *out = s.ota;
     UNLOCK();
+}
+
+bool scr_svc_ota_quiet_c6(void)
+{
+    bool quiet = false;
+    LOCK();
+    if (s.ota.target == SVC_FW_C6) {
+        if (s.ota.phase == SVC_OTA_VERIFY || s.ota.phase == SVC_OTA_SEND) {
+            quiet = true;      /* bulk upload may starve telemetry for seconds */
+        } else if (s.ota.phase == SVC_OTA_DONE && s.ota_done_ms != 0 &&
+                   now_ms() - s.ota_done_ms < C6_RECONNECT_GRACE_MS) {
+            quiet = true;      /* C6 is rebooting into the new image */
+        }
+    }
+    UNLOCK();
+    return quiet;
 }
 
 bool scr_svc_ota_start(svc_fw_t t, char *why, int why_cap)
@@ -215,6 +239,7 @@ bool scr_svc_ota_start(svc_fw_t t, char *why, int why_cap)
     }
     LOCK();
     memset(&s.ota, 0, sizeof(s.ota));
+    s.ota_done_ms = 0;
     s.ota.target = t;
     s.ota.phase = SVC_OTA_VERIFY;
     strlcpy(s.ota.msg, "verifying staged image", sizeof(s.ota.msg));
