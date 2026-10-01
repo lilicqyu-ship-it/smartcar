@@ -1,3 +1,8 @@
 .DS_Store
-/firmware/dist/
 .zcode/
+
+# firmware/dist：固件镜像（hex/bin）+ manifest.json 入库做版本管理；
+# elf/map/mdf 是调试符号（单个 elf ~2MB），只留本地不入库
+firmware/dist/**/*.elf
+firmware/dist/**/*.map
+firmware/dist/**/*.mdf

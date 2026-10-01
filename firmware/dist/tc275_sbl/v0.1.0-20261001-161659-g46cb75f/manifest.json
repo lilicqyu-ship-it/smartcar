@@ -1,0 +1,32 @@
+{
+  "project": "tc275_sbl",
+  "collected_at": "2026-10-01 16:16:59",
+  "fw_version": "0.1.0",
+  "git": {
+    "commit": "46cb75f",
+    "branch": "main",
+    "dirty": false
+  },
+  "artifacts": [
+    {
+      "name": "tc275_sbl_v0.1.0.hex",
+      "bytes": 21474,
+      "source": "build\\tasking-debug\\tc275_sbl_v0.1.0.hex"
+    },
+    {
+      "name": "tc275_sbl_v0.1.0.elf",
+      "bytes": 1958564,
+      "source": "build\\tasking-debug\\tc275_sbl_v0.1.0.elf"
+    },
+    {
+      "name": "tc275_sbl_v0.1.0.map",
+      "bytes": 527903,
+      "source": "build\\tasking-debug\\tc275_sbl_v0.1.0.map"
+    },
+    {
+      "name": "factory_full.hex",
+      "bytes": 181534,
+      "source": "build\\tasking-debug\\factory_full.hex"
+    }
+  ]
+}

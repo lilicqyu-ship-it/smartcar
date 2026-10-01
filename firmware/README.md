@@ -5,9 +5,9 @@ smartcar 四个工程固件的总入口：一条命令编译、烧录、归档�
 
 ```bash
 python firmware/fw.py list                    # 各工程产物 / 归档状态一览
-python firmware/fw.py build <project>         # 编译（--collect 顺带归档）
+python firmware/fw.py build <project>         # 编译（成功即自动归档 dist；--no-collect 跳过）
 python firmware/fw.py flash <project> [...]   # 烧录（参数透传给各工程入口）
-python firmware/fw.py collect [project]       # 归档产物到 firmware/dist/
+python firmware/fw.py collect [project]       # 补充归档到 firmware/dist/
 python firmware/fw.py factory [--flash]       # SBL+App 出厂整包合成（可烧录）
 python firmware/fw.py clean [--yes]           # 清空 firmware/dist/
 ```
@@ -15,19 +15,36 @@ python firmware/fw.py clean [--yes]           # 清空 firmware/dist/
 工程名：`esp32c6_car` | `smartcar_remote` | `tc275_car` | `tc275_sbl`，
 别名 `c6` / `remote` / `app` / `sbl`（tc275_sbl 历史上叫 myCarSbl，旧名也认）。
 推荐走 just：`just fw-list` / `just fw-build <project>` / `just fw-flash <project>` /
-`just fw-collect` / `just fw-factory`。
+`just fw-collect` / `just fw-factory` / `just fw-dist`。
 
 ## 目录
 
 ```
 firmware/
 ├── fw.py        统一入口（纯 Python 标准库，Windows / macOS / Linux 通用）
-└── dist/        归档产物（gitignore，不入库）
-    └── <工程>/<时间戳-g提交号[-dirty]>/   bin/hex/elf/map + manifest.json
+└── dist/        归档产物（固件镜像入库做版本管理）
+    └── <工程>/[v版本-]<时间戳-g提交号[-dirty]>/   bin/hex/elf/map + manifest.json
 ```
 
-`manifest.json` 记录归档时间、子仓库 commit/分支/是否脏、每个产物的
-大小与来源路径——烧出问题的板子可以对回源码版本。
+`manifest.json` 记录归档时间、固件版本（TC275 读自 `mw/app_version.h`）、
+子仓库 commit/分支/是否脏、每个产物的大小与来源路径——烧出问题的板子
+可以对回源码版本。
+
+## 归档的版本管理与 GitHub 推送
+
+`just fw-build <project>` 构建成功即自动归档；归档目录名携带固件版本
+（TC275 工程：`v0.2.2-20261001-1530-g9ac84b1/`）。**固件镜像（hex/bin）与
+manifest.json 入库**，作为整车固件的版本档案；elf/map/mdf 调试符号体积大
+（单 elf ~2MB），只留本地（.gitignore 过滤），需要时从本地归档取。
+
+```bash
+just fw-build tc275_sbl        # 构建 + 自动归档
+just fw-dist                   # git add firmware/dist + commit + push（GitHub 上可见全部镜像版本）
+```
+
+历史镜像回溯：直接翻 `firmware/dist/<工程>/` 的目录名（版本+时间+提交号），
+或 `git log -- firmware/dist/<工程>`；某次烧录出问题，用 manifest.json 里的
+commit 精确回到源码。
 
 ## 各工程的编译 / 烧录链（fw.py 只做发现与委托）
 

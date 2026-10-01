@@ -1,0 +1,31 @@
+{
+  "project": "tc275_sbl",
+  "collected_at": "2026-10-01 14:01:16",
+  "git": {
+    "commit": "4cedf6a",
+    "branch": "main",
+    "dirty": false
+  },
+  "artifacts": [
+    {
+      "name": "tc275_sbl.hex",
+      "bytes": 21349,
+      "source": "Debug\\tc275_sbl.hex"
+    },
+    {
+      "name": "tc275_sbl.elf",
+      "bytes": 1728964,
+      "source": "Debug\\tc275_sbl.elf"
+    },
+    {
+      "name": "tc275_sbl.map",
+      "bytes": 525918,
+      "source": "Debug\\tc275_sbl.map"
+    },
+    {
+      "name": "factory_full.hex",
+      "bytes": 181578,
+      "source": "Debug\\factory_full.hex"
+    }
+  ]
+}

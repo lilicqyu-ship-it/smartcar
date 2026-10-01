@@ -12,9 +12,9 @@
 
 用法（或 just fw-* 配方）:
   python firmware/fw.py list                      各工程构建产物 / 归档状态一览
-  python firmware/fw.py build <project>           编译一个工程
+  python firmware/fw.py build <project>           编译一个工程（成功即自动归档 dist）
   python firmware/fw.py flash <project> [args…]   烧录（余参透传给各工程入口）
-  python firmware/fw.py collect [project]         归档产物到 firmware/dist/<工程>/
+  python firmware/fw.py collect [project]         补充归档到 firmware/dist/<工程>/
   python firmware/fw.py factory [--flash]         SBL+App 出厂整包（合成，可选烧录）
   python firmware/fw.py clean [--yes]             清空 firmware/dist/
 
@@ -27,6 +27,7 @@ import argparse
 import glob
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -129,30 +130,29 @@ def esp_artifacts(repo):
 
 
 def tc275_artifacts(repo, extra_dirs=()):
-    """TASKING 构建产物：SCons 的 build/tasking-*/ 优先，ADS 目录回退。
+    """TASKING 构建产物：只取"最新构建"所在目录（按最新 hex 的 mtime 判定）。
 
-    factory_full.hex 是 SBL+App 的合成整包，不能顶替工程自身的 hex，
-    从"最新 hex"候选中排除、存在时单独附带。"""
-    dirs = sorted((repo / "build").glob("tasking-*")) + [Path(d) for d in extra_dirs]
-    out, factory = [], None
-    for d in dirs:
-        if not d.is_dir():
-            continue
-        for pat in ("*.hex", "*.elf", "*.map"):
-            hits = sorted((p for p in d.glob(pat) if p.name != "factory_full.hex"),
-                          key=lambda p: p.stat().st_mtime)
-            if hits and hits[-1] not in out:
-                out.append(hits[-1])
-        if (d / "factory_full.hex").exists():
-            factory = d / "factory_full.hex"
-    if factory:
-        out.append(factory)
-    # 不同构建目录可能有同名产物（如 release 半成品 map）：按名去重，留最新
-    dedup = {}
-    for p in out:
-        if p.name not in dedup or p.stat().st_mtime > dedup[p.name].stat().st_mtime:
-            dedup[p.name] = p
-    return sorted(dedup.values(), key=lambda p: p.stat().st_mtime)
+    候选目录 = SCons 的 build/tasking-* + ADS 目录（extra_dirs）；单目录
+    取整，避免新旧构建（如 release 半成品、IDE 残留）混进同一份归档。
+    factory_full.hex 是 SBL+App 合成整包，不能顶替工程自身的 hex，从
+    "最新 hex"候选中排除、存在时单独附带。"""
+    cand = []
+    for d in sorted((repo / "build").glob("tasking-*")) + [Path(d) for d in extra_dirs]:
+        hexes = list(d.glob("*.hex")) if d.is_dir() else []
+        if hexes:
+            cand.append((max(p.stat().st_mtime for p in hexes), d))
+    if not cand:
+        return []
+    b = max(cand, key=lambda t: t[0])[1]
+    out = []
+    for pat in ("*.hex", "*.elf", "*.map"):
+        hits = sorted((p for p in b.glob(pat) if p.name != "factory_full.hex"),
+                      key=lambda p: p.stat().st_mtime)
+        if hits:
+            out.append(hits[-1])
+    if (b / "factory_full.hex").exists():
+        out.append(b / "factory_full.hex")
+    return out
 
 
 def _newest_hex(patterns):
@@ -330,7 +330,7 @@ def flash_tc275(hex_path, args):
 def cmd_build(a):
     p = require_project(a.project)
     rc = BUILDERS[p](a.args)
-    if rc == 0 and a.collect:
+    if rc == 0 and not a.no_collect:
         rc = collect_one(p)
     if rc == 0:
         info(f"{p} 构建完成")
@@ -369,24 +369,44 @@ def cmd_factory(a):
     if rc:
         return rc
     info(f"整包已合成: {out}（烧录: fw.py factory --flash）")
-    return collect_one("tc275_sbl") if a.collect else 0
+    return collect_one("tc275_sbl") if not a.no_collect else 0
 
 
 # ---------------------------------------------------------------- 归档 / 状态
 
+_FW_VER_RE = re.compile(r'^#define\s+APP_VERSION_STRING\s+"([^"]+)"', re.M)
+
+
+def fw_version(p):
+    """TC275 工程的固件版本（mw/app_version.h）；ESP 工程返回 None。"""
+    h = (repo_dir(p) / "mw" / "app_version.h")
+    if not h.exists():
+        return None
+    m = _FW_VER_RE.search(h.read_text(encoding="utf-8"))
+    return m.group(1) if m else None
+
+
 def collect_one(p):
-    """把工程产物复制到 dist/<工程>/<时间戳-g哈希>/ 并写 manifest.json。"""
+    """把工程产物复制到 dist/<工程>/[v版本-]<时间戳-g哈希>/ 并写 manifest.json。
+
+    归档目录即版本管理单元：TC275 工程目录名携带固件版本（mw/app_version.h），
+    Git 信息入 manifest；固件镜像（hex/bin）+ manifest 入库，elf/map 留本地。
+    """
     arts = ARTIFACTS[p]()
     if not arts:
         die(f"{p} 没有可归档的构建产物（先 fw.py build {p}）")
     repo = repo_dir(p)
     h, branch, dirty = git_info(repo)
     stamp = time.strftime("%Y%m%d-%H%M%S") + f"-g{h}" + ("-dirty" if dirty else "")
+    ver = fw_version(p)
+    if ver:
+        stamp = f"v{ver}-" + stamp
     dest = DIST / p / stamp
     if dest.exists():
         dest = DIST / p / (stamp + f"-{int(time.time()) % 1000}")
     dest.mkdir(parents=True)
     manifest = {"project": p, "collected_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+                "fw_version": ver,
                 "git": {"commit": h, "branch": branch, "dirty": dirty},
                 "artifacts": []}
     for src in arts:
@@ -456,7 +476,8 @@ def main(argv):
 
     b = sub.add_parser("build", help="编译一个工程")
     b.add_argument("project")
-    b.add_argument("--collect", action="store_true", help="构建成功后顺带归档产物")
+    b.add_argument("--no-collect", action="store_true",
+                   help="构建后不归档（默认成功即归档到 firmware/dist/）")
     b.add_argument("args", nargs="*", help="透传给各工程构建入口")
 
     f = sub.add_parser("flash", help="烧录（余参透传给各工程烧录入口）")
@@ -470,7 +491,7 @@ def main(argv):
 
     fa = sub.add_parser("factory", help="SBL+App 出厂整包（构建+合成，--flash 烧录）")
     fa.add_argument("--flash", action="store_true", help="合成后用 AURIXFlasher 整包烧录")
-    fa.add_argument("--collect", action="store_true", help="顺带归档 SBL 侧产物")
+    fa.add_argument("--no-collect", action="store_true", help="不归档 SBL 侧产物")
 
     cl = sub.add_parser("clean", help="清空 firmware/dist/")
     cl.add_argument("--yes", action="store_true")

@@ -1,0 +1,26 @@
+{
+  "project": "tc275_car",
+  "collected_at": "2026-10-01 14:01:16",
+  "git": {
+    "commit": "a825ab1",
+    "branch": "main",
+    "dirty": false
+  },
+  "artifacts": [
+    {
+      "name": "myCar.hex",
+      "bytes": 162691,
+      "source": "TriCore Debug (TASKING)\\myCar.hex"
+    },
+    {
+      "name": "myCar.elf",
+      "bytes": 6095676,
+      "source": "TriCore Debug (TASKING)\\myCar.elf"
+    },
+    {
+      "name": "myCar.map",
+      "bytes": 1468134,
+      "source": "TriCore Debug (TASKING)\\myCar.map"
+    }
+  ]
+}

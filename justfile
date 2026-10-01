@@ -68,7 +68,7 @@ py := if os() == "windows" { "python" } else { "python3" }
 fw-list:
     @{{py}} firmware/fw.py list
 
-# 编译固件: just fw-build <project>（如 just fw-build tc275_sbl --collect）
+# 编译固件: just fw-build <project>（成功后自动归档 firmware/dist/；--no-collect 跳过）
 fw-build project *args:
     @{{py}} firmware/fw.py build {{project}} {{args}}
 
@@ -76,9 +76,15 @@ fw-build project *args:
 fw-flash project *args:
     @{{py}} firmware/fw.py flash {{project}} {{args}}
 
-# 归档产物到 firmware/dist/<工程>/<时间戳-g提交号>/（省略 project 则四工程全归档）
+# 归档产物到 firmware/dist/<工程>/[v版本-]<时间戳-g提交号>/（省略 project 则四工程全归档）
 fw-collect project="":
     @{{py}} firmware/fw.py collect {{project}}
+
+# 把 firmware/dist 的新归档提交并推送 GitHub（固件镜像版本管理；镜像+manifest 入库）
+fw-dist msg="fw(dist): 归档固件镜像（构建产物入库）":
+    git add firmware/dist
+    git diff --cached --quiet || git commit -m "{{msg}}"
+    git push origin main
 
 # SBL+App 出厂整包: 构建两工程 + 合成 factory_full.hex（--flash 顺带烧录）
 fw-factory *args:
