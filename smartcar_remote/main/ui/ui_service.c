@@ -318,14 +318,21 @@ void ui_service_fw_refresh(const scr_state_t *st)
 /* =================================================================================
  * CALIBRATE
  * ===============================================================================*/
+/* Rows are PHYSICAL positions (TC275 CALIB_POS_* order). The TC275 indexes
+ * everything else (jog motor id, invert[], delta[], jog counts) by motor A..D,
+ * so each row is resolved through the record's pos[] map: pos[motor] =
+ * physical position. Until a record arrives, the TC275 factory map is assumed
+ * (calib_record.c: A front-left, B rear-left, C rear-right, D front-right). */
 static const char *const WHEEL[4] = { "FL", "FR", "RL", "RR" };
+static const uint8_t DEF_POS[4] = { 0 /*A FL*/, 2 /*B RL*/, 3 /*C RR*/, 1 /*D FR*/ };
+#define JOG_XTALK_CNT  20       /* |counts| on a wheel NOT being jogged = suspect */
 
 static struct {
     lv_obj_t *pre[3];       /* precondition rows */
     lv_obj_t *off_sw;
     hold_t    dir;
     lv_obj_t *dir_state;
-    lv_obj_t *res_inv[4], *res_dl[4];
+    lv_obj_t *res_name[4], *res_inv[4], *res_dl[4];
     lv_obj_t *rec_src, *rec_crc, *rec_map;
     lv_obj_t *fs_val, *wd_val;
     int16_t   fs, wd;
@@ -333,9 +340,33 @@ static struct {
     lv_obj_t *adj[4];       /* fs-, fs+, wd-, wd+ */
     lv_obj_t *write, *read;
     hold_t    clear;
-    lv_obj_t *jog[8];
+    lv_obj_t *jog[8], *jog_name[4], *jog_cnt[4];
+    uint8_t   motor_at[4];  /* physical position -> motor 0..3 (A..D) */
+    int       jog_phys;     /* last pressed position, -1 = none */
+    int       jog_dir;      /* +1 up / -1 down */
     bool      ok;           /* all preconditions met */
 } s_cal;
+
+/* Build position -> motor from pos[]; falls back to the factory map when the
+ * record is missing or not a permutation of 0..3. */
+static void cal_map_update(const svc_cal_t *c)
+{
+    const uint8_t *pos = DEF_POS;
+    if (c->have_rec) {
+        uint8_t seen = 0;
+        for (int m = 0; m < 4; m++) {
+            if (c->pos[m] < 4) {
+                seen |= (uint8_t)(1u << c->pos[m]);
+            }
+        }
+        if (seen == 0x0F) {
+            pos = c->pos;
+        }
+    }
+    for (int m = 0; m < 4; m++) {
+        s_cal.motor_at[pos[m]] = (uint8_t)m;
+    }
+}
 
 static void cal_dir_fire(void)
 {
@@ -387,7 +418,9 @@ static void jog_cb(lv_event_t *e)
     int i = (int)(intptr_t)lv_event_get_user_data(e);
     lv_event_code_t c = lv_event_get_code(e);
     if (c == LV_EVENT_PRESSED && s_cal.ok) {
-        scr_ctrl_set_jog(i / 2, (i & 1) ? 300 : -300);
+        s_cal.jog_phys = i / 2;
+        s_cal.jog_dir = (i & 1) ? 1 : -1;
+        scr_ctrl_set_jog(s_cal.motor_at[i / 2], (i & 1) ? 300 : -300);
     } else if (c == LV_EVENT_RELEASED || c == LV_EVENT_PRESS_LOST) {
         scr_ctrl_set_jog(-1, 0);
     }
@@ -396,6 +429,11 @@ static void jog_cb(lv_event_t *e)
 static void calib_create(lv_obj_t *root)
 {
     ui_header(root, "CALIBRATE  TC275", back_settings_cb);
+    {
+        svc_cal_t none = { 0 };
+        cal_map_update(&none);          /* factory map until a record arrives */
+        s_cal.jog_phys = -1;
+    }
 
     /* preconditions */
     lv_obj_t *pc = card_at(root, 8, 58, 240, 250, "PRECONDITIONS");
@@ -427,8 +465,8 @@ static void calib_create(lv_obj_t *root)
     lv_obj_t *h3 = lbl(dc, "COUNTS", F_SM, UI_COL_DIM);
     lv_obj_align(h3, LV_ALIGN_TOP_RIGHT, 0, 50);
     for (int i = 0; i < 4; i++) {
-        lv_obj_t *w = lbl(dc, WHEEL[i], F_MD, UI_COL_TXT);
-        lv_obj_align(w, LV_ALIGN_TOP_LEFT, 0, 72 + i * 24);
+        s_cal.res_name[i] = lbl(dc, WHEEL[i], F_MD, UI_COL_TXT);
+        lv_obj_align(s_cal.res_name[i], LV_ALIGN_TOP_LEFT, 0, 72 + i * 24);
         s_cal.res_inv[i] = lbl(dc, "--", F_SM, UI_COL_DIM);
         lv_obj_align(s_cal.res_inv[i], LV_ALIGN_TOP_LEFT, 80, 74 + i * 24);
         s_cal.res_dl[i] = lbl(dc, "--", F_SM, UI_COL_DIM);
@@ -441,7 +479,7 @@ static void calib_create(lv_obj_t *root)
     lv_obj_t *rc = card_at(root, 532, 58, 260, 250, "RECORD");
     s_cal.rec_src = kv_at(rc, 24, "SOURCE");
     s_cal.rec_crc = kv_at(rc, 46, "CRC");
-    s_cal.rec_map = kv_at(rc, 68, "INVERT");
+    s_cal.rec_map = kv_at(rc, 68, "INVERT FL FR RL RR");
     lv_obj_t *fk = lbl(rc, "FULL SCALE", F_SM, UI_COL_DIM);
     lv_obj_align(fk, LV_ALIGN_TOP_LEFT, 0, 98);
     lv_obj_t *wk = lbl(rc, "WHEEL mm", F_SM, UI_COL_DIM);
@@ -472,8 +510,14 @@ static void calib_create(lv_obj_t *root)
     lv_obj_t *jc = card_at(root, 8, 316, 784, 156, "MOTOR JOG  -  HOLD TO SPIN 30%, RELEASE TO STOP");
     for (int m = 0; m < 4; m++) {
         int x = m * 192;
-        lv_obj_t *n = lbl(jc, WHEEL[m], F_LG, UI_COL_TXT);
-        lv_obj_align(n, LV_ALIGN_TOP_LEFT, x + 70, 30);
+        s_cal.jog_name[m] = lbl(jc, WHEEL[m], F_LG, UI_COL_TXT);
+        lv_obj_align(s_cal.jog_name[m], LV_ALIGN_TOP_LEFT, x, 30);
+        /* live encoder counts for this wheel since the current press */
+        s_cal.jog_cnt[m] = lbl(jc, "--", F_MD, UI_COL_DIM);
+        lv_obj_set_width(s_cal.jog_cnt[m], 84);
+        lv_obj_set_style_text_align(s_cal.jog_cnt[m], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_label_set_long_mode(s_cal.jog_cnt[m], LV_LABEL_LONG_MODE_CLIP);
+        lv_obj_align(s_cal.jog_cnt[m], LV_ALIGN_TOP_LEFT, x + 84, 34);
         for (int d = 0; d < 2; d++) {
             int i = m * 2 + d;
             s_cal.jog[i] = btn(jc, d ? LV_SYMBOL_RIGHT : LV_SYMBOL_LEFT, UI_COL_SURFACE2, 80, 64);
@@ -508,6 +552,31 @@ void ui_service_calib_refresh(const scr_state_t *st)
 
     svc_cal_t c;
     scr_svc_get_cal(&c);
+    cal_map_update(&c);
+    for (int i = 0; i < 4; i++) {
+        char l = (char)('A' + s_cal.motor_at[i]);
+        ui_label_set_fmt(s_cal.res_name[i], "%s %c", WHEEL[i], l);
+        ui_label_set_fmt(s_cal.jog_name[i], "%s (%c)", WHEEL[i], l);
+    }
+
+    /* live jog counts: the pressed wheel must move with the button's sign,
+     * the other three must stay ~0. Green = as expected, red = pressed wheel
+     * wrong sign / no count, amber = a wheel that was NOT jogged moved. */
+    for (int i = 0; i < 4; i++) {
+        if (!c.have_jog || s_cal.jog_phys < 0) {
+            continue;
+        }
+        int32_t d = c.jog_d[s_cal.motor_at[i]];
+        uint32_t col;
+        if (i == s_cal.jog_phys) {
+            bool good = (int64_t)d * s_cal.jog_dir > JOG_XTALK_CNT;
+            col = good ? UI_COL_OK : UI_COL_CRIT;
+        } else {
+            col = (d > JOG_XTALK_CNT || d < -JOG_XTALK_CNT) ? UI_COL_WARN : UI_COL_DIM;
+        }
+        ui_label_set_fmt(s_cal.jog_cnt[i], "%+ld", (long)d);
+        ui_label_set_color(s_cal.jog_cnt[i], lv_color_hex(col));
+    }
 
     /* direction run */
     if (c.cal_started_ms && now_ms() - c.cal_started_ms > 3000) {
@@ -525,13 +594,14 @@ void ui_service_calib_refresh(const scr_state_t *st)
                            lv_color_hex(c.status == 0 && c.saved != 2 ? UI_COL_OK : UI_COL_WARN));
     }
     for (int i = 0; i < 4; i++) {
+        int m = s_cal.motor_at[i];      /* row i = physical position i */
         if (c.have_cal) {
-            bool nocount = c.delta[i] == 0;
+            bool nocount = c.delta[m] == 0;
             ui_label_set_text(s_cal.res_inv[i], nocount ? "NO COUNT" :
-                              (c.invert[i] < 0 ? "INVERTED" : "NORMAL"));
+                              (c.invert[m] < 0 ? "INVERTED" : "NORMAL"));
             ui_label_set_color(s_cal.res_inv[i], lv_color_hex(nocount ? UI_COL_CRIT :
-                               (c.invert[i] < 0 ? UI_COL_WARN : UI_COL_OK)));
-            ui_label_set_fmt(s_cal.res_dl[i], "%ld", (long)c.delta[i]);
+                               (c.invert[m] < 0 ? UI_COL_WARN : UI_COL_OK)));
+            ui_label_set_fmt(s_cal.res_dl[i], "%ld", (long)c.delta[m]);
         }
     }
     set_enabled(s_cal.dir.b, s_cal.ok && c.cal_started_ms == 0);
@@ -544,8 +614,10 @@ void ui_service_calib_refresh(const scr_state_t *st)
         ui_label_set_text(s_cal.rec_crc, c.rec_crc_ok ? "OK" : "BAD");
         ui_label_set_color(s_cal.rec_crc, lv_color_hex(c.rec_crc_ok ? UI_COL_OK : UI_COL_CRIT));
         ui_label_set_fmt(s_cal.rec_map, "%c%c%c%c",
-                         c.rec_invert[0] < 0 ? '-' : '+', c.rec_invert[1] < 0 ? '-' : '+',
-                         c.rec_invert[2] < 0 ? '-' : '+', c.rec_invert[3] < 0 ? '-' : '+');
+                         c.rec_invert[s_cal.motor_at[0]] < 0 ? '-' : '+',
+                         c.rec_invert[s_cal.motor_at[1]] < 0 ? '-' : '+',
+                         c.rec_invert[s_cal.motor_at[2]] < 0 ? '-' : '+',
+                         c.rec_invert[s_cal.motor_at[3]] < 0 ? '-' : '+');
         if (!s_cal.fs_wd_loaded) {
             s_cal.fs = c.full_scale;
             s_cal.wd = c.wheel_dia;

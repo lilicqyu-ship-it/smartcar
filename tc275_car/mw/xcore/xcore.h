@@ -44,6 +44,8 @@ typedef struct
     uint32  odoLeftMm;        /* per-side absolute distance since boot, mm  */
     uint32  odoRightMm;
     boolean alive;
+    sint32  raw[4];           /* E1..E4 (= MOTOR_A..D) post-invert x4 counts,
+                               * cumulative since boot; jog count EVT 0x26  */
 } XcoreEncoder;
 
 void    XCORE_encoderPublish(const XcoreEncoder *enc);

@@ -383,8 +383,78 @@ void CALIB_recordClear(void)
     calib_queueWrite(CALIB_ACT_ERASE, &rec);
 }
 
+/* ---- jog encoder counts (EVT 0x26) ------------------------------------------ */
+
+#define JOG_CNT_PERIOD_MS   100u   /* 10 Hz while any motor is jogging       */
+#define JOG_CNT_TAIL_MS     400u   /* keep reporting while the wheel coasts  */
+
+/* While a 0x71 jog is active, report every wheel's count delta since the jog
+ * started, so the bench can see WHICH encoder moves and with WHICH sign when
+ * one motor is driven. Payload {on u8, delta i32x4 LE, motor A..D order}; on=0
+ * marks the tail frames after the last jog duty went to zero. */
+static void calib_jogCountsTick(void)
+{
+    static boolean wasActive;
+    static uint32  lastActiveMs;
+    static uint32  nextMs;
+    static sint32  base[CALIB_REC_WHEELS];
+    XcoreJog       jog;
+    XcoreEncoder   enc;
+    XcoreEvtFrame  frame;
+    boolean        active = FALSE;
+    uint32         now = STIME_nowMs();
+    uint8          i;
+
+    (void)XCORE_jogGet(&jog);
+    for (i = 0u; i < CALIB_REC_WHEELS; i++)
+    {
+        if (jog.duty[i] != 0)
+        {
+            active = TRUE;
+        }
+    }
+
+    XCORE_encoderRead(&enc);
+    if ((active != FALSE) && (wasActive == FALSE))
+    {
+        /* new press: counts restart from zero */
+        for (i = 0u; i < CALIB_REC_WHEELS; i++)
+        {
+            base[i] = enc.raw[i];
+        }
+        nextMs = now;
+    }
+    if (active != FALSE)
+    {
+        lastActiveMs = now;
+    }
+    wasActive = active;
+
+    if ((active == FALSE) && ((sint32)(now - (lastActiveMs + JOG_CNT_TAIL_MS)) >= 0))
+    {
+        return;                          /* idle, or tail already sent        */
+    }
+    if ((sint32)(now - nextMs) < 0)
+    {
+        return;
+    }
+    nextMs = now + JOG_CNT_PERIOD_MS;
+
+    frame.type       = SF_TYPE_EVT;
+    frame.cid        = SF_CID_EVT_JOG_CNT;
+    frame.len        = 17u;
+    frame.payload[0] = (active != FALSE) ? 1u : 0u;
+    for (i = 0u; i < CALIB_REC_WHEELS; i++)
+    {
+        CALIBREC_putI32(&frame.payload[1u + (i * 4u)], enc.raw[i] - base[i]);
+    }
+    (void)XCORE_evtPush(&frame);
+}
+
 void CALIB_tick(void)
 {
+    calib_jogCountsTick();
+
     /* Drain CPU1's result mailbox on the 10 ms rhythm: one frame per run. */
     calib_handleResult();
 

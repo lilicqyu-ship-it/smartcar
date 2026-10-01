@@ -406,6 +406,7 @@ void ENCODER_publish(void)
     enc.odoLeftMm     = g_odometerMm[0];
     enc.odoRightMm    = g_odometerMm[1];
     enc.alive         = g_alive;
+    ENCODER_getRawCounts(enc.raw);
 
     XCORE_encoderPublish(&enc);
 }

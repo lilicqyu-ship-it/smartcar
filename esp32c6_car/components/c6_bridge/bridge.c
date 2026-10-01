@@ -645,6 +645,7 @@ static void broadcast_telemetry(void)
                                          fullScale i16, wheelDia i16, crcOk} LE (doc/17 §8.4)  */
 #define DIAG_SUB_EVT_APP_VER  0x24u   /* tcver: 24 B "APPFW tc275_car vX.Y.Z"   */
 #define DIAG_SUB_EVT_SBL_VER  0x25u   /* tcver: 24 B "SBLFW tc275_sbl vX.Y.Z", all-zero = absent */
+#define DIAG_SUB_EVT_JOG_CNT  0x26u   /* jogcnt: {on u8, delta i32x4 LE, motor A..D} */
 
 /* --- TC275 version beacon (SF EVT 0x24/0x25 via the DIAG tunnel) ---------- */
 /* TC275 pushes both strings at link start and every 5 s; the bridge caches the
@@ -742,6 +743,27 @@ static void bridge_emit_rec(const uint8_t *p, uint16_t n)
     http_broadcast_ctl(json);
 }
 
+/* EVT 0x26 -> {"t":"jogcnt","on":n,"d":[A,B,C,D]}: per-motor encoder count
+ * delta since the current jog press (10 Hz while jogging, short tail after). */
+static void bridge_emit_jogcnt(const uint8_t *p, uint16_t n)
+{
+    char json[128];
+    int k;
+
+    if (n < 17u)
+    {
+        return;
+    }
+    k = snprintf(json, sizeof(json), "{\"t\":\"jogcnt\",\"on\":%u,\"d\":[", p[0]);
+    for (int i = 0; i < 4; i++)
+    {
+        k += snprintf(json + k, sizeof(json) - (size_t)k, "%s%ld",
+                      (i == 0) ? "" : ",", (long)(int32_t)proto_get_u32(&p[1 + (i * 4)]));
+    }
+    (void)snprintf(json + k, sizeof(json) - (size_t)k, "]}");
+    http_broadcast_ctl(json);
+}
+
 static void pump_link_frame(const proto_frame_t *f)
 {
     switch (f->cmd)
@@ -780,6 +802,10 @@ static void pump_link_frame(const proto_frame_t *f)
                 else if (sub == DIAG_SUB_EVT_APP_VER || sub == DIAG_SUB_EVT_SBL_VER)
                 {
                     bridge_emit_tcver(sub, p, n);
+                }
+                else if (sub == DIAG_SUB_EVT_JOG_CNT)
+                {
+                    bridge_emit_jogcnt(p, n);
                 }
                 else
                 {

@@ -100,6 +100,7 @@ extern "C" {
  * payload. C6 tunnels unknown EVT CIDs unchanged (c6_link sf_to_v2). */
 #define SF_CID_EVT_APP_VER    0x24u                /* TYPE_EVT, 24 B "APPFW ..."   */
 #define SF_CID_EVT_SBL_VER    0x25u                /* TYPE_EVT, 24 B "SBLFW ..."   */
+#define SF_CID_EVT_JOG_CNT    0x26u                /* TYPE_EVT, 17 B {on, delta i32x4 A..D} */
 #define SF_EVT_KIND_PAIR_REPLY 0x01u               /* TYPE_EVT / CID_STATE byte 0  */
 #define SF_CID_OTA_BEGIN      0x30u                /* TYPE_OTA_DATA {u32 total, u32 crc32} */
 #define SF_CID_OTA_CHUNK      0x31u                /* TYPE_OTA_DATA {u16 idx, data<=240}   */

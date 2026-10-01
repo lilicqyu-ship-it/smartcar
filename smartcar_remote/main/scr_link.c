@@ -205,6 +205,7 @@ static void ws_handle_text(const char *data, int len)
             }
         } else if (strcmp(t->valuestring, "cal") == 0 ||
                    strcmp(t->valuestring, "rec") == 0 ||
+                   strcmp(t->valuestring, "jogcnt") == 0 ||
                    strcmp(t->valuestring, "otastatus") == 0 ||
                    strcmp(t->valuestring, "otaswap") == 0 ||
                    strcmp(t->valuestring, "otaerror") == 0) {

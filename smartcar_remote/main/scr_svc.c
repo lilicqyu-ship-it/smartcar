@@ -599,6 +599,16 @@ void scr_svc_on_ws_json(const char *type, const void *cjson_root)
         s.cal.full_scale = (int16_t)(cJSON_IsNumber(fs) ? fs->valueint : 0);
         s.cal.wheel_dia = (int16_t)(cJSON_IsNumber(wd) ? wd->valueint : 0);
         UNLOCK();
+    } else if (strcmp(type, "jogcnt") == 0) {
+        const cJSON *d = cJSON_GetObjectItem(r, "d");
+        LOCK();
+        s.cal.have_jog = true;
+        s.cal.jog_on = j_u32(r, "on") != 0;
+        s.cal.jog_ms = now_ms();
+        for (int i = 0; i < 4; i++) {
+            s.cal.jog_d[i] = (int32_t)j_arr_i(d, i);
+        }
+        UNLOCK();
     } else if (strcmp(type, "otastatus") == 0) {
         uint32_t stv = j_u32(r, "state");
         uint32_t pct = j_u32(r, "pct");

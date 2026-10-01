@@ -98,6 +98,13 @@ typedef struct {
     int8_t   rec_invert[4];
     int16_t  full_scale, wheel_dia;
     int64_t  rec_ms;
+
+    /* live jog counts {"t":"jogcnt"}: per-motor (A..D) encoder delta since
+     * the current jog press, 10 Hz while jogging */
+    bool     have_jog;
+    bool     jog_on;
+    int32_t  jog_d[4];
+    int64_t  jog_ms;
 } svc_cal_t;
 
 void scr_svc_start(void);

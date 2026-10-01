@@ -76,6 +76,7 @@ extern "C" {
  * NUL-terminated strings; SBL slot all-zero when the SBL is absent. */
 #define SF_CID_EVT_APP_VER    0x24u   /* TYPE_EVT, 24 B "APPFW tc275_car vX.Y.Z" */
 #define SF_CID_EVT_SBL_VER    0x25u   /* TYPE_EVT, 24 B "SBLFW tc275_sbl vX.Y.Z" */
+#define SF_CID_EVT_JOG_CNT    0x26u   /* TYPE_EVT, 17 B {on, delta i32x4 A..D}   */
 
 /* OTA (0x06 OTA_D / 0x07 OTA_C) */
 #define SF_CID_OTA_BEGIN     0x30u   /* {u32 total, u32 crc32}                */
