@@ -37,8 +37,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DIST = ROOT / "firmware" / "dist"
 PROJECTS = ("esp32c6_car", "smartcar_remote", "tc275_car", "tc275_sbl")
-ALIASES = {"c6": "esp32c6_car", "remote": "smartcar_remote",
-           "app": "tc275_car", "sbl": "tc275_sbl", "myCarSbl": "tc275_sbl"}
+ALIASES = {"c6": "esp32c6_car", "r-s3": "smartcar_remote",
+           "app": "tc275_car", "sbl": "tc275_sbl"}
 
 # TC275 侧固定约定：命令行构建 = SCons（build/tasking-<cfg>/，产物名带版本）；
 # ADS IDE 构建目录作为产物发现的回退（与各仓库 README 一致）。
