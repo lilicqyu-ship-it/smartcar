@@ -405,6 +405,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
 #define WS_TX_LOCK_MS     600u    /* > the 500 ms SO_SNDTIMEO, so a lock timeout
                                    * can only mean a genuinely stalled peer      */
 #define WS_TX_FAIL_MAX      3u    /* consecutive failed writes = the peer is gone */
+#define WS_VGA_MIN_GAP_MS   400u   /* VGA pacing: ~2.5 fps = handset decode rate */
 #define WS_FRAME_BUDGET_MS 1500u   /* whole-frame write budget (several SO_SNDTIMEO ticks) */
 #define WS_STATE_PERIOD_MS 1000u
 #define WS_TASK_STACK       3072
@@ -433,6 +434,7 @@ typedef struct
     volatile uint8_t     tx_fail;      /* consecutive failed writes          */
     char                 profile[16];
     uint32_t             started_ms;
+    uint32_t             last_tx_ms;   /* last binary frame put on the air   */
 } ws_session_t;
 
 /* One handset at a time, so the session is a static: nothing to free under the
@@ -695,6 +697,18 @@ static void ws_pump_task(void *arg)
         }
 
         bool send = s->subscribed && fb->format == PIXFORMAT_JPEG;
+        /* Pace VGA to what the handset can show: it decodes a 640x480 frame in
+         * ~450 ms, so at the sensor's ~11 fps three of every four VGA frames
+         * crossed the air only to be dropped latest-only on arrival (bench
+         * 10-02: drop=742 of ~1000).  That wasted airtime is what starved the
+         * handset's control uplink into RADIO LOST.  QVGA (~70 ms decode)
+         * keeps the full rate. */
+        if (send && fb->width > 320u) {
+            if (now_ms - s->last_tx_ms < WS_VGA_MIN_GAP_MS) {
+                send = false;
+                s_ws_dropped++;
+            }
+        }
         size_t need = CAM_HEADER_LEN + fb->len;
         if (send && need + WS_FRAME_HEADROOM > s->ocap)
         {
@@ -756,6 +770,7 @@ static void ws_pump_task(void *arg)
                     break;
                 } else {
                     s_frames++;
+                    s->last_tx_ms = now_ms;
                 }
             }
         }
