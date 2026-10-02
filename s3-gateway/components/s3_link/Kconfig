@@ -1,0 +1,67 @@
+menu "S3-CAM LINK (SPI slave to TC275, tc275_car doc 22)"
+
+    config S3_LINK_SPI_SCLK_GPIO
+        int "LINK SPI SCLK GPIO (from TC275 P33.11)"
+        default 40
+        range 0 48
+        help
+            TC275 is the SPI master.  Signal names are unchanged from the C6
+            wiring (X1-3 P33.11 SCLK), it now lands on the S3-CAM free header
+            pin GPIO40.
+
+    config S3_LINK_SPI_MOSI_GPIO
+        int "LINK SPI MOSI GPIO (from TC275 P33.12)"
+        default 39
+        range 0 48
+        help
+            X1-4 P33.12 MTSR -> GPIO39 (master TX / slave RX).
+
+    config S3_LINK_SPI_MISO_GPIO
+        int "LINK SPI MISO GPIO (to TC275 P33.13)"
+        default 41
+        range 0 48
+        help
+            X1-5 P33.13 MRST <- GPIO41 (slave TX, held inactive between
+            half-duplex transactions).
+
+    config S3_LINK_SPI_CS_GPIO
+        int "LINK SPI CS GPIO (from TC275 P23.4 SLSO5)"
+        default 42
+        range 0 48
+        help
+            X1-12 P23.4 SLSO5 -> GPIO42.
+
+    config S3_LINK_SPI_IRQ_GPIO
+        int "LINK data-ready IRQ GPIO (open-drain, to TC275 P23.0)"
+        default 2
+        range 0 48
+        help
+            GPIO2 -> X1-8 P23.0 (IOM edge IRQ).  Open-drain; the 10k pull-up
+            to 3V3 is external hardware (22 §3.2 - without it the link
+            degrades to pure polling).  Chosen because it is the only free
+            S3-CAM pin outside the camera bus (4..18), native USB (19/20),
+            flash (26..32) and octal PSRAM (33..37).
+
+    config S3_LINK_SPI_CLOCK_HZ
+        int "Production clock step (master-driven, diag mirror)"
+        default 5000000
+        range 1000000 20000000
+        help
+            The master owns the clock; this value is what the slave reports
+            in diagnostics and what the TC275 side should be configured to.
+            Ladder per 22 §8 G5: 1/2/5/10/20 MHz, production baseline 5 MHz.
+
+    config S3_LINK_DEBUG_UART_RX_GPIO
+        int "Debug console RX GPIO (documentation anchor)"
+        default 44
+        help
+            ESP32-S3 UART0 lives on GPIO44(RX)/GPIO43(TX); the Freenove CAM
+            board is normally flashed and monitored over the on-board
+            USB-Serial-JTAG (GPIO19/20) instead, so these pins are only
+            documentation anchors - the LINK uses no UART at all (T3).
+
+    config S3_LINK_DEBUG_UART_TX_GPIO
+        int "Debug console TX GPIO (documentation anchor)"
+        default 43
+
+endmenu

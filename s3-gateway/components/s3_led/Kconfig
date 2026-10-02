@@ -1,0 +1,21 @@
+menu "s3_led (WS2812 status indicator)"
+
+    config S3_LED_ENABLE
+        bool "Enable WS2812 status LED patterns"
+        default y
+        help
+            One addressable RGB LED (WS2812) driven by RMT on a single GPIO.
+            The app state machine maps transitions onto patterns: boot=white
+            slow blink, factory_wait=yellow double-blink, net_start=blue 2 Hz,
+            online=green heartbeat (normal operation), net failure=red 4 Hz.
+
+    config S3_LED_GPIO
+        int "WS2812 data GPIO"
+        default 48
+        range 0 48
+        help
+            Freenove ESP32-S3-WROOM CAM keeps one WS2812 on GPIO48 (spare
+            on-board status LED).  GPIO26..32 are SPI flash and GPIO33..37
+            octal PSRAM - stay off those; GPIO45/46 are strapping pins.
+
+endmenu

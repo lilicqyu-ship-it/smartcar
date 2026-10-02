@@ -1,0 +1,97 @@
+# ---- target / flash ---------------------------------------------------------
+# Freenove ESP32-S3-WROOM-CAM (N16R8): 16 MB flash + 8 MB octal PSRAM
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
+
+# ---- PSRAM (camera frame buffers + wifi/lwip offload) -------------------------
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
+
+# ---- partition table (LLDD 2.1, unchanged from the C6 layout) -----------------
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# ---- web server (LLDD 8) ------------------------------------------------------
+CONFIG_HTTPD_WS_SUPPORT=y
+CONFIG_HTTPD_WS_PRE_HANDSHAKE_CB_SUPPORT=y
+CONFIG_HTTPD_WS_POST_HANDSHAKE_CB_SUPPORT=y
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=1024
+
+# ---- camera (esp32-camera) ----------------------------------------------------
+CONFIG_OV5640_SUPPORT=y
+CONFIG_CAMERA_TASK_STACK_SIZE=4096
+
+# ---- OTA / rollback (LLDD 4.7) ------------------------------------------------
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y
+CONFIG_BOOTLOADER_APP_ANTI_ROLLBACK_ENABLE=n
+
+# ---- NVS: bench build keeps encryption OFF (production re-enable with keys) ---
+CONFIG_NVS_ENCRYPTION=n
+
+# ---- core dump to flash (LLDD 4.10 / FR-9) ------------------------------------
+CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH=y
+CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF=y
+CONFIG_ESP_COREDUMP_CHECKSUM_CRC32=y
+CONFIG_ESP_COREDUMP_MAX_TASKS_NUM=16
+
+# ---- networking budget --------------------------------------------------------
+# captive DNS pulls every phone-app background probe into httpd; keep socket
+# headroom for a phone refreshing the control page while streaming MJPEG.
+CONFIG_LWIP_MAX_SOCKETS=32
+CONFIG_LWIP_MAX_ACTIVE_TCP=20
+CONFIG_LWIP_SO_REUSE=y
+CONFIG_LWIP_TCP_MSL=10000
+CONFIG_ESP_WIFI_NVS_ENABLED=y
+
+# ---- RTOS / watchdogs (LLDD 2.3 / 4.10) ---------------------------------------
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_TASK_WDT_INIT=y
+CONFIG_ESP_TASK_WDT_TIMEOUT_S=5
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y
+CONFIG_ESP_INT_WDT=y
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=6144
+
+# ---- core split (doc/20-core-assignment.md) -----------------------------------
+# core 0 = RF/IP plane: the WiFi driver and the esp_timer daemon are already
+#   pinned there, so lwIP's tcpip task is pinned to the same core instead of
+#   floating, and every socket-facing task (both httpd instances, DNS, mDNS,
+#   legacy TCP) is created on core 0 in code.
+# core 1 = board plane: camera capture, SPI LINK to TC275, the bridge pump,
+#   the OTA writer, WS2812 - none of them may preempt the RF stack.
+CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0=y
+CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU0=y
+CONFIG_CAMERA_CORE1=y
+CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y
+# boot-time task->core map log (main/app_main.c, bench builds only)
+CONFIG_FREERTOS_USE_TRACE_FACILITY=y
+
+# ---- brownout + reset semantics -----------------------------------------------
+CONFIG_ESP_BROWNOUT_DET=y
+CONFIG_ESP_SYSTEM_PANIC_PRINT_REBOOT=y
+
+# ---- S3-CAM pin plan (camera owns 4..18, USB-Serial-JTAG owns 19/20, ----------
+# ---- flash 26..32, octal PSRAM 33..37, console UART 43/44) --------------------
+# TC275 board link: SPI slave half-duplex on the free header pins
+CONFIG_S3_LINK_SPI_SCLK_GPIO=40
+CONFIG_S3_LINK_SPI_MOSI_GPIO=39
+CONFIG_S3_LINK_SPI_MISO_GPIO=41
+CONFIG_S3_LINK_SPI_CS_GPIO=42
+CONFIG_S3_LINK_SPI_IRQ_GPIO=2
+# debug console anchor (Freenove routes UART0 to the CH343 bridge)
+CONFIG_S3_LINK_DEBUG_UART_RX_GPIO=43
+CONFIG_S3_LINK_DEBUG_UART_TX_GPIO=44
+# onboard WS2812
+CONFIG_S3_LED_GPIO=48
+
+# ---- bench control bypass (PRODUCTION MUST set to n) --------------------------
+CONFIG_S3_BENCH_CTRL=y
+# bench: start a usable AP without factory provisioning data
+CONFIG_S3_FACTORY_DEV_OVERRIDE=y
+
+# ---- logging ------------------------------------------------------------------
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+CONFIG_LOG_MAXIMUM_LEVEL_INFO=y

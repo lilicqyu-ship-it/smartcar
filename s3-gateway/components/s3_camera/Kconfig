@@ -1,0 +1,46 @@
+menu "s3_camera (OV5640 capture + MJPEG stream)"
+
+    config S3_CAMERA_STREAM_PORT
+        int "Stream server TCP port"
+        default 81
+        range 1 65535
+        help
+            The control page (assets, port 80) embeds
+            http://<same-host>:81/stream as an <img>.
+
+    choice S3_CAMERA_FRAME_SIZE_ID
+        prompt "Streamed frame size"
+        default S3_CAMERA_FRAME_SIZE_VGA
+        help
+            Larger frames cost bandwidth and PSRAM; the OV5640 sensor does the
+            downsampling, so this also sets the JPEG encode load.
+
+        config S3_CAMERA_FRAME_SIZE_QVGA
+            bool "320x240 (lowest latency)"
+        config S3_CAMERA_FRAME_SIZE_HVGA
+            bool "480x320"
+        config S3_CAMERA_FRAME_SIZE_VGA
+            bool "640x480"
+        config S3_CAMERA_FRAME_SIZE_SVGA
+            bool "800x600"
+        config S3_CAMERA_FRAME_SIZE_HD
+            bool "1280x720"
+    endchoice
+
+    config S3_CAMERA_FRAME_SIZE
+        int
+        default 5 if S3_CAMERA_FRAME_SIZE_QVGA
+        default 7 if S3_CAMERA_FRAME_SIZE_HVGA
+        default 8 if S3_CAMERA_FRAME_SIZE_VGA
+        default 9 if S3_CAMERA_FRAME_SIZE_SVGA
+        default 11 if S3_CAMERA_FRAME_SIZE_HD
+
+    config S3_CAMERA_JPEG_QUALITY
+        int "JPEG quality (0 best .. 63 worst)"
+        default 12
+        range 4 40
+        help
+            OV5640 gainly-style scale: 10..15 looks good at VGA without
+            saturating the SoftAP link.
+
+endmenu
