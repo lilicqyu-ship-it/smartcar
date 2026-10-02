@@ -23,6 +23,8 @@ typedef enum {
     UI_PAGE_FW,         /* firmware update C6 / TC275 (doc/08 §4)  */
     UI_PAGE_CALIB,      /* TC275 calibration (doc/08 §5)           */
     UI_PAGE_FDIAG,      /* C6 + TC275 fault diagnostics (doc/08 §6) */
+    UI_PAGE_CAMERA,     /* live preview (S3Remote design doc 8.2)   */
+    UI_PAGE_VISION,     /* vision overlay + controls (doc 8.3)      */
     UI_PAGE_COUNT,
 } ui_page_t;
 

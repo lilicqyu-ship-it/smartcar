@@ -30,6 +30,10 @@ bool scr_link_send_bin(const uint8_t *data, size_t len);
 /* Thread-safe text send (JSON control plane, e.g. {"t":"ping"}). */
 bool scr_link_send_text(const char *text);
 
+/* Wi-Fi STA has an IP and the driving link is considered usable.  scr_cam
+ * gates its Camera WS on this: no DNS/TCP storms while the radio is down. */
+bool scr_link_wifi_up(void);
+
 /* Monotonic per-session frame sequence for proto SEQ. */
 uint8_t scr_link_next_seq(void);
 

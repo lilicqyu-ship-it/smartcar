@@ -113,12 +113,17 @@ cd tc275_sbl && scons -c         # 清理
 | contracts/ 文件 | 各工程副本 |
 |---|---|
 | link/proto_frames.h/.c | esp32c6_car `components/c6_proto/`，smartcar_remote `main/proto/` |
+| camera/cam_frame.h | s3-gateway `components/s3_proto/`，smartcar_remote `main/proto/` |
+| vision/vision.h | s3-gateway `components/s3_proto/`，smartcar_remote `main/proto/` |
 | ota/ota_layout.h, ota_meta.h, tcfw_bundle.h, ota_keys.h | tc275_sbl `mw/ota/`，tc275_car `mw/ota/` |
 | crypto/ed25519v.[ch], sha512.[ch], c6_consts.h | esp32c6_car `components/c6_ota/`，tc275_sbl `mw/crypto/`，tc275_car `mw/crypto/` |
 
 CI：`.github/workflows/contracts.yml` 在 push/PR 时运行同一校验（Linux + Windows 双平台）；
-四工程 CI 按路径触发（`esp32c6-car.yml` / `smartcar-remote.yml` / `tc275-car.yml` / `tc275-sbl.yml`），
-contracts/ 变更会同时触发全部——副本与源头同仓，漂移无处可藏。
+各工程 CI 按路径触发（`esp32c6-car.yml` / `s3-gateway.yml` / `smartcar-remote.yml` /
+`tc275-car.yml` / `tc275-sbl.yml`），contracts/ 变更会同时触发全部——副本与源头同仓，漂移无处可藏。
+`s3-gateway.yml` 比其余几个多一层：入库 defaults 是**台架口味**（免配网 AP + 调试后门），
+所以矩阵把台架与生产两种口味都编，生产那份（`sdkconfig.prod` 叠加层）断言后门确实关着，
+并对推流预算与核分工的 sdkconfig 键做断言。
 
 > `tc275_car/mw/proto/protocol.[ch]` 是 LINK 协议的旧版实现，待其采纳
 > `proto_frames.[ch]`（见 proto_frames.h 头注释的既定计划）后，
@@ -128,9 +133,13 @@ contracts/ 变更会同时触发全部——副本与源头同仓，漂移无处
 
 ```bash
 just tag c6 v1.0.1               # 例：esp32c6_car 发 v1.0.1
-just tag app v1.0.1              # tc275_car（app/）；同理 r-s3/、sbl/
+just tag gw-s3 v1.1.0            # s3-gateway（生产口味固件 + 合并镜像 + assets.bin）
+just tag app v1.0.1              # tc275_car（app/）；同理 gw-s3/、r-s3/、sbl/
 git push origin main --tags      # push tag 后对应 Release workflow 自动构建/发布
 ```
+
+> ESP 工程的版本真源是各自 `CMakeLists.txt` 的 `set(PROJECT_VER ...)`；发版前先改它，
+> 否则 Release 里"镜像版本 == tag"的断言会把发版挡下来（挡得住，正是它的用途）。
 
 ## GitHub 配置
 

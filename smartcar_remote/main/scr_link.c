@@ -10,6 +10,7 @@
  */
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -34,6 +35,7 @@
 #include "scr_ctrl.h"
 #include "scr_svc.h"
 #include "proto/proto_frames.h"
+#include "proto/vision.h"
 
 #define MON_PERIOD_MS       250     /* monitor task tick            */
 
@@ -174,6 +176,62 @@ static void ws_apply_hello(const cJSON *root)
     }
 }
 
+/* {"t":"vision",...} gateway result push (contracts/vision/vision.h units).
+ * Non-safety data (design R-ADR-04): consumed into app_state for display only;
+ * the control loop never reads it. */
+static void ws_handle_vision(const cJSON *root)
+{
+    const cJSON *m = cJSON_GetObjectItem(root, VISION_F_MODE);
+    int idx = vision_mode_from_str(cJSON_IsString(m) ? m->valuestring : NULL);
+    if (idx < 0) {
+        return;
+    }
+    scr_vision_result_t v = { 0 };
+    v.mode = (uint8_t)idx;
+    app_state_set_vision_mode(v.mode);
+    if (idx == VISION_MODE_IDX_OFF) {
+        return;
+    }
+
+    v.valid = cJSON_IsTrue(cJSON_GetObjectItem(root, VISION_F_VALID));
+    const cJSON *cf = cJSON_GetObjectItem(root, VISION_F_CONFIDENCE);
+    if (cJSON_IsNumber(cf)) {
+        float c = (float)cf->valuedouble;
+        if (c <= 1.5f) {                       /* schema: 0..1 fraction */
+            c *= 100.0f;
+        }                                      /* tolerate a 0..100 sender  */
+        if (c < 0.0f)   { c = 0.0f; }
+        if (c > 100.0f) { c = 100.0f; }
+        v.confidence = (uint8_t)(c + 0.5f);
+    }
+    const cJSON *cx = cJSON_GetObjectItem(root, VISION_F_CX);
+    if (cJSON_IsNumber(cx)) {
+        v.cx = (int16_t)cx->valueint;
+    }
+    const cJSON *er = cJSON_GetObjectItem(root, VISION_F_ERROR);
+    if (cJSON_IsNumber(er)) {
+        v.error_x1000 = (int16_t)lround(er->valuedouble * 1000.0);
+    }
+    const cJSON *an = cJSON_GetObjectItem(root, VISION_F_ANGLE);
+    if (cJSON_IsNumber(an)) {
+        v.angle_x10 = (int16_t)lround(an->valuedouble * 10.0);
+    }
+    const cJSON *ts = cJSON_GetObjectItem(root, VISION_F_TS);
+    if (cJSON_IsNumber(ts)) {
+        v.ts_ms = (uint32_t)ts->valuedouble;
+    }
+    const cJSON *cnt = cJSON_GetObjectItem(root, VISION_F_COUNT);
+    if (cJSON_IsNumber(cnt)) {
+        v.objects_count = (uint16_t)cnt->valueint;
+    } else {
+        const cJSON *objs = cJSON_GetObjectItem(root, VISION_F_OBJECTS);
+        if (cJSON_IsArray(objs)) {
+            v.objects_count = (uint16_t)cJSON_GetArraySize(objs);
+        }
+    }
+    app_state_set_vision_result(&v);
+}
+
 static void ws_handle_text(const char *data, int len)
 {
     cJSON *root = cJSON_ParseWithLength(data, len);
@@ -220,6 +278,18 @@ static void ws_handle_text(const char *data, int len)
             const cJSON *b = cJSON_GetObjectItem(root, "sbl");
             app_state_set_tc_ver(cJSON_IsString(a) ? a->valuestring : "",
                                  cJSON_IsString(b) ? b->valuestring : "");
+        } else if (strcmp(t->valuestring, VISION_T_VISION) == 0) {
+            ws_handle_vision(root);
+        } else if (strcmp(t->valuestring, VISION_T_DRIVE_MODE) == 0) {
+            /* ack {"mode":"assist","ok":true} or a state beacon: on ok=false
+             * the gateway refused (vision stale / TC down) - keep showing the
+             * last confirmed mode, so the UI naturally reverts */
+            const cJSON *m = cJSON_GetObjectItem(root, VISION_F_MODE);
+            const cJSON *ok = cJSON_GetObjectItem(root, VISION_F_OK);
+            int dm = vision_drive_mode_from_str(cJSON_IsString(m) ? m->valuestring : NULL);
+            if (dm >= 0 && (!cJSON_IsBool(ok) || cJSON_IsTrue(ok))) {
+                app_state_set_drive_mode((uint8_t)dm);
+            }
         } else if (strcmp(t->valuestring, "err") == 0) {
             const cJSON *e = cJSON_GetObjectItem(root, "e");
             if (cJSON_IsString(e) && strcmp(e->valuestring, "auth") == 0) {
@@ -718,6 +788,11 @@ bool scr_link_send_text(const char *text)
 uint8_t scr_link_next_seq(void)
 {
     return ++s_link.seq;
+}
+
+bool scr_link_wifi_up(void)
+{
+    return s_link.wifi_up && s_link.got_ip;
 }
 
 void scr_link_request_pair(void)

@@ -1,7 +1,8 @@
 # smartcar 固件 monorepo 总控
-# 四个固件工程（esp32c6_car / smartcar_remote / tc275_car / tc275_sbl）与 contracts/
-# 共享接口、firmware/fw.py 工具链同仓管理：一次提交一次推送，git status 只会有真实
-# 文件差异；版本 tag 带工程前缀（c6/ r-s3/ app/ sbl/，与 fw.py 工程别名一致）。
+# 五个固件工程（esp32c6_car / s3-gateway / smartcar_remote / tc275_car / tc275_sbl）
+# 与 contracts/ 共享接口、firmware/fw.py 工具链同仓管理：一次提交一次推送，git status
+# 只会有真实文件差异；版本 tag 带工程前缀（c6/ gw-s3/ r-s3/ app/ sbl/，与 fw.py 工程
+# 别名一致）。
 #
 # 跨平台：所有配方只调用 bash + scripts/*.sh，不用 shebang 配方。
 # Windows 上必须是 Git Bash —— 裸 "bash" 在 Windows 常解析到 WSL 的
@@ -28,10 +29,11 @@ tag proj ver:
     @echo "已建 tag {{proj}}/{{ver}}——git push origin {{proj}}/{{ver}} 后触发 Release"
 
 # —— 固件统一管理（firmware/fw.py；详见 firmware/README.md）——
-# 工程名: esp32c6_car | smartcar_remote | tc275_car | tc275_sbl（别名 c6/r-s3/app/sbl）
+# 工程名: esp32c6_car | s3-gateway | smartcar_remote | tc275_car | tc275_sbl
+#         （别名 c6/gw-s3/r-s3/app/sbl）
 py := if os() == "windows" { "python" } else { "python3" }
 
-# 四工程固件产物 / 归档状态一览
+# 五工程固件产物 / 归档状态一览
 fw-list:
     @{{py}} firmware/fw.py list
 
@@ -41,12 +43,14 @@ fw-build project *args:
 
 # 一条指令编译+烧录: 默认先增量编译再烧，不会烧到旧产物
 #   --no-build 跳过编译只烧最近构建；编译不触发归档（归档走 fw-build）
-#   透传参数原样转给各工程烧录入口（esp32c6_car all -m / r-s3 -p COM7 monitor / tc275 --id N）
+#   透传参数原样转给各工程烧录入口（c6|gw-s3 all -m / r-s3 -p COM7 monitor / tc275 --id N）
+#   未给 -p 时自动认板：三块 ESP 板 USB 描述符相同，靠读 flash 里的工程名区分
+#   （首次会复位一次；跨板复用固件后删 ~/.cache/smartcar-fw/board_projects.json 重认）
 # 用法: just fw-flash <project> [透传参数]
 fw-flash project *args:
     @{{py}} firmware/fw.py flash {{project}} {{args}}
 
-# 归档产物到 firmware/dist/<工程>/[v版本-]<时间戳-g提交号>/（省略 project 则四工程全归档）
+# 归档产物到 firmware/dist/<工程>/[v版本-]<时间戳-g提交号>/（省略 project 则五工程全归档）
 fw-collect project="":
     @{{py}} firmware/fw.py collect {{project}}
 
@@ -61,9 +65,10 @@ fw-factory *args:
     @{{py}} firmware/fw.py factory {{args}}
 
 # 一条指令编译+OTA: 编译最新代码打签包写进遥控器暂存分区，
-#   遥控器 Settings > FIRMWARE 页点更新（S3 用自己的 token 推给 C6/TC275）
+#   遥控器 Settings > FIRMWARE 页点更新（S3 用自己的 token 推给 C6/网关/TC275；
+#   c6 与 gw-s3 都走 /ota/c6 + C6FW 契约，包名/URI 冻结不可改）
 #   --no-build 打包最近构建；--direct PC 直推（需在车网络）；--port/--version/--file/--seed 透传 fw.py ota
-# 用法: just fw-ota c6 | just fw-ota app
+# 用法: just fw-ota c6 | just fw-ota gw-s3 | just fw-ota app
 fw-ota project *args:
     @{{py}} firmware/fw.py ota {{project}} {{args}}
 

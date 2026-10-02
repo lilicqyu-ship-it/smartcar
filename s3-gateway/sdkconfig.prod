@@ -1,0 +1,22 @@
+# ---- 生产口味叠加层（CI 门禁与 Release 产物都走这一层）-----------------------
+# 本仓入库的 `sdkconfig.defaults` 是**台架口味**：没有出厂配网的板子也照样起来一个
+# 免配网的 AP（SD-DEV000 / sddev123456），并且 bridge/http/link 的调试后门全开。
+# 台架要的就是这个，产线和发布不能要，所以这两个符号单独放这一层，
+# 由 CI（`.github/workflows/s3-gateway.yml`）与 Release 显式叠加：
+#
+#   idf.py -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.prod" build
+#
+# 台架本地构建不要叠它（直接 `idf.py build`），否则工厂态的板子起不了 AP，
+# 会被误判成"移植坏了"。要在台架上试生产口味时，用独立构建目录，别覆盖
+# 现网 `sdkconfig`：
+#
+#   idf.py -B build_prod -DSDKCONFIG_DEFAULTS="sdkconfig.defaults;sdkconfig.prod" \
+#        -DSDKCONFIG=build_prod/sdkconfig build
+#
+# 叠层的前提是 sdkconfig **全新**（这里靠 -DSDKCONFIG 换个路径保证）。原因：
+# defaults 列表只填补 sdkconfig 里缺失的键，已存在的 CONFIG_S3_BENCH_CTRL=y
+# 会被静默保留 —— 实测过，直接叠在现网 sdkconfig 上产出的还是台架固件。
+# CI/Release 每次都是干净 checkout，天然满足；守这条的是 workflow 里的
+# "Bench backdoors really are off" 断言。
+CONFIG_S3_BENCH_CTRL=n
+CONFIG_S3_FACTORY_DEV_OVERRIDE=n

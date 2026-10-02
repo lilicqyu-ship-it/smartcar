@@ -32,6 +32,7 @@ typedef struct {
     lv_obj_t *rssi;         /* info row 2 left                    */
     lv_obj_t *lat;          /* info row 2 middle                  */
     lv_obj_t *loss;         /* info row 2 right                   */
+    lv_obj_t *cam;          /* top bar: CAM badge -> CAMERA page  */
     lv_obj_t *stop_lbl;
     int64_t   press_ms;
 } home_t;
@@ -64,6 +65,12 @@ static void stop_cb(lv_event_t *e)
 static void gear_cb(lv_event_t *e)
 {
     ui_nav_open(UI_PAGE_SETTINGS);
+}
+
+static void cam_badge_cb(lv_event_t *e)
+{
+    (void)e;
+    ui_nav_open(UI_PAGE_CAMERA);
 }
 
 /* one-touch mode select from the drive page (spec 33/34): each segment sets
@@ -251,7 +258,7 @@ void ui_home_create(lv_obj_t *root)
     lv_obj_align(sub, LV_ALIGN_LEFT_MID, TITLE_X, 12);
 
     lv_obj_t *right = lv_obj_create(bar);
-    lv_obj_set_size(right, STAT_W, 38);
+    lv_obj_set_size(right, STAT_W, 52);
     lv_obj_set_style_bg_opa(right, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(right, 0, 0);
     lv_obj_set_style_pad_all(right, 0, 0);
@@ -259,14 +266,19 @@ void ui_home_create(lv_obj_t *root)
     lv_obj_align(right, LV_ALIGN_RIGHT_MID, -(GEAR_W + GEAR_M + 6), 0);
     s_home.conn = mk_label(right, "SEARCHING", F_SM, lv_color_hex(UI_COL_DIM));
     s_home.owner = mk_label(right, "NO CONTROL", F_SM, lv_color_hex(UI_COL_WARN));
-    lv_obj_t *st_lbl[2] = { s_home.conn, s_home.owner };
-    for (int i = 0; i < 2; i++) {
-        lv_obj_set_size(st_lbl[i], STAT_W, lv_font_get_line_height(F_SM));
+    /* CAM badge (S3Remote design doc 8.1): green fps / grey STALE / red
+     * OFFLINE, text + colour never colour alone; tap opens the CAMERA page */
+    s_home.cam = mk_label(right, "", F_SM, lv_color_hex(UI_COL_DIM));
+    lv_obj_add_flag(s_home.cam, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_event_cb(s_home.cam, cam_badge_cb, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *st_lbl[3] = { s_home.conn, s_home.owner, s_home.cam };
+    const int row_h = lv_font_get_line_height(F_SM);
+    for (int i = 0; i < 3; i++) {
+        lv_obj_set_size(st_lbl[i], STAT_W, row_h);
         lv_label_set_long_mode(st_lbl[i], LV_LABEL_LONG_MODE_DOTS);
         lv_obj_set_style_text_align(st_lbl[i], LV_TEXT_ALIGN_RIGHT, 0);
+        lv_obj_align(st_lbl[i], LV_ALIGN_TOP_RIGHT, 0, i * row_h);
     }
-    lv_obj_align(s_home.conn, LV_ALIGN_TOP_RIGHT, 0, 0);
-    lv_obj_align(s_home.owner, LV_ALIGN_BOTTOM_RIGHT, 0, 0);
 
     lv_obj_t *gear = lv_button_create(bar);
     lv_obj_set_size(gear, GEAR_W, GEAR_W);
@@ -572,4 +584,30 @@ void ui_home_refresh(const scr_state_t *st)
         ui_label_set_text(s_home.lat, "--");
         ui_label_set_text(s_home.loss, "--");
     }
+
+#if CONFIG_SCR_CAM_WS_ENABLE
+    /* CAM badge: green fps / grey STALE / red OFFLINE (design doc 8.1) */
+    if (st->cam.conn == SCR_CAM_CONNECTED) {
+        if (st->cam.stale) {
+            ui_label_set_text(s_home.cam, "CAM STALE");
+            ui_label_set_color(s_home.cam, lv_color_hex(UI_COL_DIM));
+        } else if (st->cam.fps_x10 > 0) {
+            ui_label_set_fmt(s_home.cam, "CAM %u.%u fps",
+                             st->cam.fps_x10 / 10, st->cam.fps_x10 % 10);
+            ui_label_set_color(s_home.cam, lv_color_hex(UI_COL_OK));
+        } else {
+            ui_label_set_text(s_home.cam, "CAM IDLE");
+            ui_label_set_color(s_home.cam, lv_color_hex(UI_COL_DIM));
+        }
+        lv_obj_remove_flag(s_home.cam, LV_OBJ_FLAG_HIDDEN);
+    } else if (st->cam.conn == SCR_CAM_CONNECTING) {
+        ui_label_set_text(s_home.cam, "CAM LINK");
+        ui_label_set_color(s_home.cam, lv_color_hex(UI_COL_INFO));
+        lv_obj_remove_flag(s_home.cam, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        ui_label_set_text(s_home.cam, "CAM OFFLINE");
+        ui_label_set_color(s_home.cam, lv_color_hex(UI_COL_CRIT));
+        lv_obj_remove_flag(s_home.cam, LV_OBJ_FLAG_HIDDEN);
+    }
+#endif
 }

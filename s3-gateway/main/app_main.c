@@ -1,5 +1,5 @@
 /*
- * app_main.c - ESP32-C6 network coprocessor: boot orchestration (LLDD 4.1)
+ * app_main.c - ESP32-S3 gateway (C6 replacement): boot orchestration (LLDD 4.1)
  *
  * Composition root: this file is the only place that wires components
  * together (keeps the star dependency rule of LLDD 2.2 true).

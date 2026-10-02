@@ -101,14 +101,14 @@ void          app_diag_render(char *json, size_t cap);
 | app_main 栈 | 6144 B（CONFIG_ESP_MAIN_TASK_STACK_SIZE），核 0，仅空转 |
 | rb_chk 栈 | 3 KB，prio 5，**核 1**（回滚确认写 NVS/otadata，不在 esp_timer 上下文跑） |
 | 定时器 | 堆守护 10s 周期 / 回滚确认 45s 一次性（esp_timer 上下文） |
-| TWDT | bridge_task 已订阅（5 s）；见缺口 S-2 |
+| TWDT | bridge_task 与 link_task 已订阅（`bridge.c:927`、`link.c:688`）；见缺口 S-2 |
 
 ## 8. 完成状态表
 
 | # | 功能 | 状态 | 证据 / 缺口 |
 |---|---|---|---|
 | S-1 | BOOT 自检 + FACTORY_WAIT 分流 | ✅ | `app_main.c` 步骤 1–5；DEV_OVERRIDE 路径有高亮告警 |
-| S-2 | TWDT 初始化与订阅 | 🟡 | bridge_task 已 `esp_task_wdt_add`；**link_rx/link_tx/ota_task 未订阅**（LLDD §2.3 要求 uart_evt_task ✔） |
+| S-2 | TWDT 初始化与订阅 | 🟡 | bridge_task 与 link_task 已 `esp_task_wdt_add`；**cam_task/led_task/ota_task 未订阅**（LLDD §2.3 要求 link/bridge ✔，其余慢路径任务靠自身超时与堆守护兜底） |
 | S-3 | SELF_OTA / REBOOT_PENDING 状态 | 🟡 | 行为存在（ota_self 5s 重启定时器）但**未纳入状态枚举**，`/api/diag` 的 state 字段在 OTA 期间仍显示 online |
 | S-4 | FACTORY_WAIT 仅 DPT 通道开放 | 🟡 | 现实现：进 FACTORY_WAIT 后仍起完整 AP+HTTP（编码计划 C6 台架语义）；产线语义待 DPT 通道定稿后收紧 |
 | S-5 | 10s 堆守护 | ✅ | `guard_timer_cb`；只告警（决策记录在案） |

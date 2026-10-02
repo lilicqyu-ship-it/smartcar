@@ -1,3 +1,7 @@
 dependencies:
   espressif/esp32-camera:
     version: "^2.0.0"
+  # /ws/camera control text frames are JSON.  IDF 6.x removed the in-tree
+  # 'cJSON' component; it ships from the registry as espressif/cjson.
+  espressif/cjson:
+    version: "^1.7.0"

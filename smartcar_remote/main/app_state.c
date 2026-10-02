@@ -28,8 +28,14 @@ static scr_state_t s_state;
 static int64_t s_last_tele_ms;
 static bool    s_tele_seeded;
 
-/* alert slots: see the alerts section at the bottom of this file */
-#define SCR_ALERT_SLOTS 5
+/* video/vision freshness stamps (evaluated at snapshot time, never at write) */
+static int64_t s_last_cam_frame_ms;
+static int64_t s_last_vision_ms;
+
+/* alert slots: see the alerts section at the bottom of this file.
+ * 8 slots since the camera plane (design doc 6): camera/link alerts may
+ * co-exist with radio/battery/fault alerts without clobbering. */
+#define SCR_ALERT_SLOTS 8
 
 typedef struct {
     uint32_t          id;
@@ -67,6 +73,9 @@ void app_state_init(void)
     s_state.rssi     = 0;
     s_state.channel  = 0;
     s_state.c6_fw[0] = '-';
+    s_state.cam.sensor[0] = '-';
+    s_last_cam_frame_ms = 0;
+    s_last_vision_ms    = 0;
 }
 
 void app_state_snapshot(scr_state_t *out)
@@ -78,6 +87,13 @@ void app_state_snapshot(scr_state_t *out)
     out->uptime_ms   = (uint32_t)now;
     out->tele_fresh  = (s_last_tele_ms != 0) &&
                        ((now - s_last_tele_ms) < CONFIG_SCR_TELE_TIMEOUT_MS);
+    /* video: subscribed but no decodable frame inside the window -> STALE.
+     * s_last_cam_frame_ms == 0 means "never received a frame since the
+     * subscription started", which is stale by the same rule. */
+    out->cam.stale   = out->cam.subscribed &&
+                       ((now - s_last_cam_frame_ms) > CONFIG_SCR_CAM_FRAME_TIMEOUT_MS);
+    out->vision.fresh = (s_last_vision_ms != 0) &&
+                        ((now - s_last_vision_ms) < CONFIG_SCR_VISION_STALE_MS);
     xSemaphoreGive(s_mtx);
 }
 
@@ -208,6 +224,111 @@ void app_state_set_pair_status(const char *txt)
 {
     xSemaphoreTake(s_mtx, portMAX_DELAY);
     snprintf(s_state.pair_status, sizeof(s_state.pair_status), "%s", txt ? txt : "");
+    xSemaphoreGive(s_mtx);
+}
+
+/* ---- video / vision setters ---------------------------------------------------
+ * Counters and stats live in scr_cam (single owner); these setters only mirror
+ * them into the snapshot.  Freshness is deliberately NOT set here - the
+ * snapshot recomputes stale/fresh from the timestamps below (same pattern as
+ * tele_fresh, spec 101). */
+void app_state_set_cam_conn(scr_cam_conn_t c)
+{
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    s_state.cam.conn = c;
+    xSemaphoreGive(s_mtx);
+}
+
+void app_state_set_cam_subscribed(bool on)
+{
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    s_state.cam.subscribed = on;
+    if (on) {
+        s_last_cam_frame_ms = 0;    /* new subscription: demand a fresh frame */
+    }
+    xSemaphoreGive(s_mtx);
+}
+
+void app_state_set_cam_hello(const char *sensor, uint16_t w, uint16_t h)
+{
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    snprintf(s_state.cam.sensor, sizeof(s_state.cam.sensor), "%s", sensor ? sensor : "?");
+    s_state.cam.w = w;
+    s_state.cam.h = h;
+    xSemaphoreGive(s_mtx);
+}
+
+void app_state_set_cam_stats(uint8_t fps_x10, uint16_t decode_ms_max, uint16_t e2e_ms)
+{
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    s_state.cam.fps_x10 = fps_x10;
+    s_state.cam.decode_ms_max = decode_ms_max;
+    s_state.cam.e2e_ms = e2e_ms;
+    xSemaphoreGive(s_mtx);
+}
+
+void app_state_set_cam_rtt(uint16_t rtt_ms)
+{
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    s_state.cam.ping_rtt_ms = rtt_ms;
+    xSemaphoreGive(s_mtx);
+}
+
+void app_state_set_cam_counters(uint32_t seq, uint32_t drop,
+                                uint32_t frame_err, uint32_t decode_err)
+{
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    s_state.cam.seq = seq;
+    s_state.cam.drop = drop;
+    s_state.cam.frame_err = frame_err;
+    s_state.cam.decode_err = decode_err;
+    xSemaphoreGive(s_mtx);
+}
+
+void app_state_note_cam_frame(void)
+{
+    int64_t now = now_ms();
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    s_last_cam_frame_ms = now;
+    xSemaphoreGive(s_mtx);
+}
+
+void app_state_set_vision_mode(uint8_t mode)
+{
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    s_state.vision.mode = mode;
+    if (mode == 0 /* VISION_MODE_IDX_OFF */) {
+        s_state.vision.valid = false;
+        s_state.vision.objects_count = 0;
+        s_last_vision_ms = 0;
+    }
+    xSemaphoreGive(s_mtx);
+}
+
+void app_state_set_vision_result(const scr_vision_result_t *v)
+{
+    if (v == NULL) {
+        return;
+    }
+    int64_t now = now_ms();
+
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    s_state.vision.mode          = v->mode;
+    s_state.vision.valid         = v->valid;
+    s_state.vision.confidence    = v->confidence;
+    s_state.vision.cx            = v->cx;
+    s_state.vision.error_x1000   = v->error_x1000;
+    s_state.vision.angle_x10     = v->angle_x10;
+    s_state.vision.ts_ms         = v->ts_ms;
+    s_state.vision.objects_count = v->objects_count;
+    s_last_vision_ms = now;
+    xSemaphoreGive(s_mtx);
+}
+
+void app_state_set_drive_mode(uint8_t mode)
+{
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    s_state.vision.drive_mode = mode;
     xSemaphoreGive(s_mtx);
 }
 

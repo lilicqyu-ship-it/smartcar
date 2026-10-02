@@ -4,15 +4,17 @@
 > （引脚、8 MB flash、`esp32c6_car.bin`、`c6_adxl345`）仍是设计基准**，与本工程实际差异以
 > [`README.md`](../README.md) 的"引脚分配 / 摄像头与 MJPEG 推流 / build 产物与分区"三节为准：
 > 目标芯片 ESP32-S3（Freenove ESP32-S3-WROOM CAM，16 MB flash + 8 MB octal PSRAM）、
-> LINK 改为 SCLK40/MOSI39/MISO41/CS42/IRQ2、指示灯 GPIO48、新增 `s3_camera`（doc 19 待写）、
-> 不移植 `s3_adxl345`（doc 18 已删）。协议面（proto v2 / SF 帧 / `/ota/c6` / `C6FW`）零改动。
+> LINK 改为 SCLK40/MOSI39/MISO41/CS42/IRQ2、指示灯 GPIO48、新增 `s3_camera`（采集 + MJPEG/WS 双通道，见 doc 19）、
+> 不移植 `s3_adxl345`（doc 18 已删）、说明书要求的 microSD 存储同样不移植（doc 21 §6）。
+> 协议面（proto v2 / SF 帧 / `/ota/c6` / `C6FW`）零改动。
+> 与《SmartCar_S3CAM_OV5640_详细设计说明书_V1.0》的逐项对齐结论（含有意偏差的理由）见 doc 21。
 
 | 项 | 内容 |
 |---|---|
 | 文档版本 | V1.0（C6 基线）+ 2026-10-02 S3-CAM 移植批注 |
 | 日期 | 2026-09-26 |
 | 上游 | [21-software-design.md](../../tc275_car/doc/20-design/21-software-design.md)（量产 SDD，**设计基准**）→ [22-link-spi-design.md](../../tc275_car/doc/20-design/22-link-spi-design.md)（板间 SPI/SF 帧详细设计）→ [41-c6-docs-map.md](../../tc275_car/doc/40-esp32c6/41-c6-docs-map.md)（两仓库文档分工与跨仓 TODO）→ 本目录（各模块详细设计 + 完成状态） |
-| 代码基线 | `s3-gateway` 工作区（`idf.py build` 通过，`build/s3_gateway.bin` ≈ 1.06 MB，target esp32s3） |
+| 代码基线 | `s3-gateway` 工作区（`idf.py build` 通过，`build/s3_gateway.bin` ≈ 1.07 MB，target esp32s3） |
 | 控制端 | 手机 Web 控制页（`assets_src/`，烧入 assets 分区）＋ ESP32-S3 LCD 遥控器（平级仓库 `../smartcar_remote`，2026-09-29 起：proto v2 编解码原样复用本仓 s3_proto，协议面零改动对接，**双端联调待做**） |
 
 ## 状态图例
@@ -44,8 +46,9 @@
 | [13](13-verification.md) | 验证与测试汇总 | `test/host/` | LLDD §9 + doc 22 §8 | 🟡 G1 绿 / G2 绿 | G3 走查完毕；G4 HIL 未开始 |
 | [14](14-sf-link.md) | **SF 链路详设（SPI 落地）** | `components/s3_sf/` `components/s3_link/` | tc275_car doc 22 §4–§5 | 🟩 代码完成 | ✅ test_sf 7 项；波形兼容待台架 |
 | [15](15-led.md) | WS2812 状态指示灯 | `components/s3_led/` | bring-up 运维需求 | 🟩 代码完成 | 🟩 真机验证（绿心跳=正常） |
-| 19（待写） | OV5640 采集 + MJPEG 推流 | `components/s3_camera/` | S3-CAM 移植新增需求 | 🟩 代码完成 | 🟩 真机启动验证（OV5640 探测 + :81 推流起）；手机侧画面待看 |
+| [19](19-camera.md) | OV5640 采集 + 视频双通道（MJPEG `:81/stream` / WS 文本面+二进制 `:81/ws/camera`，8.2 已落地） | `components/s3_camera/` | S3-CAM 移植新增需求 + 说明书表 14/15/17 | 🟩 代码完成 | 🟩 真机启动验证（OV5640 探测 + 两个端点注册）；手机画面、WS 解码与文本面 ops 待看 |
 | [20](20-core-assignment.md) | **双核功能分配**（核0=RF/IP 面，核1=板级面） | 各组件任务创建点 + `sdkconfig.defaults` | S3 移植新增（LLDD §2.3/§2.4 的单核基线） | 🟩 代码完成 | 🟩 开机 `task map` 核对；推流下 LINK RTT 待 HIL |
+| [21](21-spec-alignment.md) | **详细设计说明书对齐与偏差记录**（引脚、核分工、视频通道、命名、存储裁剪） | 上述各组件 + `sdkconfig.defaults` | 说明书 V1.0（`doc/SmartCar_S3CAM_OV5640_详细设计说明书_V1.0.md`） | 🟩 相机面已落地 | 🟩 偏差均有理由并记录；SD 已按决策移除（§6） |
 
 ## 系统级完成视图
 
@@ -59,8 +62,10 @@ FR-5  断链即报 LINK_STATE                 08-bridge + 04-link      🟩
 FR-6  自身 OTA + TC275 中继               09-ota + 08-bridge       🟡 (全流程待目标验证)
 FR-7  产测通道                           10-maint                 🔴 (骨架)
 FR-8  安全(token/防重放/验签)             06/07/09                 🟡 (secure boot/熔断属产线)
-FR-9  可靠性(WDT/coredump/堆守护)         01-app-state             🟡 (link 任务未订阅 TWDT)
+FR-9  可靠性(WDT/coredump/堆守护)         01-app-state             🟡 (bridge+link 已订阅；httpd/cam_task/led 未订阅)
 FR-10 遗留桥                             11-legacy                🟡 (代码完成未验证)
+追加  视频通道(S3-CAM)                    19-camera                🟩 (双通道代码完成；手机端待看)
+裁剪  microSD 存储                        21-spec-alignment §6     ⬜ (实现过 1-bit SDMMC，2026-10-02 决策移除)
 ```
 
 ## 一致性约束（所有模块文档的公共口径）

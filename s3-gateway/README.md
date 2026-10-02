@@ -31,28 +31,31 @@ components/
   s3_pair/       配对窗口跟随 + 会话 token（SHA-256 截断存储）+ 30s 宽限
   s3_bridge/     三台泵：命令/遥测广播(50Hz 邮箱+慢客户端降频)/OTA 中继(8×512B 信用窗)
   s3_ota/        自身 A/B：bundle 流式解析 + ed25519 验签(仅验签) + assets 更新 + 回滚
-  s3_camera/     OV5640 采集 + MJPEG 推流（独立 httpd:81，见下节）
+  s3_camera/     OV5640 采集 + 视频通道（独立 httpd:81：MJPEG /stream 与 WS /ws/camera，见下节）
   s3_maint/      BLE DPT（CONFIG_S3_MAINT_BLE，默认关）
   s3_legacy/     TCP 8080 直通桥（CONFIG_S3_LEGACY_TCP，默认关）
 assets_src/      控制页源码（实时画面 + 摇杆 + 50Hz 仪表/车速表 + 配对 + 双板 OTA）
 tools/           build_assets.py · sign_bundle.py · ed25519_ref.py · gen_crypto_consts.py
+                 check_streaming_budget.sh（推流预算/核分工断言，CI 与 Release 都调）
 test/host/       主机单测（proto 模糊 10^7 / sha512 / ed25519 RFC8032 / bundle）
 ```
 
 C6 版里的 `c6_adxl345`（GY-291 台架三轴加速度计，仅 /diag 本地显示）在本工程**不移植**：
 S3-CAM 的空闲脚要让给 SPI LINK，IMU 仍留在 C6 治具上。
+详设说明书要求的 **microSD 存储同样不做**（实现过 1-bit SD-MMC 后于 2026-10-02 整块移除，
+理由与保留下来的技术结论见 [doc/21-spec-alignment.md](doc/21-spec-alignment.md) §6）。
 
 ## 引脚分配（本板唯一真源）
 
 | 用途 | GPIO | 说明 |
 |---|---|---|
-| 摄像头数据 | 4–18 | XCLK15 · SIOD4 · SIOC5 · Y9..Y2=16,17,18,12,10,8,9,11 · VSYNC6 · HREF7 · PCLK13（等同 `CAMERA_MODEL_ESP32S3_EYE`） |
+| 摄像头数据 | 4–13 · 15–18 | XCLK15 · SIOD4 · SIOC5 · Y9..Y2=16,17,18,12,10,8,9,11 · VSYNC6 · HREF7 · PCLK13（等同 `CAMERA_MODEL_ESP32S3_EYE`）；**14 是这段里唯一空出来的脚**，当前未使用 |
 | USB-Serial-JTAG | 19 / 20 | 烧录与监视走原生 USB |
 | SPI flash | 26–32 | 禁占用 |
 | octal PSRAM | 33–37 | 禁占用（帧缓冲在此） |
 | UART0（文档锚点） | 43 / 44 | 台架一般用不到，控制台默认走 USB |
-| TC275 LINK SPI | SCLK40 · MOSI39 · MISO41 · CS42 | `CONFIG_S3_LINK_SPI_*_GPIO` |
-| LINK 数据就绪 IRQ | 2 | 开漏 + 外部 10k 上拉到 3V3（22 §3.2） |
+| TC275 LINK SPI | SCLK40 · MOSI39 · MISO41 · CS42 | `CONFIG_S3_LINK_SPI_*_GPIO`；说明书表 11 的 14/21/47/42/1 **未采纳**，理由见 doc/21 §2 |
+| LINK 数据就绪 IRQ | 2 | 开漏 + 外部 10k 上拉到 3V3（22 §3.2）；1 与 2 都不是 S3 的 strapping 脚 |
 | WS2812 状态灯 | 48 | 板载单颗可寻址灯 |
 
 TC275 侧信号名不变（P33.11 SCLK / P33.12 MTSR / P33.13 MRST / P23.4 SLSO5 / P23.0 IRQ），
@@ -66,7 +69,7 @@ macOS/Linux 用 EIM 安装的激活脚本（`export.sh` 在无 `python_env` 时�
 source ~/.espressif/tools/activate_idf_v6.1.sh
 idf.py set-target esp32s3     # 首次；sdkconfig.defaults 已写死 target
 idf.py build
-idf.py -p /dev/cu.usbmodem11201 flash monitor
+idf.py -p PORT flash monitor        # PORT 见「台架验证状态」：网关与遥控器同 VID/PID
 ```
 
 Windows 仍是 `idf.py build` / `idf.py -p COM7 flash`。
@@ -75,6 +78,25 @@ Windows 仍是 `idf.py build` / `idf.py -p COM7 flash`。
   `sddev123456` 启动。**量产必须设为 n**（严格走 FACTORY_WAIT）。
 - 台架调试可在 menuconfig 调高日志等级（默认 WARN）；改了 `sdkconfig` 而不改
   `sdkconfig.defaults` 时，该设置只留在本机。
+- 组件依赖走 IDF 组件管理器（`components/s3_camera/idf_component.yml`：
+  `espressif/esp32-camera` + `espressif/cjson`）。IDF 6.x 把 cJSON 从 in-tree 的
+  `cJSON` 组件挪进了 registry，因此 `s3_camera` 的 `PRIV_REQUIRES` 写
+  `espressif__cjson`；解析结果锁在入库的 `dependencies.lock` 里。
+- **生产口味**（关台架后门）靠 `sdkconfig.prod` 叠加层，CI 与 Release 都走它：
+  `idf.py -DSDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.prod' build`。
+  前提是 `sdkconfig` 全新——defaults 只填补 `sdkconfig` 里缺失的键，叠在本机现网
+  配置上会静默无效（详见该文件头注释）。
+
+## CI 与发版（monorepo `.github/workflows/`）
+
+| workflow | 触发 | 内容 |
+|---|---|---|
+| `s3-gateway.yml` | push/PR 命中 `s3-gateway/**` 或 `contracts/**` | host 单测 + 控制页 JS 语法；固件矩阵**两种口味都编**（台架 + 生产），生产那份断言后门已关，两份都跑 `tools/check_streaming_budget.sh`（推流预算/核分工）与 `tools/ci_size_report.py`（大小门禁）|
+| `s3-gateway-release.yml` | tag `gw-s3/vX.Y.Z`（`just tag gw-s3 v1.1.0`） | 先跑 host 门禁，再出生产口味固件，校验镜像 `PROJECT_VER` == tag，合并单文件镜像并发布 |
+
+发版产物：`s3_gateway.bin`、`assets.bin`、`s3_gateway_vX.Y.Z_merged.bin`
+（合并件只到 `0x20000` 的 app 末尾；assets 在 `0x620000`，合进去会是个几 MB 的稀疏文件，
+所以单独发）。
 
 ## build 产物与分区（16 MB flash）
 
@@ -105,7 +127,11 @@ Windows 仍是 `idf.py build` / `idf.py -p COM7 flash`。
 > python flash.py mon           # 仅串口监视
 > ```
 >
-> 均支持 `-p /dev/cu.usbmodem11201`（省略时按 USB VID 自动识别）。
+> 均支持 `-p PORT`（省略时自动识别）。**遥控器也是 ESP32-S3，两块板的 USB 描述符完全
+> 相同**（303A:1001），本脚本在只插一块 Espressif 板时才敢自动挑，两块都在时直接报错
+> 要求 `-p`。想在两块都插着时一条指令走对板，用 monorepo 的认板入口
+> `python ../firmware/fw.py flash gw-s3`（读 flash 里的 `esp_app_desc_t` 认工程，
+> 详见 `firmware/README.md`「烧录认板」）。
 
 ```bash
 # ① 全量烧录（新板 / 首次 / 分区表改动后）
@@ -124,20 +150,40 @@ parttool.py -p PORT write_partition --partition-name=otadata --input build/ota_d
 
 免 IDF 环境（产线治具）：`python -m esptool --chip esp32s3 -p PORT -b 460800 write-flash @build/flash_args`
 
-## 摄像头与 MJPEG 推流（s3_camera）
+## 相机与视频通道（s3_camera）
 
 - 采集：OV5640 直出 JPEG（`PIXFORMAT_JPEG`，XCLK 20 MHz，2 帧缓冲在 PSRAM，
   `CAMERA_GRAB_LATEST`），档位与画质见 `CONFIG_S3_CAMERA_*`（默认 VGA / quality 12）。
-- **推流走独立 httpd 实例（默认 `:81`）**：`esp_http_server` 单任务串行处理请求，
-  若把阻塞的 MJPEG handler 注册到 80 端口那台，一个卡住的观看者会冻住控制页与
+- **两条视频通道都在独立 httpd 实例（默认 `:81`）上**：`esp_http_server` 单任务串行处理请求，
+  若把阻塞的视频 handler 注册到 80 端口那台，一个卡住的观看者会冻住控制页与
   所有 WebSocket 帧（遥控指令也在其上）。控制页只是 `<img src="http://<host>:81/stream">`。
+  - `http://<ap>:81/stream`：multipart MJPEG，给浏览器 `<img>`；
+  - `ws://<ap>:81/ws/camera`：**文本面 + WSBIN 双向会话**——
+    二进制：单条 WSBIN 帧 = 20 B 帧头 + JPEG
+    （`MAGIC CA56 / VER / FLAGS / SEQ u32 / TS_MS u32 / W u16 / H u16 / JPEG_LEN u32`，全小端，
+    TX/RX 同源 `contracts/camera/cam_frame.h`）；
+    文本面（LLDD 8.2）：连接即发 `cam_hello`，收 `subscribe/pause/ping/profile`，
+    回 `pong` 与 1 Hz `cam_state`（fps/seq/drop/subscribed）；帧头口径见 [doc/21 §3.2](doc/21-spec-alignment.md)，
+    ops 语义见 [doc/19 §5.4](doc/19-camera.md)。
 - 同机不同端口对 `<img>` 无跨域限制；页面本身仍是同源 80。
-- 一次只服务一个观看者（两个任务抢同一 2 帧队列只会各自丢帧），第二个请求返回 503；
+- 一次只服务一个观看者（两个任务抢同一 2 帧队列只会各自丢帧）：`/stream` 占 `s_clients`
+  （后到 503），`/ws/camera` 占 `s_ws_session`（后到直接拒绝升级），画面二选一；
   页面切后台会主动断开 `src` 让出通道。
+  慢查看者由 `send_wait_timeout=2 s` 兜底踢掉；WS 入站静默 `recv_wait_timeout=5 s`
+  释放会话（手持机暂停期每 4 s 一发文本 ping 按住它）。
+- 推流吞吐的上限是每条连接的 TCP 发送窗口：`sdkconfig.defaults` 把
+  `LWIP_TCP_SND_BUF/WND_DEFAULT` 从默认 5760（= 4 MSS，一帧要来回等 ACK，正是忽快忽停的根因）
+  抬到 14400，开机日志 `tcp tx win: 14400` 可核对；细节见 doc/19 §3.1。
+- 背压就是"丢到最新"：驱动在 handler 阻塞发送期间自动丢弃旧帧，没有第二条视频队列。
+- 运行态进 `/api/diag`：`camera{up,sensor,w,h,fps,frames,drop,stall,slow,view,wdrop}` + `psram_free`，
+  `/diag` 页面有对应区块；`stall`/`slow` 是"单帧写 socket 超过 100 ms"的次数与最慢耗时，
+  `wdrop` 是 `/ws/camera` 未订阅/坏帧而丢的在途帧数（= cam_state 的 `drop`）。
+- 页面侧不靠人盯：`<img>` 报错后 0.8 s 起指数退避重连（封顶 4 s），连接没断而画面停住时
+  用 `/api/diag` 的 `camera.frames` 判活，3 秒不推进就主动重开。
 - 启动顺序有硬约束：**探测/初始化在 `net_start()` 之前**（避免与 RF 上电峰值重叠，
   也把无摄像头时的 SCCB 扫描证据留在早期日志），**推流 httpd 在 `net_start()` 之后**
   （lwIP 起来之前 `httpd_start` 会踩 `tcpip_send_msg_wait_sem` 断言并反复复位）。
-- 摄像头缺失不影响其余功能：`camera_start()` 只告警，`/stream` 全程 503。
+- 摄像头缺失不影响其余功能：`camera_start()` 只告警，`/stream` 与 `/ws/camera` 全程 503。
 
 ## 双核分工（ESP32-S3）
 
@@ -189,14 +235,39 @@ ed25519 RFC 8032 正/反向量 + dev 密钥端到端；bundle 签名/哈希/越�
 - LINK 接线以本文件"引脚分配"表为准（SCLK40 / MOSI39 / MISO41 / CS42 / IRQ2），
   量产时钟 5 MHz（22 §8 G5）；TC275 仍是 SPI 主控
 
-## 台架验证状态（2026-10-02）
+## 台架验证状态（2026-10-02，收盘：视频 WS 通道已加，SD 存储已按决策移除）
 
-- ✅ `idf.py build`（v6.1，target esp32s3）产出 `s3_gateway.bin` 1.06 MB，ota_0 余量 66%
-- ✅ 真机连续冷启动一致：`octal_psram 8MB / 80MHz` → `Detected OV5640 camera (0x3c)`
-  → `cam config ok` → AP `SD-DEV000` + DHCP `192.168.4.1` + `mycar.local` →
-  `s3_http: httpd up (v1.1.0)` → `cam: MJPEG stream on :81/stream` → `state=online`
+- ✅ `idf.py build`（v6.1，target esp32s3）产出 `s3_gateway.bin` **1.02 MB**，ota_0 余量 66%
+  （含视频 WS 通道；SD 存储移除后省回 ~70 KB 的 FATFS + SDMMC）
+- ✅ **修正一条早前的错误结论**：`/ws/camera` 通道那版（含 cJSON 解帧）**当天并没有编过**——
+  IDF 6.x 已把 `cJSON` 移出 in-tree 组件，`s3_camera` 的 `PRIV_REQUIRES cJSON` 会让 cmake
+  配置阶段直接失败，另外 preview profile 用了旧帧尺寸枚举名（现名 `FRAMESIZE_QVGA/VGA`）。
+  补上 `espressif/cjson` 依赖并改正枚举后，两种口味（台架 + 生产）均构建通过，
+  台架版已重新烧板：`s3_gateway.bin` 1 069 920 B（生产版 1 069 280 B）。
+- ✅ 真机冷启动（当日烧的是仍带 `s3_sd` 的那版，相机与网络路径与现版一致）：
+  `s3 ll_cam: DMA Channel=1` → `cam: sensor OV5640 up: frame_size=8 quality=12`
+  → AP `SD-DEV000` + DHCP `192.168.4.1` + `mycar.local` → `s3_http: httpd up (v1.1.0)`
+  → `cam: MJPEG stream on http://<ap>:81/stream, camera ws on ws://<ap>:81/ws/camera`
+  → `state=online` → `task map` 与 `doc/20` §4 一致
+- ✅ 顺带验证过无卡路径：挂载 ~7 ms 超时退出、一行 WARN，网络与相机照起
+  （`sd: mount failed at /sdcard (...): ESP_ERR_TIMEOUT`）—— 该路径现已随 SD 一并删除
 - ✅ 双核绑核已由开机 `task map` 核对（`doc/20-core-assignment.md` §4 记录实测值）
 - ✅ WS2812（GPIO48）驱动起、`s3_led` 心跳正常
-- 🟩 未验证：手机侧画面/遥控（需要连上 AP 看）、TC275 联机（本板 SPI 脚已改，
-  需按上表重新接线后测波形与 RTT）
-- 🔴 未移植：`s3_adxl345`（见"目录"说明）
+- ✅ **SD 移除版已上台架复验**：板上 ota_0 的 `esp_app_desc_t` = `s3_gateway` / 1.1.0 /
+  构建时间 14:26:00，与本地 `build/s3_gateway.bin` 同一构建（0x103530）。复位后抓 6 s 日志：
+  AP + mDNS + `httpd up (v1.1.0)` + `MJPEG stream .../ camera ws .../ws/camera` 全部正常，
+  `task map: 17 tasks`（两个 httpd：core0 prio5 主控、core0 prio3 相机 :81），
+  已无 `sd:` 与 `/sdcard` 任何痕迹；`s3_link: TX stalled, re-armed` 仍是 TC275 未接的预期值
+- ✅ **当前树已上台架（收盘后补烧，RTS 脉冲冷启动抓 16 s）**：分区表 9 项与
+  `partitions.csv` 一致 → `camera: Detected OV5640 camera` → `cam: sensor OV5640 up:
+  frame_size=8 quality=12` → `wifi_init: tcp tx win: 14400` / `tcp rx win: 14400`（发送窗口
+  调优已在真机生效）→ `assets partition: 6 entries` → `MJPEG stream on ...:81/stream,
+  camera ws on ws://...:81/ws/camera`；16 s 内 0 次 panic/reboot，
+  `s3_link: TX stalled, re-armed` 仍是 TC275 未接的预期值
+- 🟩 未验证：手机侧画面/遥控、`/ws/camera` 握手与解帧（控制台冒烟片段见 `doc/21` §3.3）、
+  TC275 联机（本板 SPI 脚已改，需按上表重新接线后测波形与 RTT）
+- 🔴 不移植：`s3_adxl345`（见"目录"说明）、microSD 存储（doc 21 §6）
+
+台架串口（2026-10-02 认板实测，两块 S3 同插时以工程名区分而非 COM 号）：
+`/dev/cu.usbmodem11401` = **s3-gateway**（MAC `D8:85:AC:C9:F3:EC`）、
+`/dev/cu.usbmodem11301` = **smartcar_remote**（MAC `74:4D:BD:2D:A5:C4`）。

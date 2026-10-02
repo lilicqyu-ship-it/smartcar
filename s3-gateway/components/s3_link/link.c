@@ -757,6 +757,13 @@ static void link_task(void *arg)
             {
                 n = LINK_SEG_SIZE;
             }
+            /* done->len is the length this buffer was QUEUED with (always
+             * LINK_SEG_SIZE), which is what link_rx_requeue credits back - the
+             * pair is symmetric and RX_ROOM stays bounded by
+             * LINK_RX_BUFFERS * LINK_SEG_SIZE.  The bytes that actually arrived
+             * are done->trans_len (n above); subtracting that instead would net
+             * RX_ROOM up by (512 - L) per short segment until the register
+             * advertised space the DMA queue does not have. */
             if (done->len <= regs_get_u32(SF_REG_RX_ROOM))
             {
                 regs_set_u32(SF_REG_RX_ROOM,

@@ -149,7 +149,13 @@ def list_serial_ports():
 
 def detect_port():
     """(device, desc) of the board's port or None.  Espressif VID wins over
-    bridge chips; ties break by lowest COM number."""
+    bridge chips; a single hit in a VID group is taken, ties are never guessed.
+
+    The LCD remote is also an ESP32-S3 with the same native USB-Serial-JTAG
+    descriptors (303A:1001), so two Espressif ports means two boards: -p has
+    to say which one (or go through firmware/fw.py, which reads the flashed
+    project name to tell them apart).
+    """
     ports = list_serial_ports()
 
     def com_no(p):
@@ -157,8 +163,10 @@ def detect_port():
 
     for vids in ((ESPRESSIF_VID,), BRIDGE_VIDS):
         hits = sorted((p for p in ports if p[1] in vids), key=com_no)
-        if hits:
+        if len(hits) == 1:
             return hits[0][0], hits[0][3]
+        if hits:
+            return None
     if len(ports) == 1:
         return ports[0][0], ports[0][3]
     return None
@@ -175,10 +183,14 @@ def resolve_port(port):
         # codepages - keep them only when plain ASCII
         print(f"[c6] port {dev} ({desc if desc.isascii() else 'usb serial'})")
         return dev
-    seen = ", ".join(sorted(p[0] for p in list_serial_ports())) or "none"
+    ports = list_serial_ports()
+    seen = ", ".join(sorted(p[0] for p in ports)) or "none"
     hint = "-p COMx" if os.name == "nt" else "-p /dev/cu.usbmodemXXXX"
-    sys.exit(f"[c6] board port not found (ports: {seen}) - plug in the board "
-             f"(USB cable must be a data cable) or pass {hint}")
+    why = ("several Espressif boards attached (the LCD remote is an ESP32-S3 "
+           "with identical USB descriptors) - "
+           if len([p for p in ports if p[1] == ESPRESSIF_VID]) > 1
+           else "plug in the board (USB cable must be a data cable) or ")
+    sys.exit(f"[c6] board port not found (ports: {seen}) - {why}pass {hint}")
 
 
 def ensure_port_free(port):

@@ -27,14 +27,6 @@ menu "s3_camera (OV5640 capture + MJPEG stream)"
             bool "1280x720"
     endchoice
 
-    config S3_CAMERA_FRAME_SIZE
-        int
-        default 5 if S3_CAMERA_FRAME_SIZE_QVGA
-        default 7 if S3_CAMERA_FRAME_SIZE_HVGA
-        default 8 if S3_CAMERA_FRAME_SIZE_VGA
-        default 9 if S3_CAMERA_FRAME_SIZE_SVGA
-        default 11 if S3_CAMERA_FRAME_SIZE_HD
-
     config S3_CAMERA_JPEG_QUALITY
         int "JPEG quality (0 best .. 63 worst)"
         default 12

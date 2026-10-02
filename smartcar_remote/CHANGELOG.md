@@ -7,10 +7,21 @@
 
 ## [未发布]
 
+### 新增
+- **Remote 视频面（scr_cam）+ CAMERA/VISION 页落地**（按 Remote 设计文档 §16 文件清单）：Camera WS 客户端（独立 `esp_websocket_client` 实例、`cam_monitor_task` 独占拨号、3 s 重拨节拍、Control 断链联动拆链）、`cam_frame.h` 20 B 头校验、esp_jpeg(TJpgDec) RGB565 解码、深度-1 pending + 3 帧槽最新帧环 + 一代延迟释放、10 Hz LVGL 泵；app_state 扩 cam/vision 字段组与告警槽；host 自测新增 `test_cam_frame` / `test_vision`
+- Camera WS URI 带端口 `CONFIG_SCR_CAM_STREAM_PORT`（默认 81，对齐网关 `s3_camera` 流实例；此前按 LLDD 表 12 拨 :80 永远连不上）
+- 暂停期 4 s keepalive ping：用 pong 采样本平面（Camera WS 自己那条连接）的 RTT 进 DIAG 页，并在串口打一行 `camera pong: rtt=..ms`，不开 CAMERA 页也能台架证明文本面往返通。**注意它不是续命租约**：`esp_http_server` 只在 socket 可读时进 handler，`recv_wait_timeout` 只是 accept 时设的 `SO_RCVTIMEO`，网关不会因入站静默回收空闲 WS 会话（此前 changelog 写的"守住网关入站超时否则单观众位被回收"是错的，已更正）
+
 ### 变更
 - PROJECT_VER 升至 1.1.0（整车 1.1 基线，迎接 S3-CAM 替换 C6）
+- **订阅即声明档位**：`cam_subscribe_now()` 在 `{"op":"subscribe"}` 之后无条件补发
+  `{"op":"profile","name":..}`（原先只有配成 WEB 才发，REMOTE 走 `#else` 分支只打日志）。
+  `framesize` 是网关传感器的一组全局寄存器、与 `/stream` 共用，静默 subscribe 等于接受网关自己的
+  VGA，而 CAMERA 页的 320/640 radio 按说明书 106 只跟随回传尺寸——结果手持机 Kconfig 默认
+  `SCR_CAM_PROFILE_REMOTE`（320×240）与网关默认 VGA（640×480）互相拧着，radio 永远指着 640 FULL。
 
 ### 修复
+- **视频面永远 NO SIGNAL（blocker）**：WS 分片重组把 `ev->payload_len` 当本事件拷贝长度使用，而它是**整帧**总长（`data_len` 才是本片字节数）。`WS_RX_BUF=4096` < VGA JPEG 20–25 KB ⇒ 每帧拆 5–6 个事件，逐个越读堆约 19 KB 并让后片覆盖前片，SOI 侥幸可过、EOI 必挂 → `CAM_RX_JPEG_ERR` 持续计数。改取 `data_len` 后 `total = payload_offset + data_len` 成为真正的运行结束偏移，`total > ASM_CAP` 越界检查也随之成立（与 `scr_link.c` 控制面二进制路径一致）
 - C6 OTA 期间不再弹全屏 RADIO LOST 告警：上传饿死遥测与"接受后重启等待重连"两个窗口内静默（scr_svc 新增 `scr_svc_ota_quiet_c6()`，90 s 重连宽限；上传失败/宽限超时后告警照常）
 - TC275 断电（WS 仍连接）不再触发 RADIO LOST 全屏告警：告警只跟踪 S3↔C6 无线链路本身，车端离线由 SYSTEM 页 OFFLINE/STALE 与遥测 "--" 呈现（需配合 C6 侧遥测停播修复）
 

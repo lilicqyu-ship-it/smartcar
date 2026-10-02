@@ -95,6 +95,28 @@ typedef enum {
     SCR_SYS_EMERGENCY,
 } scr_sys_t;
 
+/* ---- video / vision plane (S3CAM LLDD 8/11, Remote design doc 6) -----------
+ * Frame DATA never enters the snapshot - only metadata; the RGB buffers are
+ * handed to the LVGL task through scr_cam's slot ring.  cam/vision MUST NOT
+ * feed app_state_derive(): the camera is a non-safety sensor (LLDD 17). */
+typedef enum {
+    SCR_CAM_IDLE = 0,       /* client disabled / never started        */
+    SCR_CAM_CONNECTING,
+    SCR_CAM_CONNECTED,
+} scr_cam_conn_t;
+
+/* latest {"t":"vision"} result (contracts/vision/vision.h units) */
+typedef struct {
+    uint8_t  mode;            /* VISION_MODE_IDX_*                      */
+    bool     valid;
+    uint8_t  confidence;      /* 0..100 percent                         */
+    int16_t  cx;              /* line centre px, preview coord space    */
+    int16_t  error_x1000;     /* normalized offset x1000                */
+    int16_t  angle_x10;       /* degrees x10                            */
+    uint32_t ts_ms;           /* gateway uptime of the producing frame  */
+    uint16_t objects_count;
+} scr_vision_result_t;
+
 typedef struct {
     scr_alert_level_t level;
     uint32_t id;
@@ -147,6 +169,37 @@ typedef struct {
     uint32_t     tc_fw_ver;
     uint8_t      hw_rev;
 
+    /* video plane (scr_cam owns the counters, pushes them at ~1 Hz) */
+    struct {
+        scr_cam_conn_t conn;
+        bool         subscribed;    /* preview subscription active          */
+        char         sensor[8];     /* cam_hello, e.g. "OV5640"             */
+        uint16_t     w, h;          /* live profile size (cam_hello/frame)  */
+        uint8_t      fps_x10;       /* measured display fps x10, 0 = --     */
+        uint32_t     seq;           /* last accepted frame seq              */
+        uint32_t     drop;          /* latest-only discards + seq gaps      */
+        uint32_t     frame_err;     /* header-level rejects                 */
+        uint32_t     decode_err;    /* JPEG decode failures                 */
+        uint16_t     decode_ms_max; /* windowed max decode time             */
+        uint16_t     e2e_ms;        /* now - frame TIMESTAMP_MS, smoothed   */
+        uint16_t     ping_rtt_ms;   /* camera-plane text ping -> pong RTT   */
+        bool         stale;         /* snapshot-time: subscribed but no frame */
+    } cam;
+
+    /* vision plane (single latest snapshot, no history - LLDD 11) */
+    struct {
+        uint8_t      mode;          /* VISION_MODE_IDX_*                    */
+        bool         valid;
+        uint8_t      confidence;    /* 0..100 %                             */
+        int16_t      cx;
+        int16_t      error_x1000;
+        int16_t      angle_x10;
+        uint32_t     ts_ms;
+        bool         fresh;         /* snapshot-time staleness gate         */
+        uint8_t      drive_mode;    /* 0 manual / 1 assist / 2 auto         */
+        uint16_t     objects_count;
+    } vision;
+
     /* control */
     scr_owner_t  owner;
     scr_mode_t   mode;
@@ -192,6 +245,22 @@ void app_state_set_c6_fw(const char *fw);
 void app_state_set_tc_ver(const char *app, const char *sbl);
 void app_state_set_telemetry(const proto_telemetry_t *t);
 void app_state_set_pair_status(const char *txt);    /* pairing page feedback  */
+
+/* ---- video / vision setters (scr_cam, scr_link) ------------------------------
+ * Counters are owned by scr_cam and pushed at ~1 Hz; note_cam_frame only
+ * stamps "a decodable frame just landed" for the snapshot-time stale gate. */
+void app_state_set_cam_conn(scr_cam_conn_t c);
+void app_state_set_cam_subscribed(bool on);
+void app_state_set_cam_hello(const char *sensor, uint16_t w, uint16_t h);
+void app_state_set_cam_stats(uint8_t fps_x10, uint16_t decode_ms_max, uint16_t e2e_ms);
+void app_state_set_cam_rtt(uint16_t rtt_ms);
+void app_state_set_cam_counters(uint32_t seq, uint32_t drop,
+                                uint32_t frame_err, uint32_t decode_err);
+void app_state_note_cam_frame(void);
+
+void app_state_set_vision_mode(uint8_t mode);       /* vision_cmd ack / hello */
+void app_state_set_vision_result(const scr_vision_result_t *v);
+void app_state_set_drive_mode(uint8_t mode);        /* 0/1/2, drive_mode ack  */
 
 /* ---- control side (called from scr_ctrl) --------------------------------------*/
 void app_state_set_joy(int16_t v, int16_t w);

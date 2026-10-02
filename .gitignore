@@ -11,5 +11,7 @@ firmware/dist/**/*.mdf
 /firmware/__pycache__/*.pyc
 /firmware/dist/esp32c6_car
 /firmware/dist/smartcar_remote
+# ESP 工程的归档不入 git（体积走 CI artifact / Release 附件，同一份 bin 不放两处）
+/firmware/dist/s3-gateway
 # 外部工具残留的差异文件（TortoiseGit/对比工具临时补丁等）
 *.diff

@@ -22,6 +22,7 @@
 #include "scr_settings.h"
 #include "scr_link.h"
 #include "scr_ctrl.h"
+#include "scr_cam.h"
 #include "scr_svc.h"
 #include "esp_heap_caps.h"
 #include "ui/ui.h"
@@ -117,6 +118,7 @@ void app_main(void)
     scr_link_start();
     scr_ctrl_start();
     scr_svc_start();        /* core 0: OTA / diag / calibration (doc/08) */
+    scr_cam_start();        /* core 0: Camera WS video plane (doc 08 §2) */
 #endif
 
     /* UI runs in the LVGL task context: take the display lock while building */

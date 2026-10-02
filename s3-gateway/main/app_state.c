@@ -17,6 +17,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include "camera_stream.h"
 #include "led.h"
 #include "link.h"
 #include "ota_self.h"
@@ -150,14 +151,21 @@ void app_diag_snapshot(app_diag_t *out)
 
 void app_diag_render(char *json, size_t cap)
 {
-    app_diag_t d;
+    app_diag_t    d;
+    camera_stats_t cs;
+
+    camera_stats(&cs);
+    const char *sensor = camera_sensor_name();
 
     app_diag_snapshot(&d);
     int n = (int)snprintf(json, cap,
         "{\"ver\":\"%s\",\"state\":\"%s\",\"slot\":\"%s\",\"factory\":%s,"
         "\"reset\":%u,\"selfcheck\":%u,\"coredump\":%s,\"heap_min\":%u,"
+        "\"psram_free\":%u,"
         "\"link\":{\"up\":%s,\"clock\":%u,\"rtt\":%u,\"crc_err\":%u,"
         "\"fmt_err\":%u,\"rx\":%u,\"tx\":%u,\"busy\":%u},"
+        "\"camera\":{\"up\":%s,\"sensor\":\"%s\",\"w\":%u,\"h\":%u,"
+        "\"fps\":%u.%u,\"frames\":%u,\"drop\":%u,\"stall\":%u,\"slow\":%u,\"view\":%u,\"wdrop\":%u},"
         "\"pair\":\"%s\",\"uptime_s\":%u",
         esp_app_get_description()->version,
         app_state_name(),
@@ -167,11 +175,19 @@ void app_diag_render(char *json, size_t cap)
         d.self_check,
         d.coredump_present ? "true" : "false",
         (unsigned)d.heap_min,
+        (unsigned)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
         d.link_up ? "true" : "false",
         (unsigned)d.clock_hz,
         (unsigned)d.rtt_ms,
         d.crc_errs, d.fmt_errs,
         (unsigned)d.frames_rx, (unsigned)d.frames_tx, (unsigned)d.tx_busy,
+        camera_available() ? "true" : "false",
+        (sensor != NULL) ? sensor : "",
+        (unsigned)cs.width, (unsigned)cs.height,
+        (unsigned)(cs.fps_x10 / 10u), (unsigned)(cs.fps_x10 % 10u),
+        (unsigned)cs.frames, (unsigned)cs.grab_fail,
+        (unsigned)cs.stalls, (unsigned)cs.worst_send_ms, (unsigned)cs.viewers,
+        (unsigned)cs.drop,
         (pair_state() == PAIR_CLAIMED) ? "claimed" :
         ((pair_state() == PAIR_OPEN) ? "open" : "idle"),
         (unsigned)d.uptime_s);

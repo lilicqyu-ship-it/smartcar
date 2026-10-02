@@ -1,0 +1,121 @@
+# Release (s3-gateway): push gw-s3/vX.Y.Z tag → 生产口味构建 → GitHub Release。
+# 产物: app 镜像、控制页资源、单文件合并镜像；release notes 取 tag 注释（git tag -a -m）。
+# tag 带工程前缀（gw-s3/），产物文件名里用剥掉前缀的版本号（避免文件名含 "/"）。
+# 与 CI 同一条构建配方（生产口味 = sdkconfig.defaults + sdkconfig.prod 叠加），
+# 所以门禁过了的东西才会被发出去；host 协议门禁作为前置 job 先跑一遍（跟 CI 同一
+# 环境同一命令），别把坏了 G1 门禁的固件推到产线上。
+# 合并镜像只到 ota_0（0x20000 + app），**不含 assets 分区**：assets 在 0x620000，
+# 合进去会得到一个 ~6.4 MB、中间全是 0 的文件；控制页单独发 assets.bin。
+name: Release (s3-gateway)
+
+on:
+  push:
+    tags: ["gw-s3/v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  host-tests:
+    name: Host gates before publish
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: s3-gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and run host tests
+        run: make -C test/host check
+
+      - name: Control page JS parses
+        run: for f in assets_src/*.js; do node --check "$f"; done
+
+  release:
+    name: Production build + GitHub release
+    runs-on: ubuntu-latest
+    needs: host-tests
+    container:
+      image: espressif/idf:v6.1
+    env:
+      # 容器镜像自带 IDF_TARGET=esp32；不覆盖就发了一块 esp32 的固件出去
+      IDF_TARGET: esp32s3
+    defaults:
+      run:
+        working-directory: s3-gateway
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # tag annotation 要读，别做浅克隆
+
+      - name: Derive version from tag
+        run: |
+          # gw-s3/v1.2.3 → VER=1.2.3（对 PROJECT_VER 用裸号，产物文件名统一补 v）
+          echo "VER=${GITHUB_REF_NAME#gw-s3/v}" >> "$GITHUB_ENV"
+
+      - name: Build (production flavor)
+        run: |
+          # Job 容器里的步骤走 docker exec，不执行镜像 entrypoint，
+          # IDF 环境需要每步手动 source。
+          . /opt/esp/idf/export.sh
+          # checkout 没有 sdkconfig（gitignore 掉了），叠加层因此是从零生成的：
+          # defaults 只填补 sdkconfig 里缺失的键，叠在旧 sdkconfig 上是静默无效的。
+          idf.py -DSDKCONFIG_DEFAULTS='sdkconfig.defaults;sdkconfig.prod' build
+
+      - name: Image version matches tag
+        run: |
+          # 本工程用的是写死的 set(PROJECT_VER "x.y.z")（不是 git describe，故意的：
+          # describe 会把 -dirty / -g<hash> 漏进 UI 和 hello.ver）。写死就得有人守着，
+          # 否则 tag 到 v1.2.0、板子自报 1.1.0，产线与 OTA 台账全对不上。
+          . /opt/esp/idf/export.sh
+          PV=$(python -c "import json;print(json.load(open('build/project_description.json'))['project_version'])")
+          if [ "$PV" != "$VER" ]; then
+            echo "::error::镜像里的 PROJECT_VER=$PV 与 tag v$VER 不一致 - 改 CMakeLists.txt 的 set(PROJECT_VER ...)"
+            exit 1
+          fi
+
+      - name: Bench backdoors really are off
+        run: |
+          # 发布物绝不能再有免配网 AP 与调试后门（Kconfig 默认是 y，靠叠加层关掉）
+          if grep -E '^(CONFIG_S3_BENCH_CTRL=y|CONFIG_S3_FACTORY_DEV_OVERRIDE=y)$' sdkconfig; then
+            echo "::error::发布固件里台架后门仍是开的"
+            exit 1
+          fi
+
+      - name: Streaming budget & core split intact
+        run: |
+          # 与 CI 同一条断言（清单见 tools/check_streaming_budget.sh）。放这里是因为
+          # tag 可以打在一条 CI 还没跑绿的提交上，发版不该因此放过卡顿配方。
+          sh tools/check_streaming_budget.sh
+
+      - name: Firmware size & resource margins
+        run: |
+          . /opt/esp/idf/export.sh
+          python tools/ci_size_report.py \
+            --map build/s3_gateway.map \
+            --bin build/s3_gateway.bin \
+            --partitions partitions.csv \
+            --extra-bin assets=build/assets.bin
+
+      - name: Merge one-file flash image
+        run: |
+          . /opt/esp/idf/export.sh
+          python -m esptool --chip esp32s3 merge-bin \
+            -o "build/s3_gateway_v${VER}_merged.bin" \
+            --flash-mode dio --flash-size 16MB --flash-freq 80m \
+            0x0 build/bootloader/bootloader.bin \
+            0x8000 build/partition_table/partition-table.bin \
+            0x19000 build/ota_data_initial.bin \
+            0x20000 build/s3_gateway.bin
+
+      - name: Release notes from tag annotation
+        run: git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > release_notes.md
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            s3-gateway/build/s3_gateway.bin
+            s3-gateway/build/assets.bin
+            s3-gateway/build/s3_gateway_v${{ env.VER }}_merged.bin
+          body_path: s3-gateway/release_notes.md

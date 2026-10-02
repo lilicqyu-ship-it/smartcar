@@ -1,6 +1,6 @@
 # firmware/ — 固件统一存放、编译、烧录
 
-smartcar 四个工程固件的总入口：一条命令编译、烧录、归档产物，
+smartcar 五个工程固件的总入口：一条命令编译、烧录、归档产物，
 不再需要分别记每个工程的构建烧录方式。
 
 ```bash
@@ -13,8 +13,8 @@ python firmware/fw.py factory [--flash]       # SBL+App 出厂整包合成（可
 python firmware/fw.py clean [--yes]           # 清空 firmware/dist/
 ```
 
-工程名：`esp32c6_car` | `smartcar_remote` | `tc275_car` | `tc275_sbl`，
-别名 `c6` / `remote` / `app` / `sbl`（tc275_sbl 历史上叫 myCarSbl，旧名也认）。
+工程名：`esp32c6_car` | `s3-gateway` | `smartcar_remote` | `tc275_car` | `tc275_sbl`，
+别名 `c6` / `gw-s3` / `r-s3` / `app` / `sbl`（tc275_sbl 历史上叫 myCarSbl，旧目录名也认）。
 推荐走 just：`just fw-list` / `just fw-build <project>` / `just fw-flash <project>` /
 `just fw-ota <project>` / `just fw-collect` / `just fw-factory` / `just fw-dist`。
 
@@ -56,13 +56,34 @@ commit 精确回到源码。
 | 工程 | 编译 | 烧录 |
 |---|---|---|
 | esp32c6_car | 委托 `esp32c6_car/flash.py build`（自动发现 EIM/IDF 环境，含 assets 打包） | 委托 `flash.py`：`full`（默认）/`assets`/`all`，`-p COMx` 指定串口，`-m` 烧后监视 |
-| smartcar_remote | EIM 环境 + `idf.py build` | `idf.py -p <串口> flash`，串口按 USB VID 自动识别（可 `-p COMx` 覆盖，余参透传如 `monitor`） |
+| s3-gateway | 委托 `s3-gateway/flash.py build`（C6 的 S3-CAM 替代固件，同一套 click CLI，含 assets 打包） | 委托同一个 `flash.py`：`full`/`assets`/`all`/`mon`，`-p <串口>` 指定，`-b` 先编 `-m` 烧后监视 |
+| smartcar_remote | EIM 环境 + `idf.py build` | `idf.py -p <串口> flash`，串口自动认板（可 `-p COMx` 覆盖，余参透传如 `monitor`） |
 | tc275_car | `python -m SCons`（解析 `.cproject`，与 ADS 同源零漂移；产物名带版本） | `tc275_sbl/tools/flash.py flash <App槽A.hex>`（AURIXFlasher CLI） |
 | tc275_sbl | `python -m SCons`（同上） | `tc275_sbl/tools/flash.py flash`（自动取 SCons 最新版本化 hex） |
 
 TC275 烧录透传 `flash.py` 的参数：`--id <n>` 选 DAS 端口、`--log x.xml`
 出详细日志等（需 DAS 服务在跑，装 ADS 即有）。烧录透传参数（`-m`/`-p`/`--id`
 等）原样透传，fw.py 自己的开关只有 `--no-build`。
+
+### 烧录认板（三块 ESP 板在 USB 层长得一样）
+
+遥控器与网关都是 ESP32-S3，和 C6 一样走原生 USB-Serial-JTAG：**VID/PID 完全相同
+（303A:1001）**，连芯片型号都区分不了两块 S3，USB 侧只有序列号（= 芯片 MAC）能区分
+物理板子。所以未给 `-p` 时按"这块板跑的是哪个工程"来认板：一次 `read-flash` 覆盖
+分区表（0x8000）与 `factory`/`ota_0` 两处 app 头，读 app 分区起始 +0x20 的
+`esp_app_desc_t`（magic `0xABCD5432`，`project_name` 在 +48），拿到工程名与固件版本。
+
+- 结果按 USB 序列号缓存到 `~/.cache/smartcar-fw/board_projects.json`
+  （`{序列号: {project, version}}`）：命中就不再读 flash，**未命中的板子会被复位一次**。
+- 每次解析都打印全表 `串口=工程(版本)`，选错板子当场可见；只插一块候选时同样会认板，
+  拔掉目标板不会把剩下那块当成目标。
+- 认板按分区表里 `type=app` 的分区扫，而不是死记偏移：网关板的 nvs 区间里就残留过
+  一份旧 app 头（0x10000 处），照偏移硬读会把数据区当成 app 认成别的工程。
+- 缓存过期（同一块板换了别的工程固件）→ 删掉该文件重新认板，或直接用 `-p` 指定。
+  空白片 / 跑着未知固件的板子认不出，多块候选时会报错要求 `-p`。
+- 台架实测（2026-10-02，两块 S3 同时插着）：`/dev/cu.usbmodem11301 =
+  smartcar_remote(1.0.0)`、`/dev/cu.usbmodem11401 = s3-gateway(1.1.0)`，
+  `fw.py flash gw-s3` / `flash r-s3` 各自命中正确的那块。
 
 ### tc275 双仓 SCons 命令行编译的说明
 
@@ -78,6 +99,15 @@ include、宏、排除表直接解析 `.cproject`，编译/链接参数复刻 ID
 - TASKING 工具链由 `aurix_tasking.find_tasking()` 自动发现
   （`TASKING_TRICORE_HOME`/`TASKING_HOME` 可覆盖）。
 
+### ota（C6FW 签包与 S3 暂存）
+
+`fw.py ota c6|gw-s3|app`：`c6` 与 `gw-s3` 打同一套 C6FW 签包（bundle magic `C6FW`、
+上传 URI `/ota/c6`、proto v2 / SF 帧布局）——网关整体替换 C6 时这些协议面**冻结不改名**，
+手机、遥控器与 TC275 侧无需变更；`app`（TC275）走 SCFW → `/ota/tc275`。签包写进遥控器
+的 `fw_c6` / `fw_tc` 暂存分区（委托 `smartcar_remote/tools/stage_fw.py`，串口同样自动认板），
+真正的推送在遥控器 Settings > FIRMWARE 页点（用的是遥控器自己的 token）。台架私钥
+`tools/keys/ed25519_dev.seed` 各仓一份且字节相同，`--seed` 可覆盖，**不入库**。
+
 ### factory（出厂整包）
 
 `fw.py factory` = 编译 tc275_car（App 槽 A）+ tc275_sbl（SBL）→ Intel-HEX
@@ -87,7 +117,7 @@ SBL 0x80000000 + App 0x80008000，合成工具校验地址不重叠）。`--flas
 
 ## 环境要求
 
-- **ESP 两工程**：EIM 安装的 ESP-IDF v6.1（Windows: `C:\Espressif`，
+- **ESP 三工程**：EIM 安装的 ESP-IDF v6.1（Windows: `C:\Espressif`，
   macOS/Linux: `~/.espressif`），fw.py 自动发现；失败时用 `FW_IDF_PROFILE`
   指定 PowerShell 激活脚本。
 - **TC275 两工程**：完整版 TASKING（如 v6.3r1，`C:/Program Files/TASKING/`；
@@ -102,5 +132,9 @@ SBL 0x80000000 + App 0x80008000，合成工具校验地址不重叠）。`--flas
 - **`没有 ADS 生成的构建文件`** → 先在 ADS 里 import + 构建一次（见上）。
 - **tc275_sbl 找不到目录** → 子模块已从 `myCarSbl` 改名 `tc275_sbl`，
   两个名字 fw.py 都认；`just init` 未跑导致子仓库缺失时先初始化。
-- **烧录串口识别不到** → ESP 板插好再跑；或显式 `-p COM7`。TC275 侧
+- **烧录串口识别不到** → ESP 板插好再跑（数据线，不是充电线）；或显式 `-p COM7`
+  / `-p /dev/cu.usbmodemXXXX`。TC275 侧
   确认 DAS 服务在跑、MiniWiggler 连接正常（ADS 里能连上即可）。
+- **`无法唯一确定 xx 串口`** → 见上面「烧录认板」：报错里带了全表
+  `串口=工程(版本)`，按它显式 `-p`；换过板子固件时先删
+  `~/.cache/smartcar-fw/board_projects.json` 重新认。

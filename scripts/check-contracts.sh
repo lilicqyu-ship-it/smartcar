@@ -23,6 +23,11 @@ APPLY=0
 CHECKS=(
   "link/proto_frames.h  esp32c6_car/components/c6_proto/proto_frames.h smartcar_remote/main/proto/proto_frames.h"
   "link/proto_frames.c  esp32c6_car/components/c6_proto/proto_frames.c smartcar_remote/main/proto/proto_frames.c"
+  # Camera WS 帧头（S3-CAM camera_ws TX ↔ S3 Remote scr_cam RX）；
+  # gateway 侧副本随 camera_ws 组件采纳时追加到本行（Remote 设计文档 G-1/G-2）
+  "camera/cam_frame.h   smartcar_remote/main/proto/cam_frame.h  s3-gateway/components/s3_proto/cam_frame.h"
+  # Vision / cam_cmd 文本面 JSON schema（双端消息名与单位口径）
+  "vision/vision.h      smartcar_remote/main/proto/vision.h  s3-gateway/components/s3_proto/vision.h"
   # SBL↔App：两侧必须一致，否则槽位/元数据/包头解析错位只能上板才发现
   "ota/ota_layout.h     tc275_sbl/mw/ota/ota_layout.h  tc275_car/mw/ota/ota_layout.h"
   "ota/ota_meta.h       tc275_sbl/mw/ota/ota_meta.h    tc275_car/mw/ota/ota_meta.h"

@@ -1,0 +1,113 @@
+# CI (s3-gateway): host 单测 + 固件构建（**两种口味都编**）+ 大小门禁
+# 与 esp32c6_car/smartcar_remote 同构，但多一条本仓特有的约束：入库的
+# `sdkconfig.defaults` 是**台架口味**（`S3_FACTORY_DEV_OVERRIDE` / `S3_BENCH_CTRL` 开着，
+# 免配网也能起 AP、调试后门全开），生产口味靠 `sdkconfig.prod` 叠加层显式关掉。
+# 只编其中一种都会漏：只编台架 → 发布物带着后门；只编生产 → 台架专用代码路径
+# （task map 日志、bridge/http/link 的 `#if CONFIG_S3_BENCH_CTRL` 分支）悄悄编不过。
+# 大小门禁: app <= 90% OTA 槽位、静态 DIRAM <= 95%、assets.bin 必须装进 assets 分区
+# （tools/ci_size_report.py，与 esp32c6_car 同款）。
+# 推流门禁: 视频流不卡顿依赖几个 sdkconfig 预算（TCP 发送窗口 / PSRAM 卸载 /
+# 核分工），它们散在 defaults 里很容易被人"顺手改回来"，所以在 CI 里断言。
+# monorepo: working-directory 指向 s3-gateway/；contracts/ 变更同样触发（接口副本的源头）。
+name: CI (s3-gateway)
+
+on:
+  push:
+    branches: [main]
+    paths: ["s3-gateway/**", "contracts/**"]
+  pull_request:
+    paths: ["s3-gateway/**", "contracts/**"]
+  workflow_dispatch:
+
+concurrency:
+  group: s3-gateway-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-tests:
+    name: Host unit tests + control page syntax
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: s3-gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and run host tests
+        run: make -C test/host check
+
+      # 控制页是打进 assets.bin 的裸 JS（无打包步骤），语法错了要等手机连上车才看见
+      - name: Control page JS parses
+        run: for f in assets_src/*.js; do node --check "$f"; done
+
+  firmware:
+    name: Firmware build + size gates (${{ matrix.flavor }}, IDF v6.1)
+    runs-on: ubuntu-latest
+    container:
+      image: espressif/idf:v6.1
+    env:
+      # 容器镜像自带 IDF_TARGET=esp32；不覆盖的话 sdkconfig.defaults 里的
+      # CONFIG_IDF_TARGET 会被环境值顶掉，编出一块 esp32 的固件还"一切正常"。
+      IDF_TARGET: esp32s3
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - flavor: bench
+            # 入库默认，开发者日常烧的就是这个
+            defaults: sdkconfig.defaults
+            artifact: ""
+          - flavor: production
+            # 台架后门显式关闭，Release 产物出自这一份
+            defaults: sdkconfig.defaults;sdkconfig.prod
+            artifact: firmware-s3-gateway
+    defaults:
+      run:
+        working-directory: s3-gateway
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build
+        run: |
+          # 容器步骤走 docker exec，不执行镜像 entrypoint，IDF 环境每步手动 source
+          . /opt/esp/idf/export.sh
+          # checkout 里没有 sdkconfig（.gitignore 掉了），所以叠加层是从零生成的
+          # —— 这是 defaults 生效的前提：defaults 只填补 sdkconfig 里缺失的键。
+          idf.py -DSDKCONFIG_DEFAULTS='${{ matrix.defaults }}' build
+
+      - name: Bench backdoors really are off
+        if: matrix.flavor == 'production'
+        run: |
+          # 叠加层被真的应用上了才算数（Kconfig 默认是 y，写错文件不会报错，只会静默出台架固件）
+          if grep -E '^(CONFIG_S3_BENCH_CTRL=y|CONFIG_S3_FACTORY_DEV_OVERRIDE=y)$' sdkconfig; then
+            echo "::error::生产口味构建里台架后门仍是开的（sdkconfig.prod 没叠上？）"
+            exit 1
+          fi
+
+      # 逐条断言见 tools/check_streaming_budget.sh：TCP 发送窗口、PSRAM 卸载、lwIP/相机
+      # 绑核这些键看着像"随手可调的网络参数"，动一条视频流就回到卡顿状态。
+      # 发版前本地自查同一条：sh s3-gateway/tools/check_streaming_budget.sh
+      - name: Streaming budget & core split intact
+        run: sh tools/check_streaming_budget.sh
+
+      - name: Firmware size & resource margins
+        run: |
+          . /opt/esp/idf/export.sh
+          python tools/ci_size_report.py \
+            --map build/s3_gateway.map \
+            --bin build/s3_gateway.bin \
+            --partitions partitions.csv \
+            --extra-bin assets=build/assets.bin
+
+      - name: Upload firmware
+        if: matrix.artifact != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            s3-gateway/build/s3_gateway.bin
+            s3-gateway/build/assets.bin
+            s3-gateway/build/bootloader/bootloader.bin
+            s3-gateway/build/partition_table/partition-table.bin
+            s3-gateway/build/flasher_args.json
+          if-no-files-found: error

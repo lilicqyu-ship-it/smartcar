@@ -106,4 +106,87 @@ menu "smartcar_remote"
             still ed25519-verified on-target. Production MUST set n together
             with C6_OTA_NO_AUTH=n.
 
+    menu "Camera / Vision (S3-CAM video plane)"
+
+        config SCR_CAM_WS_ENABLE
+            bool "Camera WS client (/ws/camera preview plane)"
+            default y
+            help
+                Master compile switch for scr_cam. Off = the remote never
+                touches the video plane; control/telemetry/OTA unaffected.
+
+        config SCR_CAM_STREAM_PORT
+            int "Camera WS TCP port (gateway stream httpd)"
+            default 81
+            range 1 65535
+            help
+                The gateway serves /ws/camera on its OWN httpd instance
+                (s3_camera, CONFIG_S3_CAMERA_STREAM_PORT there, default 81),
+                not on the control-plane :80 - keep the two in sync.
+
+        choice SCR_CAM_PROFILE
+            prompt "Default preview profile"
+            default SCR_CAM_PROFILE_REMOTE
+            help
+                Profile requested on first subscribe; switchable in the UI.
+                WEB_PREVIEW (640x480) needs the decode slot budget below to
+                cover it and ~2x the PSRAM/airtime.
+
+            config SCR_CAM_PROFILE_REMOTE
+                bool "REMOTE_PREVIEW 320x240"
+            config SCR_CAM_PROFILE_WEB
+                bool "WEB_PREVIEW 640x480"
+        endchoice
+
+        config SCR_CAM_MAX_JPEG_BYTES
+            int "Max JPEG payload per frame (protocol ceiling)"
+            default 65536
+            range 8192 131072
+            help
+                Frames above this are dropped as CAM_RX_LEN_ERR. Keep equal
+                to CAM_JPEG_LEN_MAX in contracts/camera/cam_frame.h.
+
+        config SCR_CAM_MAX_FPS
+            int "Subscribe rate ceiling (fps)"
+            default 10
+            range 1 30
+
+        config SCR_CAM_FRAME_TIMEOUT_MS
+            int "Frame-level stale threshold (NO SIGNAL overlay)"
+            default 2000
+            range 500 10000
+            help
+                Subscribed but no decodable frame for this long -> the page
+                shows STALE/NO SIGNAL. The WS connection is kept.
+
+        config SCR_CAM_RX_WATCHDOG_MS
+            int "Camera WS silence before reconnect"
+            default 10000
+            range 3000 60000
+            help
+                Mirrors CONFIG_SCR_RX_WATCHDOG_MS on the video plane; a
+                Camera WS restart NEVER touches the control plane.
+
+        config SCR_CAM_SLOTS
+            int "Latest-frame slot ring size"
+            default 3
+            range 2 4
+            help
+                >= 3 so the LVGL-displayed slot is never written into while
+                the decoder targets a second slot (doc: 3-slot ring).
+
+        config SCR_CAM_OVERLAY
+            bool "Draw vision overlay on the VISION page video"
+            default y
+
+        config SCR_VISION_STALE_MS
+            int "Vision result stale threshold"
+            default 1000
+            range 200 5000
+            help
+                {"t":"vision"} older than this -> STALE, ASSIST falls back
+                to MANUAL on screen (S3CAM LLDD 13.4 / Table 21 row 4).
+
+    endmenu
+
 endmenu

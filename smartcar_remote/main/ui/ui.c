@@ -4,6 +4,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include <bsp/esp-bsp.h>
 
 #include "ui.h"
 #include "ui_theme.h"
@@ -11,10 +12,14 @@
 #include "ui_pages.h"
 #include "ui_service.h"
 #include "ui_alert.h"
+#include "ui_camera.h"
+#include "ui_vision.h"
+#include "ui_joystick.h"
 
 #include "../app_state.h"
 #include "../scr_link.h"
 #include "../scr_ctrl.h"
+#include "../scr_cam.h"
 #include "../scr_settings.h"
 #include "../proto/proto_frames.h"
 
@@ -38,6 +43,14 @@ static bool      s_boot_switching;
 /* toast */
 static lv_obj_t *s_toast;
 static lv_timer_t *s_toast_timer;
+
+/* DRIVE / CAMERA / VISION tab bar (S3Remote design doc 8.1): shown on the
+ * two video pages; the DRIVE page keeps its validated full-height layout
+ * and reaches the video plane through the top-bar CAM badge. */
+#define TAB_H 44
+static lv_obj_t *s_tabbar;
+static lv_obj_t *s_tab_btn[3];
+static const ui_page_t TAB_PAGE[3] = { UI_PAGE_HOME, UI_PAGE_CAMERA, UI_PAGE_VISION };
 
 static const char * const BOOT_NAMES[4] = { "LCD", "Touch", "Radio", "System" };
 
@@ -88,18 +101,87 @@ void ui_toast(const char *fmt, ...)
 }
 
 /* ---- navigation --------------------------------------------------------------*/
+static bool page_is_video(ui_page_t p)
+{
+    return p == UI_PAGE_CAMERA || p == UI_PAGE_VISION;
+}
+
+static void tabs_set_visible(bool on)
+{
+    if (s_tabbar == NULL) {
+        return;
+    }
+    if (on && lv_obj_has_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_remove_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_move_foreground(s_tabbar);
+        lv_obj_move_foreground(s_toast);
+    } else if (!on && !lv_obj_has_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN)) {
+        lv_obj_add_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN);
+    }
+}
+
+static void tab_cb(lv_event_t *e)
+{
+    int idx = (int)(uintptr_t)lv_event_get_user_data(e);
+    if (idx < 0 || idx >= 3) {
+        return;
+    }
+    scr_state_t st;
+    app_state_snapshot(&st);
+    if (st.conn != SCR_CONN_CONNECTED) {
+        ui_toast("LINK DOWN: NO CAMERA");
+        return;
+    }
+    ui_nav_open(TAB_PAGE[idx]);
+}
+
+/* TAB state every refresh: check + link gate (design doc 8.1: tabs are only
+ * clickable while CONNECTED) + immersive hide (WEB_PREVIEW full-bleed). */
+static void tabs_refresh(const scr_state_t *st)
+{
+    tabs_set_visible(page_is_video(s_cur) && !ui_video_immersive());
+    for (int i = 0; i < 3; i++) {
+        bool on = (s_cur == TAB_PAGE[i]);
+        if (on != lv_obj_has_state(s_tab_btn[i], LV_STATE_CHECKED)) {
+            if (on) {
+                lv_obj_add_state(s_tab_btn[i], LV_STATE_CHECKED);
+            } else {
+                lv_obj_remove_state(s_tab_btn[i], LV_STATE_CHECKED);
+            }
+        }
+        if (st->conn != SCR_CONN_CONNECTED) {
+            lv_obj_add_state(s_tab_btn[i], LV_STATE_DISABLED);
+        } else {
+            lv_obj_remove_state(s_tab_btn[i], LV_STATE_DISABLED);
+        }
+    }
+}
+
 void ui_nav_open(ui_page_t p)
 {
     if (p >= UI_PAGE_COUNT || p == s_cur) {
         return;
     }
+    ui_page_t old = s_cur;
     lv_obj_add_flag(s_pages[s_cur], LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(s_pages[p], LV_OBJ_FLAG_HIDDEN);
     lv_obj_move_foreground(s_pages[p]);
     lv_obj_move_foreground(s_toast);
-    ui_service_on_leave(s_cur);
+    ui_service_on_leave(old);
     s_cur = p;
     ui_service_on_enter(p);
+    tabs_set_visible(page_is_video(p) && !ui_video_immersive());
+
+    /* preview subscription follows page visibility (design doc 4.2: enter
+     * subscribes, leave only pauses - the Camera WS stays up, R-ADR-06) */
+    if (page_is_video(p) && !page_is_video(old)) {
+        /* drive safety pattern of the calibration pages (08 §5): the stick is
+         * off-screen, so its output is zeroed and the DRIVE heartbeat goes 0,0 */
+        ui_joystick_set_enabled(false);
+        scr_cam_page_enter();
+    } else if (!page_is_video(p) && page_is_video(old)) {
+        scr_cam_page_leave();
+    }
 
     /* stale-data guard: a page never shows values captured before it opened
      * (spec 106) - every visible page is re-painted from the next tick on */
@@ -219,6 +301,8 @@ static void ui_timer_cb(lv_timer_t *t)
         case UI_PAGE_FW:       ui_service_fw_refresh(&st);     break;
         case UI_PAGE_CALIB:    ui_service_calib_refresh(&st);  break;
         case UI_PAGE_FDIAG:    ui_service_fdiag_refresh(&st);  break;
+        case UI_PAGE_CAMERA:   ui_camera_refresh(&st);  tabs_refresh(&st); break;
+        case UI_PAGE_VISION:   ui_vision_refresh(&st);  tabs_refresh(&st); break;
         default: break;
     }
 }
@@ -245,6 +329,8 @@ void ui_init(void)
     s_pages[UI_PAGE_FW]       = lv_obj_create(s_scr_main);
     s_pages[UI_PAGE_CALIB]    = lv_obj_create(s_scr_main);
     s_pages[UI_PAGE_FDIAG]    = lv_obj_create(s_scr_main);
+    s_pages[UI_PAGE_CAMERA]   = lv_obj_create(s_scr_main);
+    s_pages[UI_PAGE_VISION]   = lv_obj_create(s_scr_main);
 
     for (int i = 0; i < UI_PAGE_COUNT; i++) {
         lv_obj_t *p = s_pages[i];
@@ -262,7 +348,39 @@ void ui_init(void)
                     s_pages[UI_PAGE_DIAG], s_pages[UI_PAGE_SETTINGS],
                     s_pages[UI_PAGE_PAIR], s_pages[UI_PAGE_EVENTS]);
     ui_service_create(s_pages[UI_PAGE_FW], s_pages[UI_PAGE_CALIB], s_pages[UI_PAGE_FDIAG]);
+    ui_camera_create(s_pages[UI_PAGE_CAMERA]);
+    ui_vision_create(s_pages[UI_PAGE_VISION]);
     ui_alert_create(s_scr_main);
+
+    /* DRIVE / CAMERA / VISION tab bar, bottom of the two video pages */
+    s_tabbar = lv_obj_create(s_scr_main);
+    lv_obj_set_size(s_tabbar, LV_PCT(100), TAB_H);
+    lv_obj_align(s_tabbar, LV_ALIGN_BOTTOM_LEFT, 0, 0);
+    lv_obj_set_style_bg_color(s_tabbar, lv_color_hex(UI_COL_SURFACE), 0);
+    lv_obj_set_style_bg_opa(s_tabbar, LV_OPA_COVER, 0);
+    lv_obj_set_style_border_width(s_tabbar, 1, 0);
+    lv_obj_set_style_border_side(s_tabbar, LV_BORDER_SIDE_TOP, 0);
+    lv_obj_set_style_border_color(s_tabbar, lv_color_hex(UI_COL_LINE), 0);
+    lv_obj_set_style_radius(s_tabbar, 0, 0);
+    lv_obj_set_style_pad_all(s_tabbar, 4, 0);
+    lv_obj_remove_flag(s_tabbar, LV_OBJ_FLAG_SCROLLABLE);
+    static const char *const tab_txt[3] = { LV_SYMBOL_HOME " DRIVE",
+                                            LV_SYMBOL_EYE_OPEN " CAMERA",
+                                            LV_SYMBOL_EYE_CLOSE " VISION" };
+    int tab_w = (bsp_display_get_h_res() - 8 - 2 * 8) / 3;
+    for (int i = 0; i < 3; i++) {
+        s_tab_btn[i] = ui_button(s_tabbar, tab_txt[i], lv_color_hex(UI_COL_SURFACE2),
+                                 tab_cb, (void *)(uintptr_t)i);
+        lv_obj_set_size(s_tab_btn[i], tab_w, TAB_H - 8);
+        lv_obj_align(s_tab_btn[i], LV_ALIGN_TOP_LEFT, i * (tab_w + 8), 0);
+        lv_obj_set_style_bg_color(s_tab_btn[i], lv_color_hex(0x0B2A3A), LV_STATE_CHECKED);
+        lv_obj_set_style_border_color(s_tab_btn[i], lv_color_hex(UI_COL_ACCENT), LV_STATE_CHECKED);
+        lv_obj_set_style_border_width(s_tab_btn[i], 2, LV_STATE_CHECKED);
+        lv_obj_t *tl = lv_obj_get_child(s_tab_btn[i], 0);
+        lv_obj_set_style_text_color(tl, lv_color_hex(UI_COL_ACCENT), LV_STATE_CHECKED);
+        lv_obj_add_flag(tl, LV_OBJ_FLAG_EVENT_BUBBLE);
+    }
+    lv_obj_add_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN);
 
     /* toast on the top layer so every page can show feedback */
     s_toast = lv_label_create(lv_layer_top());

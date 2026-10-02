@@ -26,7 +26,7 @@
     "--compile-commands-dir=/Users/kunlong/Documents/Code/smartcar/s3-gateway/build"
   ],
   "idf.currentSetup": "/Users/kunlong/.espressif/v6.1/esp-idf",
-  "idf.port": "/dev/tty.usbmodem11201",
+  "idf.port": "/dev/tty.usbmodem11401",
   "idf.openOcdConfigs": [
     "board/esp32s3-builtin.cfg"
   ],

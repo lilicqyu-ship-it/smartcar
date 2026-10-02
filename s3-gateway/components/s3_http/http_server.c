@@ -573,7 +573,9 @@ static esp_err_t api_health_handler(httpd_req_t *req)
 
 static esp_err_t api_diag_handler(httpd_req_t *req)
 {
-    static char json[768];
+    /* static, not on the httpd task's 4 KB-ish stack; sized for the whole
+     * diag object including link{} + camera{} and the fields still to come */
+    static char json[1024];
 
     if (s_http.diag_fn != NULL)
     {
@@ -611,7 +613,7 @@ static esp_err_t api_diag_handler(httpd_req_t *req)
 static const char DIAG_PAGE[] =
 "<!DOCTYPE html><html><head><meta charset=\"utf-8\">\n"
 "<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">\n"
-"<title>C6 诊断</title>\n"
+"<title>S3 诊断</title>\n"
 "<style>\n"
 "body{font-family:-apple-system,sans-serif;margin:12px;background:#14181f;color:#e8eaed}\n"
 "h1{font-size:1.05rem;margin:0 0 8px}\n"
@@ -628,7 +630,7 @@ static const char DIAG_PAGE[] =
 "#raw{white-space:pre-wrap;word-break:break-all;font-size:.66rem;color:#7fbf7f;padding:8px 0}\n"
 "summary{font-size:.76rem;color:#9fb3c8;cursor:pointer;margin-top:14px}\n"
 "</style></head><body>\n"
-"<h1>C6 诊断 <span id=\"age\">加载中…</span></h1>\n"
+"<h1>S3 诊断 <span id=\"age\">加载中…</span></h1>\n"
 "<div id=\"v\">加载中…</div>\n"
 "<details><summary>原始数据（JSON）</summary><div id=\"raw\"></div></details>\n"
 "<script>\n"
@@ -655,6 +657,7 @@ static const char DIAG_PAGE[] =
 "h+=row(\"OTA 槽位\",p(j,\"slot\")+(j.factory?' <span class=\"warn\">出厂模式</span>':\"\"));\n"
 "h+=row(\"运行时长\",fmtUp(j.uptime_s));\n"
 "h+=row(\"历史最低内存\",((Math.max(0,+j.heap_min||0))/1024).toFixed(1)+\" KB\");\n"
+"h+=row(\"PSRAM 空闲\",((Math.max(0,+j.psram_free||0))/1024).toFixed(0)+\" KB\");\n"
 "h+=row(\"上次复位原因\",fmtReset(j.reset)+(j.coredump?' <span class=\"bad\">有转储</span>':\"\"));\n"
 "h+=row(\"开机自检\",j.selfcheck?'<span class=\"ok\">通过</span>':'<span class=\"dim\">未记录</span>');\n"
 "h+=\"</table>\";\n"
@@ -667,6 +670,17 @@ static const char DIAG_PAGE[] =
 "h+=row(\"CRC / 格式错误\",tag((L.crc_err||0)+\" / \"+(L.fmt_err||0),ok0((L.crc_err||0)+(L.fmt_err||0))));\n"
 "h+=row(\"发送拥塞\",(L.busy||0)+( (L.busy||0)>0?' <span class=\"warn\">偏高</span>':\"\"));\n"
 "h+=row(\"配对状态\",p(j,\"pair\"));\n"
+"h+=\"</table>\";\n"
+"h+=\"<h2>相机 OV5640</h2><table>\";\n"
+"const C=j.camera||{};\n"
+"h+=row(\"传感器\",C.up?tag(p(C,\"sensor\"),\"ok\"):tag(\"不可用\",\"bad\"));\n"
+"h+=row(\"分辨率\",(C.w||0)+\"×\"+(C.h||0));\n"
+"h+=row(\"帧率\",(C.fps||0)+\" fps\"+(C.up&&+(C.fps||0)===0?' <span class=\"dim\">无人观看</span>':\"\"));\n"
+"h+=row(\"累计推帧\",(C.frames||0)+\" 帧\");\n"
+"h+=row(\"累计取帧失败\",tag((C.drop||0)+( (C.drop||0)>0?' <span class=\"warn\">有丢帧</span>':\"\"),(C.drop||0)>0?\"warn\":\"ok\"));\n"
+"const stall=+C.stall||0, slow=+C.slow||0;\n"
+"h+=row(\"发送卡顿\",tag(stall+\" 次 · 最慢 \"+slow+\" ms\",stall===0?\"ok\":stall<16?\"warn\":\"bad\"));\n"
+"h+=row(\"视频通道占用\",(C.view||0)+\" / 1\");\n"
 "h+=\"</table>\";\n"
 "h+=\"<h2>Web 服务</h2><table>\";\n"
 "h+=row(\"在线客户端\",(j.cli||0)+\" 个\");\n"

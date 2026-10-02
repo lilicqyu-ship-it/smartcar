@@ -16,8 +16,10 @@
 # Log files
 *.log
 
-# Host test binary
+# Host test binaries (Makefile 产物与源同名无扩展名)
 test/host/test_proto
+test/host/test_cam_frame
+test/host/test_vision
 
 # Build artifacts and directories
 **/build/

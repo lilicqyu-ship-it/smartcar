@@ -289,27 +289,76 @@ $("btn_ota_tc").onclick = () => upload($("file_tc").files[0], "/ota/tc275", $("b
 });
 
 /* ---- 实时画面: MJPEG 推流由独立 httpd 提供（components/s3_camera, :81）----
- * 关闭必须清空 src：<img> 的连接会一直占着板子上唯一的查看者通道 */
+ * 关闭必须清空 src：<img> 的连接会一直占着板子上唯一的查看者通道。
+ * 断流自救有两条路：503（上一个查看者还没退出）、板子复位、Wi-Fi 抖动都只
+ * 让 onerror 响一次，不重连画面就永远黑着；而连接没断、画面停住时 <img>
+ * 根本不会报错，只能看板上 camera.frames 还在不在推进。 */
 const CAM_PORT = 81;
-let camOn = false;
+let camOn = false, camTimer = null, camBackoff = 0;
+let camFrames = -1, camProgressAt = 0;
+
+function camStatus(txt) {
+  const off = $("cam_off");
+  off.textContent = txt;
+  off.style.display = txt ? "" : "none";
+}
+
+function camAttach() {
+  const img = $("cam_img");
+  img.removeAttribute("src");          /* 先断开上一条，别让它占着查看者通道 */
+  img.src = "http://" + location.hostname + ":" + CAM_PORT + "/stream?t=" + Date.now();
+  $("cam_box").classList.remove("err");
+  camStatus("");
+}
+
 function camShow(on) {
   camOn = on;
-  const img = $("cam_img"), box = $("cam_box");
+  clearTimeout(camTimer);
+  camTimer = null; camBackoff = 0; camFrames = -1; camProgressAt = 0;
+  const img = $("cam_img");
   if (on) {
-    box.classList.remove("err");
-    img.src = "http://" + location.hostname + ":" + CAM_PORT + "/stream?t=" + Date.now();
     img.style.display = "block";
-    $("cam_off").style.display = "none";
     $("btn_cam").textContent = "关闭";
+    camAttach();
   } else {
     img.removeAttribute("src");
     img.style.display = "none";
-    $("cam_off").style.display = "";
     $("btn_cam").textContent = "显示";
+    camStatus("未开启");
   }
 }
 $("btn_cam").onclick = () => camShow(!camOn);
-$("cam_img").onerror = () => { if (camOn) $("cam_box").classList.add("err"); };
+
+/* 两条路都汇到这里：0.8 s 起指数退避（封顶 4 s）重连。退避只在画面确实在
+ * 推进时清零，否则一个永远拖不动的查看者会被我们每 3 秒敲一次 */
+function camRetry(msg) {
+  $("cam_box").classList.add("err");
+  camBackoff = camBackoff ? Math.min(camBackoff * 2, 4000) : 800;
+  camStatus(msg + "，" + (camBackoff / 1000).toFixed(1) + " 秒后重连…");
+  clearTimeout(camTimer);
+  camTimer = setTimeout(() => { if (camOn && !document.hidden) camAttach(); }, camBackoff);
+}
+
+$("cam_img").onerror = () => {
+  if (!camOn || document.hidden) return;
+  camRetry("画面中断");
+};
+
+/* 每秒问一次控制面（另一个 httpd，推流再忙也挡不到它）：帧计数 3 秒不动就
+ * 当作卡死重来一次；正常推进时把退避清零，下次中断能立刻重连 */
+setInterval(() => {
+  if (!camOn || document.hidden) return;
+  fetch("/api/diag", { cache: "no-store" }).then((r) => r.json()).then((j) => {
+    const f = +((j.camera || {}).frames) || 0;
+    const now = Date.now();
+    if (f !== camFrames) { camFrames = f; camProgressAt = now; camBackoff = 0; return; }
+    if (camProgressAt === 0) { camProgressAt = now; return; }
+    if (now - camProgressAt < 3000) return;
+    camProgressAt = now;
+    camRetry("画面停滞");
+  }).catch(() => {});
+}, 1000);
+
 /* 页面切到后台时让出通道，回到前台再重连 */
 document.addEventListener("visibilitychange", () => {
   if (!camOn) return;
