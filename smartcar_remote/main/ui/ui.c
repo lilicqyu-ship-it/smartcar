@@ -306,6 +306,26 @@ static void ui_timer_cb(lv_timer_t *t)
     }
 }
 
+/* Video pump at 3x the label cadence: a decoded frame otherwise waits up to a
+ * full 100 ms UI tick before reaching the panel (avg +50 ms glass-to-eye).
+ * The seq gate inside the pump makes every tick without a new frame a no-op,
+ * so the steady-state cost is one state snapshot per 33 ms. */
+static void ui_video_timer_cb(lv_timer_t *t)
+{
+    (void)t;
+    if (!s_boot_switching ||
+        (s_cur != UI_PAGE_CAMERA && s_cur != UI_PAGE_VISION)) {
+        return;
+    }
+    scr_state_t st;
+    app_state_snapshot(&st);
+    if (s_cur == UI_PAGE_CAMERA) {
+        ui_camera_pump_video(&st);
+    } else {
+        ui_vision_pump_video(&st);
+    }
+}
+
 /* ---- init -------------------------------------------------------------------------*/
 void ui_init(void)
 {
@@ -396,4 +416,5 @@ void ui_init(void)
     s_cur = UI_PAGE_HOME;
 
     lv_timer_create(ui_timer_cb, UI_PERIOD_MS, NULL);
+    lv_timer_create(ui_video_timer_cb, 33, NULL);
 }

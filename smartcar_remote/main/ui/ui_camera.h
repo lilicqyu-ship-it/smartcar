@@ -37,6 +37,9 @@ void ui_video_view_pump(ui_video_view_t *v, const scr_state_t *st);
 
 void ui_camera_create(lv_obj_t *root);
 void ui_camera_refresh(const scr_state_t *st);
+/* 33 ms video pump (ui.c timer): newest decoded frame -> panel without
+ * waiting for the 100 ms refresh; no-op when the slot ring has nothing new */
+void ui_camera_pump_video(const scr_state_t *st);
 
 /* true while a full-height (WEB_PREVIEW) stream is displayed: the tab bar
  * hides and the page layout goes immersive.  Driven by the cam dims. */

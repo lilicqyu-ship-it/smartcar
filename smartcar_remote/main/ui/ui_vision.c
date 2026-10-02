@@ -401,3 +401,14 @@ void ui_vision_refresh(const scr_state_t *st)
     overlay_update(st);
 #endif
 }
+
+/* Fast-cadence video pump, driven by the 33 ms timer in ui.c (see
+ * ui_camera_pump_video).  Carries the result overlay so it never lags the
+ * frame it is drawn on. */
+void ui_vision_pump_video(const scr_state_t *st)
+{
+    ui_video_view_pump(&s_vis.view, st);
+#if CONFIG_SCR_CAM_OVERLAY
+    overlay_update(st);
+#endif
+}

@@ -14,6 +14,9 @@ extern "C" {
 
 void ui_vision_create(lv_obj_t *root);
 void ui_vision_refresh(const scr_state_t *st);
+/* 33 ms video pump (ui.c timer): newest decoded frame + result overlay
+ * without waiting for the 100 ms refresh; no-op when nothing new arrived */
+void ui_vision_pump_video(const scr_state_t *st);
 
 #ifdef __cplusplus
 }

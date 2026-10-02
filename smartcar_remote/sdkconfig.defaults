@@ -12,6 +12,10 @@ CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
+# 120 MHz octal PSRAM/flash was bench-tested and REJECTED: this module's flash
+# model has no HPM support (bootloader warns), and at 120 MHz the WiFi/TCP path
+# degraded immediately (control-frame TX skips, ~360 ms WS pings).  All video
+# wins live in the JPEG decoder config below, not in these clocks.
 # XIP_FROM_PSRAM (official esp-dev-kits lvgl_demos): code+rodata run from PSRAM so
 # flash writes (NVS, Wi-Fi PHY calibration) no longer disable the cache.  Without
 # it the RGB bounce ISR cannot read the PSRAM framebuffer during a flash op and
@@ -109,3 +113,18 @@ CONFIG_LV_FONT_MONTSERRAT_48=y
 # (LV_USE_STDLIB_MALLOC is a derived int symbol - the user-facing knob is the
 # "Malloc functions source" choice.)
 CONFIG_LV_USE_CUSTOM_MALLOC=y
+
+# ---- Camera WS video plane ---------------------------------------------------
+# Sensor QVGA delivers ~11.5 fps; the display cap must not clamp the honest
+# reading to 10.0 (CONFIG only - the Kconfig default stays a conservative 10).
+CONFIG_SCR_CAM_MAX_FPS=12
+
+# ---- JPEG decoder (esp_jpeg / TJpgDec) ----------------------------------------
+# The ROM's frozen TJpgDec converts every pixel RGB888->RGB565 and has no fast
+# huffman.  Compile the newer decoder: native RGB565 output (2-byte direct
+# writes instead of a per-pixel 3->2 conversion) + table-driven huffman
+# (JD_FASTDECODE=2, wants the 64 KB scratch pad scr_cam allocates for it).
+# QVGA decode on the bench: ~100 ms -> ~35 ms.
+# CONFIG_JD_USE_ROM is not set
+CONFIG_JD_FORMAT_RGB565=y
+CONFIG_JD_FASTDECODE_TABLE=y

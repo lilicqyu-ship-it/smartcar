@@ -14,6 +14,8 @@
 
 ### 变更
 - PROJECT_VER 升至 1.1.0（整车 1.1 基线，迎接 S3-CAM 替换 C6）
+- **视频面解码提速 + 显示延迟减半**：esp_jpeg 弃用 ROM 固化的 TJpgDec（它对 RGB565 输出走逐像素 3→2 字节转换、哈夫曼无查表加速），改编译新版解码器——`JD_FASTDECODE=2` 表驱动哈夫曼（63 KB 工作区由 `scr_cam_start` 锁进内部 RAM，PSRAM 回退兜底，启动日志标注落位）+ `JD_FORMAT_RGB565` 原生 2 字节直写。CAMERA/VISION 页另立 33 ms 视频泵（`ui_camera_pump_video` / `ui_vision_pump_video`，帧槽 seq 门控让无新帧的 tick 零开销）：新帧平均 ~17 ms 上面板，替代原先最长 100 ms 的 UI tick 等待；NO SIGNAL 遮罩只在可见性边沿搬前景，30 Hz 空转不再搅动绘制顺序。`SCR_CAM_MAX_FPS` 显示上限 10→12，对齐传感器 QVGA 实际 ~11.5 fps
+- **（台架决策，详见 sdkconfig.defaults 注释）PSRAM/flash 120 MHz 实验否决**：本批模块的 flash 颗粒无 HPM 支持（bootloader 启动即警告），120 MHz 下 WiFi/TCP 立即劣化（控制帧成片跳发、WS ping ~360 ms）——已回退 80 MHz；视频面的收益全部来自上面的解码器与泵配置，不在存储时钟
 - **订阅即声明档位**：`cam_subscribe_now()` 在 `{"op":"subscribe"}` 之后无条件补发
   `{"op":"profile","name":..}`（原先只有配成 WEB 才发，REMOTE 走 `#else` 分支只打日志）。
   `framesize` 是网关传感器的一组全局寄存器、与 `/stream` 共用，静默 subscribe 等于接受网关自己的

@@ -91,9 +91,14 @@ void ui_video_view_pump(ui_video_view_t *v, const scr_state_t *st)
     if (show) {
         ui_label_set_text(v->mask, txt);
         ui_label_set_color(v->mask, col);
-        lv_obj_remove_flag(v->mask, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(v->mask);
-    } else {
+        /* foreground only on the hidden->visible edge: the 33 ms video pump
+         * reaches here with an unchanged mask most ticks, and a redundant
+         * move_foreground would churn the draw order */
+        if (lv_obj_has_flag(v->mask, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_remove_flag(v->mask, LV_OBJ_FLAG_HIDDEN);
+            lv_obj_move_foreground(v->mask);
+        }
+    } else if (!lv_obj_has_flag(v->mask, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_add_flag(v->mask, LV_OBJ_FLAG_HIDDEN);
     }
 }
@@ -216,6 +221,34 @@ static void apply_layout(bool immersive)
     }
 }
 
+/* Strip fields are fixed width and DOTS-truncated (the DRIVE top bar uses the
+ * same discipline): free-width labels on a fixed pitch let the longest string
+ * win - "✕ CAM OFF" at ~90 px grew across the 74 px gap into "-- fps", which is
+ * the overlapping text in the corner. */
+static lv_obj_t *strip_field(lv_obj_t *parent, const char *cap, int x, int w)
+{
+    lv_obj_t *l = lv_label_create(parent);
+    lv_label_set_text(l, cap);
+    lv_obj_set_style_text_font(l, F_SM, 0);
+    lv_obj_set_size(l, w, lv_font_get_line_height(F_SM));
+    lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_align(l, LV_ALIGN_LEFT_MID, x, 0);
+    return l;
+}
+
+/* Width of `s` in F_SM, measured by the layout engine itself: hand-guessed
+ * pixel budgets are how "✕ CAM OFF" got clipped in the first place. */
+static int32_t strip_text_w(lv_obj_t *parent, const char *s)
+{
+    lv_obj_t *m = lv_label_create(parent);
+    lv_obj_set_style_text_font(m, F_SM, 0);
+    lv_label_set_text(m, s);
+    lv_obj_update_layout(m);
+    int32_t w = lv_obj_get_width(m);
+    lv_obj_delete(m);
+    return w;
+}
+
 void ui_camera_create(lv_obj_t *root)
 {
     s_panel_w = bsp_display_get_h_res();
@@ -232,28 +265,44 @@ void ui_camera_create(lv_obj_t *root)
     lv_obj_set_style_pad_all(s_cu.strip, 0, 0);
     lv_obj_remove_flag(s_cu.strip, LV_OBJ_FLAG_SCROLLABLE);
 
-    const int SX[5] = { 18, 92, 180, 262, 430 };
-    s_cu.dot = lv_label_create(s_cu.strip);
-    lv_label_set_text(s_cu.dot, LV_SYMBOL_CLOSE " CAM");
-    lv_obj_set_style_text_font(s_cu.dot, F_SM, 0);
-    ui_label_set_color(s_cu.dot, lv_color_hex(UI_COL_DIM));
-    lv_obj_align(s_cu.dot, LV_ALIGN_LEFT_MID, SX[0], 0);
-    s_cu.fps = lv_label_create(s_cu.strip);
-    lv_label_set_text(s_cu.fps, "-- fps");
-    lv_obj_set_style_text_font(s_cu.fps, F_SM, 0);
-    lv_obj_align(s_cu.fps, LV_ALIGN_LEFT_MID, SX[1], 0);
-    s_cu.res = lv_label_create(s_cu.strip);
-    lv_label_set_text(s_cu.res, "-x-");
-    lv_obj_set_style_text_font(s_cu.res, F_SM, 0);
-    lv_obj_align(s_cu.res, LV_ALIGN_LEFT_MID, SX[2], 0);
-    s_cu.drop_lbl = lv_label_create(s_cu.strip);
-    lv_label_set_text(s_cu.drop_lbl, "drop -");
-    lv_obj_set_style_text_font(s_cu.drop_lbl, F_SM, 0);
-    lv_obj_align(s_cu.drop_lbl, LV_ALIGN_LEFT_MID, SX[3], 0);
-    s_cu.e2e = lv_label_create(s_cu.strip);
-    lv_label_set_text(s_cu.e2e, "e2e -");
-    lv_obj_set_style_text_font(s_cu.e2e, F_SM, 0);
-    lv_obj_align(s_cu.e2e, LV_ALIGN_LEFT_MID, SX[4], 0);
+    /* Five columns sized from the real strings, not from a hand-tuned table
+     * (the fixed 110 px first column clipped "✕ CAM OFF" - the top-left field
+     * this page is read by).  Every bounded field gets exactly its widest
+     * text; only the unbounded drop counter keeps DOTS as a floor.  All
+     * columns stay inside the 640 px video column so the sidebar never clips
+     * a value. */
+    static const char *const DOT_MAX[] = {
+        LV_SYMBOL_CLOSE " CAM OFF", LV_SYMBOL_PLAY " CAM LINK",
+        LV_SYMBOL_WARNING " STALE", LV_SYMBOL_OK " LIVE",
+        LV_SYMBOL_EYE_OPEN " IDLE",
+    };
+    int32_t dot_w = 0;
+    for (size_t i = 0; i < sizeof(DOT_MAX) / sizeof(DOT_MAX[0]); i++) {
+        int32_t w = strip_text_w(s_cu.strip, DOT_MAX[i]);
+        if (w > dot_w) {
+            dot_w = w;
+        }
+    }
+    const int GAP = 14;
+    const int X0 = 8;
+    const int RIGHT = s_panel_w - SIDE_W - 8;    /* video column right edge */
+    int x = X0;
+    s_cu.dot      = strip_field(s_cu.strip, DOT_MAX[0], x, (int)dot_w);
+    x += (int)dot_w + GAP;
+    int fps_w = strip_text_w(s_cu.strip, "99.9 fps");
+    s_cu.fps      = strip_field(s_cu.strip, "-- fps", x, fps_w);
+    x += fps_w + GAP;
+    int res_w = strip_text_w(s_cu.strip, "640x480");
+    s_cu.res      = strip_field(s_cu.strip, "-x-", x, res_w);
+    x += res_w + GAP;
+    int e2e_w = strip_text_w(s_cu.strip, "e2e 65535 ms");
+    int drop_min = strip_text_w(s_cu.strip, "drop 99999/99999");
+    int drop_w = (RIGHT - e2e_w - GAP) - x;
+    if (drop_w < drop_min) {
+        drop_w = drop_min;
+    }
+    s_cu.drop_lbl = strip_field(s_cu.strip, "drop -", x, drop_w);
+    s_cu.e2e      = strip_field(s_cu.strip, "e2e -", RIGHT - e2e_w, e2e_w);
 
     /* video area */
     s_cu.area = lv_obj_create(root);
@@ -340,5 +389,13 @@ void ui_camera_refresh(const scr_state_t *st)
     ui_label_set_text(s_cu.reason, why);
 
     apply_layout(ui_video_immersive());
+    ui_video_view_pump(&s_cu.view, st);
+}
+
+/* Fast-cadence video pump, driven by the 33 ms timer in ui.c: a decoded frame
+ * reaches the panel without waiting for the 100 ms page refresh.  The seq gate
+ * in ui_video_view_pump makes every tick without a new frame a no-op. */
+void ui_camera_pump_video(const scr_state_t *st)
+{
     ui_video_view_pump(&s_cu.view, st);
 }

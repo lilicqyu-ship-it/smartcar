@@ -352,20 +352,43 @@ static void cam_handle_binary(esp_websocket_event_data_t *ev)
      * which is the WHOLE frame's length (see scr_link's proven RX) */
     size_t clen  = (size_t)ev->data_len;
     size_t total = (size_t)ev->payload_offset + clen;
+    bool frame_start = (ev->payload_offset == 0);
+    /* The end of a frame is offset + data_len reaching payload_len, NOT
+     * ev->fin: fin mirrors the WS header bit and is therefore true on EVERY
+     * event of a single-frame message, so keying on it parsed a 4 KB prefix of
+     * each 20-25 KB VGA frame and counted every one CAM_RX_LEN_ERR (the control
+     * plane never shows this because its frames fit in one event). */
+    bool complete = (total >= (size_t)ev->payload_len);
+
+    /* A frame begins at offset 0, and that is where the per-frame overflow latch
+     * clears - not after a successful parse. While it was only cleared on
+     * success, the first oversized frame stuck it true forever: every later
+     * frame was dropped silently and the 1 Hz trace showed a ferr that stopped
+     * growing (win=0 with a dead stream looks identical to a paused page). */
+    if (frame_start) {
+        s_cam.asm_overflow = false;
+    }
 
     if (total > ASM_CAP || s_cam.asm_buf == NULL) {
-        if (!s_cam.asm_overflow && total > ASM_CAP) {
+        if (frame_start && total > ASM_CAP && s_cam.asm_buf != NULL) {
+            /* the first event of an oversized frame already proves it */
             s_cam.asm_overflow = true;
             s_cam.cnt_frame_err++;
+            ESP_LOGW(TAG, "rx oversized: whole=%u cap=%u",
+                     (unsigned)ev->payload_len, (unsigned)ASM_CAP);
+        } else if (!s_cam.asm_overflow && total > ASM_CAP && s_cam.asm_buf != NULL) {
+            s_cam.asm_overflow = true;
+            s_cam.cnt_frame_err++;
+            ESP_LOGW(TAG, "rx oversized mid-frame: total=%u whole=%u cap=%u",
+                     (unsigned)total, (unsigned)ev->payload_len, (unsigned)ASM_CAP);
         }
         return;
     }
     memcpy(s_cam.asm_buf + (size_t)ev->payload_offset,
            ev->data_ptr, clen);
-    if (!ev->fin) {
+    if (!complete) {
         return;
     }
-    s_cam.asm_overflow = false;
 
     cam_frame_hdr_t hdr;
     cam_rx_ev_t r = cam_frame_parse(s_cam.asm_buf, total, &hdr);
@@ -717,11 +740,19 @@ void scr_cam_start(void)
         return;
     }
 
-    /* TJpgDec (esp_jpeg 1.x) needs a non-psram scratch pad; 8 KB covers the
-     * default 32-bit-fastdecode configuration.  NULL would fall back to a
-     * per-call internal allocation - avoid that at stream rate. */
-    s_cam.jpeg_ws_size = 8192;
+    /* TJpgDec (esp_jpeg 1.x) needs a scratch pad it can address directly.
+     * Table-mode huffman (JD_FASTDECODE=2, sdkconfig.defaults) wants the full
+     * 64 KB esp_jpeg work area in INTERNAL RAM: the huffman LUTs are the hot
+     * path and PSRAM latency would eat the speedup.  Fall back to PSRAM
+     * (slower but working) rather than dropping video on a fragmented heap. */
+#if CONFIG_JD_FASTDECODE == 2
+#define JPEG_WS_SIZE 65472
+#else
+#define JPEG_WS_SIZE 8192
+#endif
+    s_cam.jpeg_ws_size = JPEG_WS_SIZE;
     s_cam.jpeg_ws = heap_caps_malloc(s_cam.jpeg_ws_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    bool jpeg_ws_internal = s_cam.jpeg_ws != NULL;
     if (s_cam.jpeg_ws == NULL) {
         s_cam.jpeg_ws = heap_caps_malloc(s_cam.jpeg_ws_size, MALLOC_CAP_8BIT);
     }
@@ -730,6 +761,10 @@ void scr_cam_start(void)
         s_cam.degraded = true;
         return;
     }
+    ESP_LOGI(TAG, "jpeg scratch %u KB in %s (fastdecode=%d)",
+             (unsigned)(s_cam.jpeg_ws_size / 1024),
+             jpeg_ws_internal ? "internal RAM" : "PSRAM",
+             CONFIG_JD_FASTDECODE);
 
     if (xTaskCreatePinnedToCore(cam_monitor_task, "scr_cam", 6144, NULL, 4, NULL, 0) != pdPASS ||
         xTaskCreatePinnedToCore(decode_task, "cam_decode", 8192, NULL, 4, NULL, 0) != pdPASS) {

@@ -233,32 +233,42 @@ void ui_home_create(lv_obj_t *root)
     lv_obj_remove_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
     /* Fixed horizontal budget (320 px column):
-     *   [10 tick][20..140 title][146..262 status][268..312 gear]
-     * Every label is one line, fixed width, DOTS-truncated, so no string can
+     *   [8..132 CAM entry][146..262 status][268..312 gear]
+     * The "SMART CAR" title block that used to own x<146 is gone: the CAM entry
+     * is this page's only way onto the video plane, and as one text row in the
+     * status column it was an ~11 px (3 mm) target that taps never landed on.
+     * Every label stays one line, fixed width, DOTS-truncated, so no string can
      * grow into its neighbour. */
-    const int TITLE_X = 20, TITLE_W = 120;
+    /* 150 px: the widest live readout, LV_SYMBOL_VIDEO " CAM 12.0 fps",
+     * must fit whole - a DOTS-clipped "… 11.5" on the stream state is how
+     * the drive page reads whether the video plane is alive */
+    const int CAM_X = 8, CAM_W = 150, CAM_H = 40;
     const int GEAR_W = 44, GEAR_M = 8;
-    const int STAT_W = LW - TITLE_X - TITLE_W - 6 - GEAR_W - GEAR_M - 6;
+    const int STAT_W = LW - CAM_X - CAM_W - 14 - GEAR_W - GEAR_M - 6;
 
-    /* accent tick + title: HUD header */
-    lv_obj_t *tick = lv_obj_create(bar);
-    lv_obj_set_size(tick, 4, 24);
-    lv_obj_set_style_radius(tick, 1, 0);
-    lv_obj_set_style_border_width(tick, 0, 0);
-    lv_obj_set_style_bg_color(tick, lv_color_hex(UI_COL_ACCENT), 0);
-    lv_obj_set_style_bg_opa(tick, LV_OPA_COVER, 0);
-    lv_obj_align(tick, LV_ALIGN_LEFT_MID, 10, 0);
-    lv_obj_t *title = mk_label(bar, "SMART CAR", F_LG, lv_color_hex(UI_COL_TXT));
-    lv_obj_set_size(title, TITLE_W, lv_font_get_line_height(F_LG));
-    lv_label_set_long_mode(title, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_align(title, LV_ALIGN_LEFT_MID, TITLE_X, -8);
-    lv_obj_t *sub = mk_label(bar, "REMOTE CONSOLE", F_SM, lv_color_hex(UI_COL_ACCENT));
-    lv_obj_set_size(sub, TITLE_W, lv_font_get_line_height(F_SM));
-    lv_label_set_long_mode(sub, LV_LABEL_LONG_MODE_DOTS);
-    lv_obj_align(sub, LV_ALIGN_LEFT_MID, TITLE_X, 12);
+    /* CAM entry (S3Remote design doc 8.1): a real button that doubles as the
+     * stream state readout - green fps / grey STALE / red OFFLINE, text +
+     * colour never colour alone (spec 51).  Absent entirely when the video
+     * plane is compiled out: a dead 124x40 button would be worse than none. */
+#if CONFIG_SCR_CAM_WS_ENABLE
+    lv_obj_t *cam_btn = lv_button_create(bar);
+    lv_obj_set_size(cam_btn, CAM_W, CAM_H);
+    lv_obj_align(cam_btn, LV_ALIGN_LEFT_MID, CAM_X, 0);
+    lv_obj_set_style_bg_color(cam_btn, lv_color_hex(UI_COL_SURFACE2), 0);
+    lv_obj_set_style_radius(cam_btn, 8, 0);
+    lv_obj_set_style_shadow_width(cam_btn, 0, 0);
+    lv_obj_set_style_border_width(cam_btn, 1, 0);
+    lv_obj_set_style_border_color(cam_btn, lv_color_hex(UI_COL_LINE), 0);
+    lv_obj_set_style_border_color(cam_btn, lv_color_hex(UI_COL_ACCENT), LV_STATE_PRESSED);
+    s_home.cam = mk_label(cam_btn, "", F_SM, lv_color_hex(UI_COL_DIM));
+    lv_obj_set_size(s_home.cam, CAM_W - 12, lv_font_get_line_height(F_SM));
+    lv_label_set_long_mode(s_home.cam, LV_LABEL_LONG_MODE_DOTS);
+    lv_obj_center(s_home.cam);
+    lv_obj_add_event_cb(cam_btn, cam_badge_cb, LV_EVENT_CLICKED, NULL);
+#endif
 
     lv_obj_t *right = lv_obj_create(bar);
-    lv_obj_set_size(right, STAT_W, 52);
+    lv_obj_set_size(right, STAT_W, BAR_H);
     lv_obj_set_style_bg_opa(right, LV_OPA_TRANSP, 0);
     lv_obj_set_style_border_width(right, 0, 0);
     lv_obj_set_style_pad_all(right, 0, 0);
@@ -266,18 +276,14 @@ void ui_home_create(lv_obj_t *root)
     lv_obj_align(right, LV_ALIGN_RIGHT_MID, -(GEAR_W + GEAR_M + 6), 0);
     s_home.conn = mk_label(right, "SEARCHING", F_SM, lv_color_hex(UI_COL_DIM));
     s_home.owner = mk_label(right, "NO CONTROL", F_SM, lv_color_hex(UI_COL_WARN));
-    /* CAM badge (S3Remote design doc 8.1): green fps / grey STALE / red
-     * OFFLINE, text + colour never colour alone; tap opens the CAMERA page */
-    s_home.cam = mk_label(right, "", F_SM, lv_color_hex(UI_COL_DIM));
-    lv_obj_add_flag(s_home.cam, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_add_event_cb(s_home.cam, cam_badge_cb, LV_EVENT_CLICKED, NULL);
-    lv_obj_t *st_lbl[3] = { s_home.conn, s_home.owner, s_home.cam };
+    lv_obj_t *st_lbl[2] = { s_home.conn, s_home.owner };
     const int row_h = lv_font_get_line_height(F_SM);
-    for (int i = 0; i < 3; i++) {
+    const int rows_top = (BAR_H - 2 * row_h) / 2;
+    for (int i = 0; i < 2; i++) {
         lv_obj_set_size(st_lbl[i], STAT_W, row_h);
         lv_label_set_long_mode(st_lbl[i], LV_LABEL_LONG_MODE_DOTS);
         lv_obj_set_style_text_align(st_lbl[i], LV_TEXT_ALIGN_RIGHT, 0);
-        lv_obj_align(st_lbl[i], LV_ALIGN_TOP_RIGHT, 0, i * row_h);
+        lv_obj_align(st_lbl[i], LV_ALIGN_TOP_RIGHT, 0, rows_top + i * row_h);
     }
 
     lv_obj_t *gear = lv_button_create(bar);
@@ -586,28 +592,26 @@ void ui_home_refresh(const scr_state_t *st)
     }
 
 #if CONFIG_SCR_CAM_WS_ENABLE
-    /* CAM badge: green fps / grey STALE / red OFFLINE (design doc 8.1) */
+    /* CAM entry: the glyph is what makes it read as a button, the text +
+     * colour carry the stream state (design doc 8.1, spec 51) */
     if (st->cam.conn == SCR_CAM_CONNECTED) {
         if (st->cam.stale) {
-            ui_label_set_text(s_home.cam, "CAM STALE");
+            ui_label_set_text(s_home.cam, LV_SYMBOL_VIDEO " CAM STALE");
             ui_label_set_color(s_home.cam, lv_color_hex(UI_COL_DIM));
         } else if (st->cam.fps_x10 > 0) {
-            ui_label_set_fmt(s_home.cam, "CAM %u.%u fps",
+            ui_label_set_fmt(s_home.cam, LV_SYMBOL_VIDEO " CAM %u.%u fps",
                              st->cam.fps_x10 / 10, st->cam.fps_x10 % 10);
             ui_label_set_color(s_home.cam, lv_color_hex(UI_COL_OK));
         } else {
-            ui_label_set_text(s_home.cam, "CAM IDLE");
+            ui_label_set_text(s_home.cam, LV_SYMBOL_VIDEO " CAM IDLE");
             ui_label_set_color(s_home.cam, lv_color_hex(UI_COL_DIM));
         }
-        lv_obj_remove_flag(s_home.cam, LV_OBJ_FLAG_HIDDEN);
     } else if (st->cam.conn == SCR_CAM_CONNECTING) {
-        ui_label_set_text(s_home.cam, "CAM LINK");
+        ui_label_set_text(s_home.cam, LV_SYMBOL_VIDEO " CAM LINK");
         ui_label_set_color(s_home.cam, lv_color_hex(UI_COL_INFO));
-        lv_obj_remove_flag(s_home.cam, LV_OBJ_FLAG_HIDDEN);
     } else {
-        ui_label_set_text(s_home.cam, "CAM OFFLINE");
+        ui_label_set_text(s_home.cam, LV_SYMBOL_VIDEO " CAM OFFLINE");
         ui_label_set_color(s_home.cam, lv_color_hex(UI_COL_CRIT));
-        lv_obj_remove_flag(s_home.cam, LV_OBJ_FLAG_HIDDEN);
     }
 #endif
 }
