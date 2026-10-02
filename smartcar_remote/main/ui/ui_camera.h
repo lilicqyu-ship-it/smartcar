@@ -25,6 +25,7 @@ typedef struct {
     lv_obj_t      *img;
     lv_obj_t      *mask;        /* full-area overlay label, hidden while live */
     lv_image_dsc_t dsc;
+    uint16_t shown_w, shown_h;   /* last size logged (layout trace) */
     uint32_t       cur_seq;     /* frame the image currently references       */
     bool           has_frame;
 } ui_video_view_t;

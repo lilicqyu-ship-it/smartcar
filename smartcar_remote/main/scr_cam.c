@@ -243,8 +243,12 @@ static void decode_frame(const uint8_t *buf, const cam_frame_hdr_t *hdr)
         .outbuf_size  = (uint32_t)cap,
         .out_format   = JPEG_IMAGE_FORMAT_RGB565,
         .out_scale    = JPEG_IMAGE_SCALE_0,
-        /* TJpgDec emits big-endian RGB565; LVGL wants native LE words */
-        .flags.swap_color_bytes = 1,
+        /* NO swap: with JD_FORMAT=1 TJpgDec stores each pixel as a native
+         * (little-endian) uint16, exactly LVGL's LV_COLOR_FORMAT_RGB565, and
+         * the panel has no swap_bytes.  swap_color_bytes=1 made the words
+         * big-endian -> the "colour mosaic" on the bench (host-verified 10-02:
+         * same JPEG, unswapped = reference image, swapped = mosaic). */
+        .flags.swap_color_bytes = 0,
         .advanced.working_buffer      = s_cam.jpeg_ws,
         .advanced.working_buffer_size = s_cam.jpeg_ws_size,
     };

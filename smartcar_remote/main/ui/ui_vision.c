@@ -175,7 +175,11 @@ void ui_vision_create(lv_obj_t *root)
 {
     s_panel_w = bsp_display_get_h_res();
     s_panel_h = bsp_display_get_v_res();
-    s_vis.immersive_applied = false;
+    /* opposite of the apply_layout(false) that ends this function: with
+     * "false" here that first call hit the no-change early return, the
+     * video area was never sized/placed and the frame landed off-panel
+     * (bench 10-02: img at (-95,-55)-(224,184), page all black) */
+    s_vis.immersive_applied = true;
 
     s_vis.strip = lv_obj_create(root);
     lv_obj_set_size(s_vis.strip, s_panel_w, STRIP_H);

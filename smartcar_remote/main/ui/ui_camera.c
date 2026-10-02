@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <string.h>
+#include "esp_log.h"
 #include <bsp/esp-bsp.h>
 
 #include "ui_camera.h"
@@ -67,6 +68,18 @@ void ui_video_view_pump(ui_video_view_t *v, const scr_state_t *st)
         v->cur_seq = seq;
         v->has_frame = true;
         s_immersive = (h > 400);
+
+        /* one line per new size: where the frame actually sits on the panel
+         * (an off-panel image reads exactly like a dead stream) */
+        if (w != v->shown_w || h != v->shown_h) {
+            v->shown_w = w;
+            v->shown_h = h;
+            lv_obj_update_layout(v->img);
+            lv_area_t a;
+            lv_obj_get_coords(v->img, &a);
+            ESP_LOGI("ui_cam", "video %ux%u at (%d,%d)-(%d,%d)",
+                     w, h, (int)a.x1, (int)a.y1, (int)a.x2, (int)a.y2);
+        }
     }
 
     /* mask = every non-live condition, with text saying which one (spec 51:
@@ -253,7 +266,11 @@ void ui_camera_create(lv_obj_t *root)
 {
     s_panel_w = bsp_display_get_h_res();
     s_panel_h = bsp_display_get_v_res();
-    s_cu.immersive_applied = false;
+    /* opposite of the apply_layout(false) that ends this function: with
+     * "false" here that first call hit the no-change early return, the
+     * video area was never sized/placed and the frame landed off-panel
+     * (bench 10-02: img at (-95,-55)-(224,184), page all black) */
+    s_cu.immersive_applied = true;
 
     /* top info strip */
     s_cu.strip = lv_obj_create(root);
