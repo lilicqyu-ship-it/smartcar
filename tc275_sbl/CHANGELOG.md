@@ -7,6 +7,12 @@
 
 ## [未发布]
 
+## [1.0.1] - 2026-10-02
+
+### 修复
+- OTA 写路径页装载字节序改小端：DFlash/PFlash 页装载缓冲 LSB 落低地址（台架经 tc275_car calib 记录路径实证，1.0.9/1.0.10），原大端 `flashota_packWord` 把每组 4 字节写反——'TCOM' 魔数会落成 'M OCT'，槽位编程与 meta 写入的回读校验必败
+- DFlash meta 页填充 0xFF→0x00（DFlash0 擦除态读 0x00，与 PFlash 相反；官方 TC275 训练材料佐证）
+
 ## [1.0.0] - 2026-10-01
 
 首个稳定版 tag，对齐 `mw/app_version.h` 1.0.0；自 0.1.0 无代码变更。
