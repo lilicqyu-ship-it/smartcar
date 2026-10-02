@@ -241,9 +241,9 @@ UI radio 只能跟着回传尺寸显示"的拧巴态。现在的契约是**谁�
 | P1 | C6 等价替换（SoftAP/`/ws`/配对/SPI/遥测/驾驶） | 🟩 | doc 04/05/06/07/08 |
 | P2 | 相机面：MJPEG + WS 二进制帧 + **8.2 文本平面** + diag 字段 | 🟩 代码完成 | `:81/stream` 与 `:81/ws/camera` 注册日志；🟥 手机画面、Remote 解帧、hello→首帧/pause/profile 时序、`drop` 计数待测 |
 | P3 | snapshot / 录像 / gallery | ⬜ 未开始 | 前置：Frame Hub（说明书 §9）＋ 存储目标（已取消，见 §6） |
-| P4 | line / color / QR + `vision` JSON | ⬜ | 同上；`vision_task` 未创建 |
-| P5 | Assist（`omega = clamp(omega_remote + Kx·e_x + Kθ·e_θ)`） | ⬜ | 依赖 P4；权限模型已符合 ADR-008（视觉只出高层指令） |
-| P6 | ESP-DL 目标检测 | ⬜ | PSRAM 预算未评估 |
+| P4 | line / color / QR + `vision` JSON | ⬜ | 同上；`vision_task` 未创建；**落位政策：核 1**（[doc/22](22-vision-resource-policy.md)） |
+| P5 | Assist（`omega = clamp(omega_remote + Kx·e_x + Kθ·e_θ)`） | ⬜ | 依赖 P4；权限模型已符合 ADR-008（视觉只出高层指令）；**经 bridge/SF 下行**（doc/22） |
+| P6 | ESP-DL 目标检测 | ⬜ | PSRAM 预算未评估；**先过 doc/22 §4 预算清单再开** |
 | P7 | OTA / 故障 / 老化 | 🟨 | 双分区自更新与 TC275 relay OTA 是 C6 基线既有能力；G6 老化未做 |
 | — | 表 21 故障矩阵 | 🟡 | 相机侧已具备判据（`camera.up`、`drop`、`view`），存储项随 SD 取消，控制面断链策略沿用 C6 基线未改 |
 

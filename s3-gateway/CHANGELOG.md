@@ -21,6 +21,7 @@
 - **`/ws/camera` 帧头 SEQ 递增**：出站泵发帧时 `cam_frame_build(++s_seq, …)`。此前 `s_seq` 只在 `/stream` 的 sink 路径自增，WS 路径照抄变量名导致每帧 SEQ 恒为 0——手持机 `cam_seq_note` 把首帧（RESYNC 收下）之后的每一帧全判成 `CAM_SEQ_STALE` 重复帧静默丢弃，CAM 页永远 NO SIGNAL、串口痕迹只有 seq=0/win=0/ferr=0 的"干净"零计数（没有浏览器观众时必然复现，与 `/stream` 混用 s_seq 时碰巧正常）
 
 ### 新增
+- 视觉负载资源政策 [doc/22-vision-resource-policy.md](doc/22-vision-resource-policy.md)：网关空闲的是核 1 和 PSRAM、不是射频——把 8 MiB 填满（高分/多观看者/双 sink）会先打爆 SoftAP、再打爆 Remote 解码、最后才碰 PSRAM。P4 Frame Hub/视觉算法落核 1（不在核 0 httpd 里做视觉）、P5 Assist 只出高层 omega 走 bridge/SF（视觉不直接发 DRIVE）、P6 ESP-DL 先过 PSRAM 预算清单、手机高清 MJPEG 维持窗 14400 + 单观看者；doc/21 路线图对应行已挂链接
 - `s3_camera`：OV5640 直出 JPEG + MJPEG 推流，**独立 esp_http_server 实例（默认 :81）**——阻塞的视频 handler 不能挂到 80 端口那台，否则会冻住控制页与所有 WS 帧；单查看者通道，第二个请求 503
 - 控制页"实时画面"卡片：按需开关 `http://<host>:81/stream`，页面切后台自动让出通道
 - 台架开机 `task map` 日志（`CONFIG_S3_BENCH_CTRL` + `CONFIG_FREERTOS_USE_TRACE_FACILITY`）：逐行打印 `任务/core/prio/剩余栈`，用于核对双核分工表
