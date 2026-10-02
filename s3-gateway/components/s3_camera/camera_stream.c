@@ -399,7 +399,6 @@ static esp_err_t stream_handler(httpd_req_t *req)
  *   Frames are grabbed even while unsubscribed (so re-subscribe is immediate)
  *   and counted into cam_state.drop instead of going over the air - the 表 15
  *   latest-only rule. */
-#define WS_FRAME_HEADROOM 4096u   /* PSRAM frame buffer slack over one JPEG */
 #define WS_RX_TEXT_MAX    128u    /* inbound op frames above this are dropped */
 #define WS_RX_CTRL_MAX    125u    /* RFC 6455: control-frame payload is <= 125 B */
 #define WS_TX_LOCK_MS     600u    /* > the 500 ms SO_SNDTIMEO, so a lock timeout
@@ -428,8 +427,6 @@ typedef struct
     volatile bool        in_use;
     EventGroupHandle_t   bits;         /* lives as long as the server         */
     SemaphoreHandle_t    tx_mtx;       /* ditto; serialises this socket's TX  */
-    uint8_t             *obuf;         /* PSRAM: header + JPEG staging       */
-    size_t               ocap;
     volatile bool        subscribed;   /* set/cleared only via event bits    */
     volatile uint8_t     tx_fail;      /* consecutive failed writes          */
     char                 profile[16];
@@ -492,28 +489,33 @@ static size_t ws_write_all(int fd, const uint8_t *buf, size_t len, int64_t deadl
     return off;
 }
 
-/* Unmasked server->client frame, header and payload written to completion.
- * A frame that died after its first byte left can never be resynchronised on
- * the peer's side, so that case closes the socket instead of leaving a torn
- * stream behind - a clean redial is ~200 ms, a desynced stream is a dead one. */
-static esp_err_t ws_frame_write(ws_session_t *s, const httpd_ws_frame_t *pkt)
+/* Unmasked server->client frame, written to completion from up to two
+ * contiguous parts (cam frame = 20 B header + the driver's fb, no staging
+ * copy).  A frame that died after its first byte left can never be
+ * resynchronised on the peer's side, so that case closes the socket instead
+ * of leaving a torn stream behind - a clean redial is ~200 ms, a desynced
+ * stream is a dead one. */
+static esp_err_t ws_frame_write(ws_session_t *s, httpd_ws_type_t type,
+                                size_t total_len,
+                                const uint8_t *p1, size_t n1,
+                                const uint8_t *p2, size_t n2)
 {
     uint8_t hdr[10];
     size_t  hl = 0u;
-    hdr[hl++] = (uint8_t)(0x80u | ((uint8_t)pkt->type & 0x0Fu));   /* FIN + opcode */
-    if (pkt->len <= 125u)
+    hdr[hl++] = (uint8_t)(0x80u | ((uint8_t)type & 0x0Fu));   /* FIN + opcode */
+    if (total_len <= 125u)
     {
-        hdr[hl++] = (uint8_t)pkt->len;
+        hdr[hl++] = (uint8_t)total_len;
     }
-    else if (pkt->len <= 0xFFFFu)
+    else if (total_len <= 0xFFFFu)
     {
         hdr[hl++] = 126u;
-        hdr[hl++] = (uint8_t)(pkt->len >> 8);
-        hdr[hl++] = (uint8_t)(pkt->len);
+        hdr[hl++] = (uint8_t)(total_len >> 8);
+        hdr[hl++] = (uint8_t)(total_len);
     }
     else
     {
-        uint64_t l = pkt->len;
+        uint64_t l = total_len;
         hdr[hl++] = 127u;
         for (int i = 7; i >= 0; i--)
         {
@@ -523,11 +525,15 @@ static esp_err_t ws_frame_write(ws_session_t *s, const httpd_ws_frame_t *pkt)
 
     const int64_t deadline = esp_timer_get_time() + (int64_t)WS_FRAME_BUDGET_MS * 1000;
     size_t sent = ws_write_all(s->fd, hdr, hl, deadline);
-    if (sent == hl && pkt->len > 0u && pkt->payload != NULL)
+    if (sent == hl && n1 > 0u && p1 != NULL)
     {
-        sent += ws_write_all(s->fd, pkt->payload, pkt->len, deadline);
+        sent += ws_write_all(s->fd, p1, n1, deadline);
+        if (sent == hl + n1 && n2 > 0u && p2 != NULL)
+        {
+            sent += ws_write_all(s->fd, p2, n2, deadline);
+        }
     }
-    if (sent == hl + pkt->len)
+    if (sent == hl + total_len)
     {
         return ESP_OK;
     }
@@ -536,19 +542,26 @@ static esp_err_t ws_frame_write(ws_session_t *s, const httpd_ws_frame_t *pkt)
         return ESP_ERR_TIMEOUT;                 /* nothing left: stream intact */
     }
     ESP_LOGW(TAG, "ws/camera torn write %u/%u B on fd=%d - closing to resync",
-             (unsigned)sent, (unsigned)(hl + pkt->len), s->fd);
+             (unsigned)sent, (unsigned)(hl + total_len), s->fd);
     s->tx_fail = WS_TX_FAIL_MAX;                /* pump retires on its next loop */
     (void)httpd_sess_trigger_close(s->hd, s->fd);
     return ESP_FAIL;
 }
 
-static esp_err_t ws_send_frame(ws_session_t *s, httpd_ws_frame_t *pkt)
+/* Locked sender, scatter form: type + total length with up to two payload
+ * parts (part2 lets the binary path send straight out of the driver's fb).
+ * Serialises against the handler's replies on this socket and keeps the
+ * consecutive-failure count the pump retires on. */
+static esp_err_t ws_send_frame_parts(ws_session_t *s, httpd_ws_type_t type,
+                                     size_t total_len,
+                                     const uint8_t *p1, size_t n1,
+                                     const uint8_t *p2, size_t n2)
 {
     if (xSemaphoreTake(s->tx_mtx, pdMS_TO_TICKS(WS_TX_LOCK_MS)) != pdTRUE)
     {
         return ESP_ERR_TIMEOUT;
     }
-    esp_err_t err = ws_frame_write(s, pkt);
+    esp_err_t err = ws_frame_write(s, type, total_len, p1, n1, p2, n2);
     (void)xSemaphoreGive(s->tx_mtx);
     if (err == ESP_FAIL)
     {
@@ -559,6 +572,12 @@ static esp_err_t ws_send_frame(ws_session_t *s, httpd_ws_frame_t *pkt)
      * the count, not the binary send, is what lets the pump notice. */
     s->tx_fail = (err == ESP_OK) ? 0u : (uint8_t)(s->tx_fail + 1u);
     return err;
+}
+
+static esp_err_t ws_send_frame(ws_session_t *s, httpd_ws_frame_t *pkt)
+{
+    return ws_send_frame_parts(s, pkt->type, pkt->len,
+                               pkt->payload, pkt->len, NULL, 0u);
 }
 
 static void ws_send_text(ws_session_t *s, const char *json)
@@ -709,25 +728,16 @@ static void ws_pump_task(void *arg)
                 s_ws_dropped++;
             }
         }
-        size_t need = CAM_HEADER_LEN + fb->len;
-        if (send && need + WS_FRAME_HEADROOM > s->ocap)
-        {
-            heap_caps_free(s->obuf);
-            s->obuf = NULL;
-            s->ocap = 0u;
-            s->obuf = heap_caps_malloc(need + WS_FRAME_HEADROOM,
-                                       MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-            if (s->obuf == NULL) {
-                ESP_LOGE(TAG, "ws frame buffer %u B: out of PSRAM",
-                         (unsigned)(need + WS_FRAME_HEADROOM));
-                esp_camera_fb_return(fb);
-                break;
-            }
-            s->ocap = need + WS_FRAME_HEADROOM;
-        }
 
         if (send)
         {
+            /* Zero-copy TX: the fb stays owned until after the send, so the
+             * JPEG goes straight out of the driver's PSRAM buffer - only the
+             * 20 B cam header is composed locally.  (The old obuf staging
+             * cost one full-frame memcpy per frame plus its grow/free
+             * machinery, and bought nothing: the send already sat between
+             * fb_get and fb_return.) */
+            uint8_t cam_hdr[CAM_HEADER_LEN];
             /* ++: SEQ must advance per SENT frame (表 14 monotonic).  The
              * /stream path bumps it via its sink argument; the WS path sends
              * straight from s_seq, so a constant 0 landed in every header and
@@ -738,19 +748,16 @@ static void ws_pump_task(void *arg)
                                         (uint32_t)fb->timestamp.tv_sec * 1000u +
                                         (uint32_t)(fb->timestamp.tv_usec / 1000),
                                         fb->width, fb->height, (uint32_t)fb->len,
-                                        CAM_FLAG_KEYFRAME, s->obuf, s->ocap);
+                                        CAM_FLAG_KEYFRAME,
+                                        cam_hdr, sizeof(cam_hdr));
             if (hl == 0u) {
                 s_ws_dropped++;      /* oversized/corrupt fb: latest-only drop */
             } else {
-                memcpy(s->obuf + hl, fb->buf, fb->len);
-                httpd_ws_frame_t pkt = {
-                    .final   = true,
-                    .type    = HTTPD_WS_TYPE_BINARY,
-                    .payload = s->obuf,
-                    .len     = hl + fb->len,
-                };
                 int64_t send_beg = esp_timer_get_time();
-                esp_err_t res = ws_send_frame(s, &pkt);
+                esp_err_t res = ws_send_frame_parts(s, HTTPD_WS_TYPE_BINARY,
+                                                    hl + fb->len,
+                                                    cam_hdr, hl,
+                                                    fb->buf, fb->len);
                 uint32_t send_ms = (uint32_t)((esp_timer_get_time() - send_beg + 500) / 1000);
                 if (send_ms > s_worst_send_ms) {
                     s_worst_send_ms = send_ms;
@@ -787,9 +794,6 @@ static void ws_pump_task(void *arg)
      * must not keep the only viewer position, or the next dial would be refused
      * forever.  Bits are cleared before in_use drops, so the next session starts
      * from a clean mailbox. */
-    heap_caps_free(s->obuf);
-    s->obuf     = NULL;
-    s->ocap     = 0u;
     s->subscribed = false;
     xEventGroupClearBits(s->bits, PUMP_WANTED | PUMP_CLOSE | PUMP_HELLO);
     s->fd     = -1;
