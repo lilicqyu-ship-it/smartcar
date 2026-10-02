@@ -129,19 +129,32 @@ static cam_ui_t s_cu;
 static int s_panel_w, s_panel_h;
 
 /* ---- sidebar controls ----------------------------------------------------------*/
-static bool cam_ctrl_gate(void)
+/* One reason string serves both the sidebar row and the tap-time toast (design
+ * doc 8.2), so they can never disagree.  "" = actionable.  The profile buttons
+ * are gated with ui_set_blocked rather than LV_STATE_DISABLED precisely because
+ * the tap has to report this string - a disabled widget gets no CLICKED at all. */
+static const char *cam_block_why(const scr_state_t *st)
 {
-    scr_state_t st;
-    app_state_snapshot(&st);
-    return st.ctrl_role && st.conn == SCR_CONN_CONNECTED &&
-           st.cam.conn == SCR_CAM_CONNECTED;
+    if (st->cam.conn != SCR_CAM_CONNECTED) {
+        return "CAM LINK DOWN";
+    }
+    if (!st->ctrl_role) {
+        return "NEED CONTROL";
+    }
+    if (st->conn != SCR_CONN_CONNECTED) {
+        return "LINK NOT READY";
+    }
+    return "";
 }
 
 static void prof_cb(lv_event_t *e)
 {
     int idx = (int)(uintptr_t)lv_event_get_user_data(e);
-    if (!cam_ctrl_gate()) {
-        ui_toast("CAM: CONTROL NEEDED");
+    scr_state_t st;
+    app_state_snapshot(&st);
+    const char *why = cam_block_why(&st);
+    if (why[0] != '\0') {
+        ui_toast("CAM: %s", why);
         return;
     }
     scr_cam_cmd_profile(idx == 0 ? CAM_PROFILE_REMOTE : CAM_PROFILE_WEB);
@@ -319,27 +332,11 @@ void ui_camera_refresh(const scr_state_t *st)
              st->cam.sensor[0] != '\0' ? st->cam.sensor : "-",
              lv_color_hex(UI_COL_TXT));
 
-    /* CTRL gating: grey out + state the reason (design doc 8.2) */
-    bool en = st->ctrl_role && st->conn == SCR_CONN_CONNECTED &&
-              st->cam.conn == SCR_CAM_CONNECTED;
-    lv_obj_t *gated[] = { s_cu.prof[0], s_cu.prof[1] };
-    for (size_t i = 0; i < sizeof(gated) / sizeof(gated[0]); i++) {
-        if (en) {
-            lv_obj_remove_state(gated[i], LV_STATE_DISABLED);
-        } else {
-            lv_obj_add_state(gated[i], LV_STATE_DISABLED);
-        }
-    }
-    const char *why = "";
-    if (!en) {
-        if (st->cam.conn != SCR_CAM_CONNECTED) {
-            why = "CAM LINK DOWN";
-        } else if (!st->ctrl_role) {
-            why = "NEED CONTROL";
-        } else {
-            why = "LINK NOT READY";
-        }
-    }
+    /* CTRL gating: dim + state the reason, and the tap still explains itself
+     * (design doc 8.2) */
+    const char *why = cam_block_why(st);
+    ui_set_blocked(s_cu.prof[0], why[0] != '\0');
+    ui_set_blocked(s_cu.prof[1], why[0] != '\0');
     ui_label_set_text(s_cu.reason, why);
 
     apply_layout(ui_video_immersive());

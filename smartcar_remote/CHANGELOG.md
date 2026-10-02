@@ -21,6 +21,7 @@
   `SCR_CAM_PROFILE_REMOTE`（320×240）与网关默认 VGA（640×480）互相拧着，radio 永远指着 640 FULL。
 
 ### 修复
+- **"置灰 + toast" 的 toast 是死代码**：LVGL 对 `LV_STATE_DISABLED` 对象根本不派发 `CLICKED`（`lv_indev.c` 的 `is_enabled` 前置判断，见 `indev_proc_release`），所以 §8.1 三 TAB、§8.2 profile、§8.3 VISION mode/drive 按钮一旦变灰，tap 进不到回调，写在回调里的原因 toast 永不触发——说明书要求的"置灰 + toast"实际只剩置灰。新增主题原语 `ui_set_blocked()` 承载**信息型门控**：保持可点、用递归 `OPA` 淡出（子 label 随父一起变暗，`lv_obj_get_style_opa_recursive` 沿父链相乘）、取消 PRESSED 高亮让手感仍是"按不动"；原因串改为单一真源函数（`cam_block_why()` / `vis_gate_why()` / `vis_drive_why()`），tap 出的 toast 与侧栏文案同源不再各说各话。VISION 的 AUTO 占位与 STALE  ASSIST 此前同样点不动，现在会解释"为什么不能用"。**标定/OTA/清故障（08 §5）不动**：那是安全型硬禁，必须继续用真 `LV_STATE_DISABLED`
 - **视频面永远 NO SIGNAL（blocker）**：WS 分片重组把 `ev->payload_len` 当本事件拷贝长度使用，而它是**整帧**总长（`data_len` 才是本片字节数）。`WS_RX_BUF=4096` < VGA JPEG 20–25 KB ⇒ 每帧拆 5–6 个事件，逐个越读堆约 19 KB 并让后片覆盖前片，SOI 侥幸可过、EOI 必挂 → `CAM_RX_JPEG_ERR` 持续计数。改取 `data_len` 后 `total = payload_offset + data_len` 成为真正的运行结束偏移，`total > ASM_CAP` 越界检查也随之成立（与 `scr_link.c` 控制面二进制路径一致）
 - C6 OTA 期间不再弹全屏 RADIO LOST 告警：上传饿死遥测与"接受后重启等待重连"两个窗口内静默（scr_svc 新增 `scr_svc_ota_quiet_c6()`，90 s 重连宽限；上传失败/宽限超时后告警照常）
 - TC275 断电（WS 仍连接）不再触发 RADIO LOST 全屏告警：告警只跟踪 S3↔C6 无线链路本身，车端离线由 SYSTEM 页 OFFLINE/STALE 与遥测 "--" 呈现（需配合 C6 侧遥测停播修复）

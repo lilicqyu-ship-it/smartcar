@@ -104,6 +104,26 @@ lv_obj_t *ui_button(lv_obj_t *parent, const char *text, lv_color_t bg,
     return b;
 }
 
+void ui_set_blocked(lv_obj_t *btn, bool blocked)
+{
+    /* LV_STATE_USER_1 is only the marker here: the visible cue is the OPA,
+     * which the label child inherits through the parent chain.  Checking it
+     * first keeps the 10 Hz refresh from re-styling (and re-invalidating)
+     * buttons whose gate has not changed. */
+    if (blocked == lv_obj_has_state(btn, LV_STATE_USER_1)) {
+        return;
+    }
+    if (blocked) {
+        lv_obj_add_state(btn, LV_STATE_USER_1);
+        lv_obj_set_style_border_color(btn, lv_color_hex(UI_COL_LINE), LV_STATE_PRESSED);
+        lv_obj_set_style_opa(btn, LV_OPA_50, 0);
+    } else {
+        lv_obj_remove_state(btn, LV_STATE_USER_1);
+        lv_obj_set_style_border_color(btn, lv_color_hex(UI_COL_ACCENT), LV_STATE_PRESSED);
+        lv_obj_set_style_opa(btn, LV_OPA_COVER, 0);
+    }
+}
+
 lv_color_t ui_col_for_state(bool ok, bool warn, bool crit)
 {
     if (crit) return lv_color_hex(UI_COL_CRIT);

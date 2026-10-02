@@ -278,6 +278,7 @@ struct {
 
 - TAB 只在 `conn==CONNECTED` 下可点（其余置灰 + toast）；DRIVE 页即现有 Home 驾驶布局（06 §3）整体保留，STOP 按钮仅 DRIVE 页可见（LLDD §13.4：Camera 页不驾驶——进 CAMERA/VISION 页时摇杆隐藏并清零 `scr_ctrl` 输入，DRIVE 恒发 (0,0) 心跳，与标定页 08 §5 同一安全模式）。
 - CAM 徽标三态：绿 `9.8fps` / 灰 `STALE` / 红 `OFFLINE`（色+字+图标三重表达，spec §51）。
+- **"置灰 + toast" 不能用 `LV_STATE_DISABLED`**：LVGL 对 DISABLED 对象不派发 `CLICKED`（`lv_indev.c` 的 `is_enabled` 前置判断），按钮变灰后 tap 根本进不到回调，toast 就成了死代码。故这类**信息型门控**（三 TAB、CAMERA profile、VISION mode/drive）统一走 `ui_set_blocked()`：保持可点、用递归 `OPA` 淡出（子 label 随父一起变暗）、取消 PRESSED 高亮，tap 时回调读同一份原因串既出 toast 也填侧栏文案。反例是标定/OTA/清故障（08 §5）——那些是**安全型硬禁**，必须用真 `LV_STATE_DISABLED`，不可改回 blocked。
 
 ### 8.2 CAMERA 页（LLDD §13.2 布局的 800×480 展开）
 

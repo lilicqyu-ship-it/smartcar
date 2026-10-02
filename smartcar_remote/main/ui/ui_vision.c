@@ -49,14 +49,35 @@ static vis_ui_t s_vis;
 static int s_panel_w, s_panel_h;
 
 /* ---- commands (all CTRL gated, design doc 7.2) ---------------------------------*/
-static bool vis_gate(const scr_state_t *st_ref)
+/* Gate reasons double as the tap-time toast and the sidebar row, so the two
+ * cannot drift apart.  The buttons are gated with ui_set_blocked rather than
+ * LV_STATE_DISABLED on purpose: a disabled widget never sees the click, and
+ * these gates exist to tell the driver why the tap did nothing.  "" = go. */
+static const char *vis_gate_why(const scr_state_t *st)
 {
-    scr_state_t st;
-    if (st_ref == NULL) {
-        app_state_snapshot(&st);
-        st_ref = &st;
+    if (st->conn != SCR_CONN_CONNECTED) {
+        return "LINK DOWN";
     }
-    return st_ref->ctrl_role && st_ref->conn == SCR_CONN_CONNECTED;
+    if (!st->ctrl_role) {
+        return "NEED CONTROL";
+    }
+    return "";
+}
+
+static const char *vis_drive_why(const scr_state_t *st, int idx)
+{
+    if (idx == 2) {
+        /* LLDD Table 16: full AUTO is not part of V1.0 - placeholder button */
+        return "AUTO NOT IN V1.0";
+    }
+    const char *why = vis_gate_why(st);
+    if (why[0] != '\0') {
+        return why;
+    }
+    if (idx == 1 && !st->vision.fresh) {
+        return "VISION STALE";
+    }
+    return "";
 }
 
 static void send_json(const char *buf)
@@ -69,8 +90,11 @@ static void send_json(const char *buf)
 static void mode_cb(lv_event_t *e)
 {
     int idx = (int)(uintptr_t)lv_event_get_user_data(e);
-    if (!vis_gate(NULL)) {
-        ui_toast("VISION: CONTROL NEEDED");
+    scr_state_t st;
+    app_state_snapshot(&st);
+    const char *why = vis_gate_why(&st);
+    if (why[0] != '\0') {
+        ui_toast("VISION: %s", why);
         return;
     }
     char buf[VISION_CMD_BUF_MAX];
@@ -84,19 +108,11 @@ static void mode_cb(lv_event_t *e)
 static void drive_cb(lv_event_t *e)
 {
     int idx = (int)(uintptr_t)lv_event_get_user_data(e);
-    if (idx == 2) {
-        /* LLDD Table 16: full AUTO is not part of V1.0 - placeholder button */
-        ui_toast("AUTO: NOT IMPLEMENTED");
-        return;
-    }
-    if (!vis_gate(NULL)) {
-        ui_toast("VISION: CONTROL NEEDED");
-        return;
-    }
     scr_state_t st;
     app_state_snapshot(&st);
-    if (idx == 1 && !st.vision.fresh) {
-        ui_toast("ASSIST: VISION STALE");
+    const char *why = vis_drive_why(&st, idx);
+    if (why[0] != '\0') {
+        ui_toast("%s", why);
         return;
     }
     char buf[VISION_CMD_BUF_MAX];
@@ -254,11 +270,7 @@ static void set_checked(lv_obj_t *btn, bool on)
 
 static void set_enabled(lv_obj_t *btn, bool en)
 {
-    if (en) {
-        lv_obj_remove_state(btn, LV_STATE_DISABLED);
-    } else {
-        lv_obj_add_state(btn, LV_STATE_DISABLED);
-    }
+    ui_set_blocked(btn, !en);
 }
 
 #if CONFIG_SCR_CAM_OVERLAY

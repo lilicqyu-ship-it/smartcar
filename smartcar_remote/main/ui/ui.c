@@ -136,7 +136,10 @@ static void tab_cb(lv_event_t *e)
 }
 
 /* TAB state every refresh: check + link gate (design doc 8.1: tabs are only
- * clickable while CONNECTED) + immersive hide (WEB_PREVIEW full-bleed). */
+ * actionable while CONNECTED) + immersive hide (WEB_PREVIEW full-bleed).
+ * The link gate uses ui_set_blocked, not LV_STATE_DISABLED: a disabled TAB
+ * swallows the tap, but 8.1 wants the tap explained ("LINK DOWN"), so the
+ * TAB stays clickable and dims itself while tab_cb fires the toast. */
 static void tabs_refresh(const scr_state_t *st)
 {
     tabs_set_visible(page_is_video(s_cur) && !ui_video_immersive());
@@ -149,11 +152,7 @@ static void tabs_refresh(const scr_state_t *st)
                 lv_obj_remove_state(s_tab_btn[i], LV_STATE_CHECKED);
             }
         }
-        if (st->conn != SCR_CONN_CONNECTED) {
-            lv_obj_add_state(s_tab_btn[i], LV_STATE_DISABLED);
-        } else {
-            lv_obj_remove_state(s_tab_btn[i], LV_STATE_DISABLED);
-        }
+        ui_set_blocked(s_tab_btn[i], st->conn != SCR_CONN_CONNECTED);
     }
 }
 

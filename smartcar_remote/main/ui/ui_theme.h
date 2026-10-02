@@ -50,6 +50,17 @@ lv_obj_t *ui_kv_row(lv_obj_t *parent, const char *name, lv_obj_t **val_out);
 lv_obj_t *ui_button(lv_obj_t *parent, const char *text, lv_color_t bg,
                     lv_event_cb_t cb, void *user_data);
 
+/*
+ * Gate that still has to explain itself (design doc 8.1/8.2: greyed + toast).
+ * LV_STATE_DISABLED cannot carry that contract: lv_indev dispatches no
+ * CLICKED/PRESSED/RELEASED to a disabled object (see the is_enabled guards in
+ * lv_indev.c), so the reason toast in the handler would be unreachable.
+ * Blocked keeps the widget clickable, dims it with recursive OPA (the label
+ * child fades with it) and drops the pressed highlight so a tap still reads
+ * as inert.  Use real DISABLED only where the action must never happen.
+ */
+void ui_set_blocked(lv_obj_t *btn, bool blocked);
+
 /* Colour for a link/vehicle status. */
 lv_color_t ui_col_for_state(bool ok, bool warn, bool crit);
 
