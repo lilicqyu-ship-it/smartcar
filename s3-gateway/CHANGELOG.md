@@ -16,7 +16,9 @@
 - 纳入 smartcar monorepo 版本管理；PROJECT_VER 升至 1.1.0 对齐整车基线；`.gitignore` 公钥例外路径随组件更名修正（`c6_ota` → `s3_ota`），修复 `pub_ed25519_dev.bin` 被静默忽略
 - **`framesize` 是网关与手持机共用的一个全局寄存器组，谁订阅谁声明、退出即恢复**：`/ws/camera` 会话退役（泵退出路径）时把传感器写回本机 `CONFIG_S3_CAMERA_FRAME_SIZE`。此前手持机默认不声明档位，网关就留在被上一条 bug 配错的尺寸上，手机 `/stream` 会跟着长期降级；现在两端各自的默认只在"没人声明"时生效（Remote 侧对应改动：订阅后立刻发 `{"op":"profile"}`）
 - 入站 ops 打一行 `ws/camera op: <name> (fd=..)`：手持机暂停期每 4 s 的 `{"op":"ping"}` 因此在串口上可见，不开 CAMERA 页也能证明文本面双向已落地
+- **CPU 频率维持 160 MHz（240 MHz 实验否决）**：台架上 240 MHz + 视频推流的唯一一次会话以网关整机掉线收场（电台关闭、串口无 panic 痕迹地静默，断电才恢复），链路稳定性优先，回退出厂时钟；视频吞吐的收益在手持机侧解码器，不在网关时钟。240 需挂串口复现后再议（120 M 模块时钟同样被否决：需 flash HPM，本批颗粒不支持）
 - **视频画面旋转 180°**：模组在车壳里是倒装的，`camera_init()` 在 `esp_camera_init()` 成功后一次性下发传感器侧 `set_hmirror(1)` + `set_vflip(1)`（两者同时开即 180°，非镜像）。修在传感器而不是某一条输出，故 `:81/stream` 与 `/ws/camera` 一起转正；OV5640 换帧尺寸会按 `status.hmirror/vflip` 重画这两位，handset 切 profile 不会丢旋转
+- **`/ws/camera` 帧头 SEQ 递增**：出站泵发帧时 `cam_frame_build(++s_seq, …)`。此前 `s_seq` 只在 `/stream` 的 sink 路径自增，WS 路径照抄变量名导致每帧 SEQ 恒为 0——手持机 `cam_seq_note` 把首帧（RESYNC 收下）之后的每一帧全判成 `CAM_SEQ_STALE` 重复帧静默丢弃，CAM 页永远 NO SIGNAL、串口痕迹只有 seq=0/win=0/ferr=0 的"干净"零计数（没有浏览器观众时必然复现，与 `/stream` 混用 s_seq 时碰巧正常）
 
 ### 新增
 - `s3_camera`：OV5640 直出 JPEG + MJPEG 推流，**独立 esp_http_server 实例（默认 :81）**——阻塞的视频 handler 不能挂到 80 端口那台，否则会冻住控制页与所有 WS 帧；单查看者通道，第二个请求 503

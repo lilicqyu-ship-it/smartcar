@@ -630,7 +630,14 @@ static void ws_pump_task(void *arg)
 
         if (send)
         {
-            size_t hl = cam_frame_build(s_seq, (uint32_t)fb->timestamp.tv_sec * 1000u +
+            /* ++: SEQ must advance per SENT frame (表 14 monotonic).  The
+             * /stream path bumps it via its sink argument; the WS path sends
+             * straight from s_seq, so a constant 0 landed in every header and
+             * the handset's cam_seq_note binned all frames after the first as
+             * CAM_SEQ_STALE duplicates - the video plane showed one frozen
+             * frame per connection, i.e. never a live picture. */
+            size_t hl = cam_frame_build(++s_seq,
+                                        (uint32_t)fb->timestamp.tv_sec * 1000u +
                                         (uint32_t)(fb->timestamp.tv_usec / 1000),
                                         fb->width, fb->height, (uint32_t)fb->len,
                                         CAM_FLAG_KEYFRAME, s->obuf, s->ocap);

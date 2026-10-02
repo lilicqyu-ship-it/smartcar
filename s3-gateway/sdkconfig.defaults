@@ -8,6 +8,12 @@ CONFIG_ESPTOOLPY_FLASHFREQ_80M=y
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y
 CONFIG_SPIRAM_SPEED_80M=y
+# CPU stays at the stock 160 MHz: the one bench session with 240 MHz + active
+# video streaming ended with the gateway vanishing off the air (radio down,
+# console silent, no panic trace - recovered only on power cycle).  The video
+# throughput wins live in the handset's decoder, not in these clocks; revisit
+# 240 only with a serial-attached reproduction.
+# CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240 is not set
 CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=16384
 CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
 
