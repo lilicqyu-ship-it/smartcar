@@ -101,10 +101,15 @@ static boolean flashota_eraseSectorNc(uint32 sectorAddr, uint32_t busyBits)
 /* Big-endian packing of four bytes into one 32-bit program word: TriCore
  * stores the MSB at the lowest address, so byte i of the image must land in
  * bits [31-8i .. 24-8i] of the word handed to the page buffer. */
+/* Page load buffer convention (bench-proven on this silicon via the calib
+ * record path, tc275_car 1.0.9/1.0.10): the FMU maps the 32-bit word's LSB
+ * to the page's LOWEST byte address, so the word must be packed
+ * little-endian. A big-endian pack writes every 4-byte group reversed -
+ * a 'TCOM' magic would land as 'M OCT' and no read-back verify can pass. */
 static uint32_t flashota_packWord(const uint8_t *b)
 {
-    return ((uint32_t)b[0] << 24) | ((uint32_t)b[1] << 16) |
-           ((uint32_t)b[2] << 8) | (uint32_t)b[3];
+    return (uint32_t)b[0] | ((uint32_t)b[1] << 8) |
+           ((uint32_t)b[2] << 16) | ((uint32_t)b[3] << 24);
 }
 
 /* Program one whole page at pageAddr (non-cached, page-aligned). */
@@ -337,7 +342,7 @@ boolean FLASHOTA_metaWrite(uint8 pageIdx, const uint8 *data, uint32 len)
 
         for (i = 0u; i < OTA_DF_PAGE; i++)
         {
-            page[i] = ((off + i) < len) ? data[off + i] : 0xFFu;
+            page[i] = ((off + i) < len) ? data[off + i] : 0x00u;   /* DFlash0 erased level */
         }
         __disable();
         IfxFlash_clearStatus(0u);
