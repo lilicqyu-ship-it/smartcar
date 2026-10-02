@@ -111,11 +111,22 @@ static void tabs_set_visible(bool on)
     if (s_tabbar == NULL) {
         return;
     }
-    if (on && lv_obj_has_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN)) {
-        lv_obj_remove_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN);
-        lv_obj_move_foreground(s_tabbar);
-        lv_obj_move_foreground(s_toast);
-    } else if (!on && !lv_obj_has_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN)) {
+    if (on) {
+        if (lv_obj_has_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN)) {
+            lv_obj_remove_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN);
+        }
+        /* raise on EVERY on-call, not only the hidden->visible edge: a direct
+         * video-page switch (CAMERA <-> VISION) leaves the tab bar visible but
+         * BELOW the page object ui_nav_open just foregrounded - the opaque
+         * page ate the tabs (bench 10-02: all three gone after tapping
+         * VISION).  Idempotent: already-on-top just skips the move. */
+        lv_obj_t *parent = lv_obj_get_parent(s_tabbar);
+        if (lv_obj_get_index(s_tabbar) <
+                (int32_t)lv_obj_get_child_count(parent) - 1) {
+            lv_obj_move_foreground(s_tabbar);
+            lv_obj_move_foreground(s_toast);
+        }
+    } else if (!lv_obj_has_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN)) {
         lv_obj_add_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN);
     }
 }

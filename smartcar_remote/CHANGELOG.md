@@ -24,6 +24,7 @@
   `SCR_CAM_PROFILE_REMOTE`（320×240）与网关默认 VGA（640×480）互相拧着，radio 永远指着 640 FULL。
 
 ### 修复
+- **CAMERA→VISION 直接切页后 TAB 栏整条消失**：`ui_nav_open` 把新页面对象提到最前，而 `tabs_set_visible(true)` 只在"隐藏→可见"边沿重新置顶——HOME→CAMERA 会经历隐藏（置顶 ✓），CAMERA→VISION 时 TAB 本来就可见、边沿不触发，不透明页面就盖住了它（此前 640 档的 immersive 每次切页先藏后显，恰好每次都触发置顶，锁 320 后路径变直才暴露）。改为每次 on 都幂等置顶（已在顶层则跳过 move，10Hz 刷新零开销）
 - **"置灰 + toast" 的 toast 是死代码**：LVGL 对 `LV_STATE_DISABLED` 对象根本不派发 `CLICKED`（`lv_indev.c` 的 `is_enabled` 前置判断，见 `indev_proc_release`），所以 §8.1 三 TAB、§8.2 profile、§8.3 VISION mode/drive 按钮一旦变灰，tap 进不到回调，写在回调里的原因 toast 永不触发——说明书要求的"置灰 + toast"实际只剩置灰。新增主题原语 `ui_set_blocked()` 承载**信息型门控**：保持可点、用递归 `OPA` 淡出（子 label 随父一起变暗，`lv_obj_get_style_opa_recursive` 沿父链相乘）、取消 PRESSED 高亮让手感仍是"按不动"；原因串改为单一真源函数（`cam_block_why()` / `vis_gate_why()` / `vis_drive_why()`），tap 出的 toast 与侧栏文案同源不再各说各话。VISION 的 AUTO 占位与 STALE  ASSIST 此前同样点不动，现在会解释"为什么不能用"。**标定/OTA/清故障（08 §5）不动**：那是安全型硬禁，必须继续用真 `LV_STATE_DISABLED`
 - **视频面永远 NO SIGNAL（blocker）**：WS 分片重组把 `ev->payload_len` 当本事件拷贝长度使用，而它是**整帧**总长（`data_len` 才是本片字节数）。`WS_RX_BUF=4096` < VGA JPEG 20–25 KB ⇒ 每帧拆 5–6 个事件，逐个越读堆约 19 KB 并让后片覆盖前片，SOI 侥幸可过、EOI 必挂 → `CAM_RX_JPEG_ERR` 持续计数。改取 `data_len` 后 `total = payload_offset + data_len` 成为真正的运行结束偏移，`total > ASM_CAP` 越界检查也随之成立（与 `scr_link.c` 控制面二进制路径一致）
 - C6 OTA 期间不再弹全屏 RADIO LOST 告警：上传饿死遥测与"接受后重启等待重连"两个窗口内静默（scr_svc 新增 `scr_svc_ota_quiet_c6()`，90 s 重连宽限；上传失败/宽限超时后告警照常）
