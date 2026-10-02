@@ -98,7 +98,8 @@ void          app_diag_render(char *json, size_t cap);
 
 | 项 | 值 |
 |---|---|
-| app_main 栈 | 6144 B（CONFIG_ESP_MAIN_TASK_STACK_SIZE），仅空转 |
+| app_main 栈 | 6144 B（CONFIG_ESP_MAIN_TASK_STACK_SIZE），核 0，仅空转 |
+| rb_chk 栈 | 3 KB，prio 5，**核 1**（回滚确认写 NVS/otadata，不在 esp_timer 上下文跑） |
 | 定时器 | 堆守护 10s 周期 / 回滚确认 45s 一次性（esp_timer 上下文） |
 | TWDT | bridge_task 已订阅（5 s）；见缺口 S-2 |
 

@@ -18,9 +18,9 @@ ESP32-S3 是两个 Xtensa LX7：核 0（PRO CPU）+ 核 1（APP CPU）。C6 版�
 1. **射频面搬不走**：WiFi 驱动任务（prio 23）绑核 0（`CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_0`），
    `esp_timer` 守护任务（prio 22）绑核 0，`app_main` 默认亲和也是核 0。凡是与它们同上下文
    的东西只能跟着留在核 0。
-2. **采集是突发带宽型负载**：`cam_task` 的优先级是 `configMAX_PRIORITIES - 2`（= 22），
-   比 lwIP `tcpip`（18）还高。它若留在核 0，每一帧 JPEG 落 PSRAM 的拷贝窗口都会抢占
-   `tcpip`，直接体现为摇杆命令的 RTT 抖动。
+2. **采集是突发带宽型负载**：`cam_task` 的优先级是 `configMAX_PRIORITIES - 2`（IDF 的 25 档
+   即 23），比 lwIP `tcpip`（18）还高。它若留在核 0，每一帧 JPEG 落 PSRAM 的拷贝窗口都会
+   抢占 `tcpip`，直接体现为摇杆命令的 RTT 抖动。
 3. **关 cache 是全片事件**：flash 写（自板 OTA、otadata、NVS、coredump）会临时关 cache，
    两个核的 XIP 同时停。分配方案能保证"抖动不是常驻负载造成的"，不能保证 OTA 写入期间
    无抖动。
@@ -33,30 +33,36 @@ ESP32-S3 是两个 Xtensa LX7：核 0（PRO CPU）+ 核 1（APP CPU）。C6 版�
 
 | 任务 | 优先级 | 栈 | 摆放方式 | 职责 |
 |---|---|---|---|---|
+| `ipc0` | 24 | IDF | IDF 固定 | 跨核 IPC 服务（每核一个） |
 | `wifi` | 23 | IDF | IDF 固定 | 射频驱动 |
+| `sys_evt` | 20 | IDF | IDF 固定（核 0） | esp_netif/系统事件回路，Wi-Fi 事件的处理上下文 |
 | `esp_timer` | 22 | 3584 | IDF 固定 | 6 个定时器回调：`bridge_tick` 20 ms、`sf_alive` 10 ms、`heap_guard` 10 s、`rollback_chk` 45 s 单次、http 套接字表巡检 1 s、OTA 重启延时；**只做置位/通知，不做 IO** |
 | `tcpip` | 18 | IDF | `CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU0=y`（原 `NO_AFFINITY`，会漂到核 1） | lwIP |
 | `httpd_server` | 5 | 8192 | `cfg.core_id = 0` | :80 控制页 + assets + REST + WS 会话表 |
 | `httpd`（推流） | 3 | 4096 | `config.core_id = 0` | :81 MJPEG 写 socket |
-| `captive_dns` / `mdns_lite` | 4 | 3072 / 3584 | 显式核 0 | UDP 53 端口劫持 / mDNS 应答 |
+| `captive_dns` / `mdns_lite` | 4 | 3072 / 3584 | 显式核 0 | UDP 53 端口劫持（`CONFIG_S3_CAPTIVE_PORTAL`，台架为 manual-URL 模式故不创建）/ mDNS 应答 |
 | `legacy` / `legacy_cli` | 4 | 3072 | 显式核 0 | `CONFIG_S3_LEGACY_TCP`（默认关）TCP 8080 |
-| `app_main` | 5 | 6144 | IDF 默认 CPU0 | 组合根，编排完即 60 s 节拍空转 |
+| `main` | 1 | 6144 | IDF 默认 CPU0 | 组合根，编排完即 60 s 节拍空转 |
 | `idle0` | 0 | 1536 | — | `CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU0=y` |
 
 ### 核 1 — 板级/控制面
 
 | 任务 | 优先级 | 栈 | 摆放方式 | 职责 |
 |---|---|---|---|---|
-| `cam_task` | 22 | 4096 | `CONFIG_CAMERA_CORE1=y` | GDMA 帧落地 + fb 轮转（`CAMERA_FB_IN_PSRAM`，2 帧） |
+| `ipc1` | 24 | IDF | IDF 固定 | 跨核 IPC 服务 |
+| `cam_task` | 23 | 4096 | `CONFIG_CAMERA_CORE1=y` | GDMA 帧落地 + fb 轮转（`CAMERA_FB_IN_PSRAM`，2 帧） |
 | `link_task` | 12 | 5120 | `LINK_TASK_CORE` | SF 帧收发、共享寄存器握手、链路健康监测 |
 | `bridge` | 10 | 6144 | `BRIDGE_TASK_CORE` | 三台泵：命令下行 / 50 Hz 遥测广播 / OTA 中继信用窗 |
 | `ota_task` | 8 | 6144 | `OTA_TASK_CORE` | bundle 解析 + ed25519 验签 + flash 写 |
-| `rb_chk` | 5 | 3072 | 显式核 1 | 回滚确认（NVS / otadata 写），45 s 后一次性 |
+| `rb_chk` | 5 | 3072 | 显式核 1 | 回滚确认（NVS / otadata 写），45 s 后一次性、跑完即退出 |
 | `s3_led` | 3 | 2048 | 显式核 1 | WS2812 图案（RMT 发送） |
 | `idle1` | 0 | 1536 | — | `CONFIG_ESP_TASK_WDT_CHECK_IDLE_TASK_CPU1=y` |
 
-核 1 上的抢占关系是一条干净的阶梯：`cam(22) > link(12) > bridge(10) > ota(8) > led(3)`，
-重要性从上到下递减，且都低于核 0 的射频中断。
+`Tmr Svc`（FreeRTOS 软件定时器服务，prio 1）保持不绑核：本工程所有周期任务都走
+`esp_timer` + notification，没有用 `xTimerCreate`，它只在 idle 时被唤醒。
+
+核 1 上的抢占关系是一条干净的阶梯：`cam(23) > link(12) > bridge(10) > ota(8) > led(3)`，
+重要性从上到下递减；`cam` 与核 0 的 `wifi` 同优先级但不同核，互不抢占。
 
 ## 3. 接缝与代价
 
@@ -66,7 +72,7 @@ ESP32-S3 是两个 Xtensa LX7：核 0（PRO CPU）+ 核 1（APP CPU）。C6 版�
   （µs 级）。刻意不搬：这些 handler 是 `IRAM_ATTR`、只做置位 + notify，短；要把 SPI/GDMA
   ISR 挪到核 1，就得把 `link_init()`/`camera_start()` 挪进一个绑核 1 的任务里执行，代价是
   启动时序与错误返回路径重排。若将来 TC275 侧发现 CS 握手抖动，再按此路改。
-- **唯一需要盯的抢占**：`cam_task(22)` 抢占 `link_task(12)`。VGA JPEG 一帧的落地拷贝在
+- **唯一需要盯的抢占**：`cam_task(23)` 抢占 `link_task(12)`。VGA JPEG 一帧的落地拷贝在
   ms 级以内，而 LINK 侧重发容忍是 `LINK_WATCHDOG_MS = 500`，遥测节拍 20 ms 允许丢帧 →
   判定可接受。超标的两个旋钮：降分辨率/帧率（`CONFIG_S3_CAMERA_FRAME_SIZE_ID`），或把
   `LINK_TASK_PRIO` 提到 20 以上（单行宏）。
@@ -89,6 +95,26 @@ ESP32-S3 是两个 Xtensa LX7：核 0（PRO CPU）+ 核 1（APP CPU）。C6 版�
 - **回归观测点**：手机一边看 :81 画面一边推摇杆，看 `/api/diag` 的 RTT/丢帧计数与
   `s3_link` 的 `TX stalled, re-armed` 是否上升。
 - **待 HIL**：接 TC275 后实测推流下的 50 Hz 遥测 RTT 分布（tc275_car doc 22 §8 G5）。
+
+### 实测 task map（2026-10-02，台架 `SD-DEV000`，VGA/quality 12，无观看者）
+
+```
+main core=0 prio= 1  hwm=3852B      link_task core=1 prio=12  hwm=3880B
+IDLE0 core=0 prio=0  hwm=760B       bridge    core=1 prio=10  hwm=4804B
+tcpip core=0 prio=18 hwm=2040B      s3_led    core=1 prio= 3  hwm=1080B
+httpd core=0 prio= 5 hwm=6952B      cam_task  core=1 prio=23  hwm=3340B
+httpd core=0 prio= 3 hwm=2828B      IDLE1     core=1 prio= 0  hwm=756B
+mdns_lite core=0 prio=4 hwm=600B    ipc1      core=1 prio=24
+wifi core=0 prio=23  hwm=4476B      Tmr Svc   core=- prio= 1（未绑核）
+sys_evt core=0 prio=20 hwm=1344B
+esp_timer core=0 prio=22 hwm=3412B
+ipc0 core=0 prio=24  hwm=596B
+```
+
+与 §2 一致：面向 socket 的都在核 0，外设线程都在核 1。两点提醒：
+
+- `eCurrentState` 是快照值，阻塞中的任务常报成 `del`，只用来定位卡死，不作为状态判据；
+- `mdns_lite` 剩余栈 600 B 是本轮最低水位，若加逻辑就顺带把 `MDNS_TASK_STACK` 抬一档。
 
 ## 5. 完成状态
 

@@ -67,6 +67,9 @@ static void on_ap_clients(int count)
 }
 
 #if CONFIG_S3_BENCH_CTRL && CONFIG_FREERTOS_USE_TRACE_FACILITY
+#if !configTASKLIST_INCLUDE_COREID
+#error "task map needs CONFIG_FREERTOS_VTASKLIST_INCLUDE_COREID (sdkconfig.defaults, core split)"
+#endif
 /* doc/20 核分工 bench check: one-shot map of every task onto its core.
  * hwm is the FreeRTOS canary scan (bytes still free, IDF reports bytes);
  * the scan suspends the scheduler, so this runs at boot only. */
@@ -79,9 +82,12 @@ static void log_task_map(void)
     ESP_LOGI(TAG, "task map: %u tasks", (unsigned)n);
     for (UBaseType_t i = 0; i < n; i++)
     {
-        ESP_LOGI(TAG, "  %-14s core=%d prio=%2u st=%-7s hwm=%uB",
-                 ents[i].pcTaskName, (int)ents[i].xCoreID,
-                 (unsigned)ents[i].xCurrentPriority,
+        char core = (ents[i].xCoreID == 0 || ents[i].xCoreID == 1)
+                    ? (char)('0' + (int)ents[i].xCoreID) : '-';
+
+        ESP_LOGI(TAG, "  %-14s core=%c prio=%2u st=%-7s hwm=%uB",
+                 ents[i].pcTaskName, core,
+                 (unsigned)ents[i].uxCurrentPriority,
                  st[((int)ents[i].eCurrentState < 5) ? (int)ents[i].eCurrentState : 4],
                  (unsigned)ents[i].usStackHighWaterMark);
     }

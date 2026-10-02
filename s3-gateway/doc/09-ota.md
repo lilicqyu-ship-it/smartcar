@@ -16,7 +16,7 @@ assets 分区更新 → 切启动槽 → 5 s 后自重启；rollback 确认接�
 | 上下文 | 动作 |
 |---|---|
 | httpd 任务 | `begin/feed/finish`：只把 512 B 块入队（24 深），队满 = 背压（feed 阻塞 ≤2 s） |
-| `ota_task`（prio 8 / 6 KB，按需创建） | bundle 解析 + ed25519 + `esp_ota_write` + assets 写 + `set_boot_partition` |
+| `ota_task`（prio 8 / 6 KB，按需创建，核 1，见 [20](20-core-assignment.md)） | bundle 解析 + ed25519 + `esp_ota_write` + assets 写 + `set_boot_partition` |
 
 ## 3. bundle 格式（tools/sign_bundle.py 生成 ⇄ bundle.c 解析）
 

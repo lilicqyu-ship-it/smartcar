@@ -11,11 +11,13 @@
 - 本工程由 `esp32c6_car` 全量移植：目标芯片 ESP32-C6 → **ESP32-S3**（Freenove ESP32-S3-WROOM CAM，16 MB flash + 8 MB octal PSRAM），组件目录/符号统一 `c6_` → `s3_`，协议面（proto v2、SF 帧、`/ota/c6` 与 `C6FW` 标识）**零改动**
 - SPI LINK 引脚改为空闲脚方案：SCLK40 / MOSI39 / MISO41 / CS42 / IRQ2，状态灯 WS2812 → GPIO48
 - 不移植 `c6_adxl345`（GY-291 台架 IMU）：`/diag` 去掉 `"imu"` 字段与诊断页对应区块
+- 任务摆放从"调度器自由浮动"改为显式绑核（单核 C6 的前提在双核 S3 不再成立）：**核 0 = 面向 socket 的一切**（WiFi/esp_timer 由 IDF 钉住，故 lwIP `tcpip` 改为 `AFFINITY_CPU0`，两台 httpd 与 DNS/mDNS/legacy 一律 `core_id=0`），**核 1 = 面向引脚的一切**（`cam_task` 经 `CONFIG_CAMERA_CORE1` 挪出核 0，link/bridge/ota/rb_chk/led 绑核 1）；分配依据、接缝代价与实测 task map 见 [doc/20-core-assignment.md](doc/20-core-assignment.md)
 - 纳入 smartcar monorepo 版本管理；PROJECT_VER 升至 1.1.0 对齐整车基线；`.gitignore` 公钥例外路径随组件更名修正（`c6_ota` → `s3_ota`），修复 `pub_ed25519_dev.bin` 被静默忽略
 
 ### 新增
 - `s3_camera`：OV5640 直出 JPEG + MJPEG 推流，**独立 esp_http_server 实例（默认 :81）**——阻塞的视频 handler 不能挂到 80 端口那台，否则会冻住控制页与所有 WS 帧；单查看者通道，第二个请求 503
 - 控制页"实时画面"卡片：按需开关 `http://<host>:81/stream`，页面切后台自动让出通道
+- 台架开机 `task map` 日志（`CONFIG_S3_BENCH_CTRL` + `CONFIG_FREERTOS_USE_TRACE_FACILITY`）：逐行打印 `任务/core/prio/剩余栈`，用于核对双核分工表
 
 ### 修复
 - 相机推流 httpd 必须在 `net_start()` 之后启动：早于 lwIP 起来会踩 `tcpip_send_msg_wait_sem (Invalid mbox)` 断言并反复复位

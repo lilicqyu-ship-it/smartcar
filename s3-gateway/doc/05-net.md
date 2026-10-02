@@ -72,10 +72,10 @@ esp_err_t mdns_lite_start(const char *hostname, const char *instance, const char
 
 ## 6. 资源
 
-| 任务 | 栈 | 优先级 |
-|---|---|---|
-| captive_dns | 3 KB | 4 |
-| mdns_lite | 3.5 KB | 4 |
+| 任务 | 栈 | 优先级 | 核（[20](20-core-assignment.md)） |
+|---|---|---|---|
+| captive_dns | 3 KB | 4 | 0 |
+| mdns_lite | 3.5 KB | 4 | 0 |
 
 ## 7. 验证状态
 

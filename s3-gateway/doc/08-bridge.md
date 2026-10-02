@@ -9,7 +9,7 @@
 ## 1. 职责
 
 系统唯一的"WS 广播 + LINK 出线编排"上下文：命令泵、遥测广播器、OTA 中继泵
-三台状态机全部运行在 `bridge_task`（prio 10 / 6 KB / TWDT 5 s 已订阅）。
+三台状态机全部运行在 `bridge_task`（prio 10 / 6 KB / TWDT 5 s 已订阅 / 核 1，见 [20](20-core-assignment.md)）。
 
 ## 2. 上下文与队列（LLDD §2.4 映射）
 
@@ -102,7 +102,7 @@ void      ota_relay_abort(int sd);
 
 | 项 | 值 |
 |---|---|
-| bridge_task | prio 10 / 6 KB / TWDT 5 s |
+| bridge_task | prio 10 / 6 KB / TWDT 5 s / 核 1 |
 | q_cmd | 32 × 84 B ≈ 2.7 KB |
 | in-flight 环 | 8 × 518 B ≈ 4.1 KB（静态） |
 | 邮箱 | 38 B + 互斥 |

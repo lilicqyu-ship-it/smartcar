@@ -21,8 +21,8 @@ ERRSTAT/CMDRSP）、IRQ 数据就绪线驱动、SF 帧↔v2 帧字段映射、�
 
 | 任务/上下文 | 优先级 | 栈 | 职责 |
 |---|---|---|---|
-| `link_task` | 12 | 5 KB | RX 段解析 → v2 帧 → `q_rx`（16 深）；TX 段装配（≤512B 多帧+4B 补零）→ TX_PENDING/IRQ；寄存器刷新；500 ms 主机看门狗；GEN 命令处理；TWDT 已订阅 |
-| ISR 回调 ×4 | — | — | cb_sent/cb_recv/cb_buffer_tx/cb_buffer_rx：置通知位 + 唤醒任务（主机任何事务 = 活性喂狗） |
+| `link_task` | 12 | 5 KB | **核 1**（[20](20-core-assignment.md)）：RX 段解析 → v2 帧 → `q_rx`（16 深）；TX 段装配（≤512B 多帧+4B 补零）→ TX_PENDING/IRQ；寄存器刷新；500 ms 主机看门狗；GEN 命令处理；TWDT 已订阅 |
+| ISR 回调 ×4 | — | — | cb_sent/cb_recv/cb_buffer_tx/cb_buffer_rx：置通知位 + 唤醒任务（主机任何事务 = 活性喂狗）。SPI/GDMA ISR 由 `link_init()` 在 `app_main`（核 0）上下文里分配，故 handler 在核 0、线程在核 1，见 20 §3 |
 | `alive` esp_timer | 10 ms | — | SF_ALIVE++ 写共享寄存器（掉电即停 → 主机判失联） |
 
 线程安全：`link_send/link_send_ota_chunk` 互斥（10 ms 超时）+ 队列背压（满 = BUSY，

@@ -148,7 +148,7 @@ S3 是双核，C6 版（单核）里"任务随便摆"的前提不再成立，本
 | 核 | 承载 |
 |---|---|
 | 0（PRO） | WiFi 驱动(23) + esp_timer(22) + lwIP tcpip(18，已从浮动改为绑核) + 控制 httpd(5) + 推流 httpd(3) + DNS/mDNS/legacy TCP(4)；外设 ISR 也在此核 |
-| 1（APP） | 相机采集 `cam_task`(22，`CONFIG_CAMERA_CORE1`) + SPI LINK(12) + 三台泵 bridge(10) + OTA 写盘(8) + 回滚确认(5) + WS2812(3) |
+| 1（APP） | 相机采集 `cam_task`(23，`CONFIG_CAMERA_CORE1`) + SPI LINK(12) + 三台泵 bridge(10) + OTA 写盘(8) + 回滚确认(5) + WS2812(3) |
 
 台架构建（`CONFIG_S3_BENCH_CTRL` + `CONFIG_FREERTOS_USE_TRACE_FACILITY`）开机末尾会打
 `task map`，逐行给出 `任务名/core/prio/state/hwm`，用于核对上表。
@@ -192,9 +192,10 @@ ed25519 RFC 8032 正/反向量 + dev 密钥端到端；bundle 签名/哈希/越�
 ## 台架验证状态（2026-10-02）
 
 - ✅ `idf.py build`（v6.1，target esp32s3）产出 `s3_gateway.bin` 1.06 MB，ota_0 余量 66%
-- ✅ 真机连续两次冷启动一致：`octal_psram 8MB / 80MHz` → `Detected OV5640 camera (0x3c)`
+- ✅ 真机连续冷启动一致：`octal_psram 8MB / 80MHz` → `Detected OV5640 camera (0x3c)`
   → `cam config ok` → AP `SD-DEV000` + DHCP `192.168.4.1` + `mycar.local` →
-  `s3_http: httpd up (v1.0.0)` → `cam: MJPEG stream on :81/stream` → `state=online`
+  `s3_http: httpd up (v1.1.0)` → `cam: MJPEG stream on :81/stream` → `state=online`
+- ✅ 双核绑核已由开机 `task map` 核对（`doc/20-core-assignment.md` §4 记录实测值）
 - ✅ WS2812（GPIO48）驱动起、`s3_led` 心跳正常
 - 🟩 未验证：手机侧画面/遥控（需要连上 AP 看）、TC275 联机（本板 SPI 脚已改，
   需按上表重新接线后测波形与 RTT）
