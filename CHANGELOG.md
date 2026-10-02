@@ -16,6 +16,7 @@
   justfile 退役 init/status/sync/push/fix-head/lock/pin 配方，新增 tag 配方；
   旧工程仓库在 GitHub 归档只读，历史 tag 仍可从旧仓库查阅
 - fw.py `flash` / `ota` 默认先增量编译再烧录/打包（一条指令到位，不再烧/推旧构建产物）；`--no-build`（ota 另有 `--file`）跳过编译，flash/ota 内的编译不触发归档
+- 四仓版本真源统一升至 1.1.0，迎接 S3-CAM 替换 C6 的迁移（迁移前状态以整车基线 tag `v1.0.1` 锁定）；s3-gateway 工程纳入本仓版本管理（ESP32-S3 Freenove CAM，对齐 1.1.0）
 
 ### 修复
 - fw.py `flash` 透传参数（`-m`/`-p`/`--id` 等选项）被 argparse 误拒（改 REMAINDER 原样透传）

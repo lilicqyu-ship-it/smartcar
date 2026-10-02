@@ -11,9 +11,9 @@
  */
 
 #define APP_VERSION_MAJOR 1
-#define APP_VERSION_MINOR 0
+#define APP_VERSION_MINOR 1
 #define APP_VERSION_PATCH 0
-#define APP_VERSION_STRING "1.0.0"
+#define APP_VERSION_STRING "1.1.0"
 
 /* 版本串的 code flash 固定地址：Lcf_SBL.lsl 把 .sbl_version 组定在
  * sblfls0（32KB SBL 区）尾部，App 从该地址直读（tc275_car 同一宏）。
