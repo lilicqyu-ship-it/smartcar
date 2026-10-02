@@ -118,9 +118,11 @@ void ui_video_view_pump(ui_video_view_t *v, const scr_state_t *st)
 
 /* ---- CAMERA page ----------------------------------------------------------------
  * 800x480 budget (design doc 8.2): left 640 px video column, right 160 px control
- * sidebar.  REMOTE_PREVIEW 320x240 shows centred with the 36 px info strip and
- * the tab bar; WEB_PREVIEW 640x480 goes immersive (strip + tabs hide).
- * No PHOTO/REC/SD widgets: the S3-CAM has no MicroSD, storage features dropped. */
+ * sidebar.  The stream is FIXED at REMOTE_PREVIEW 320x240 (clarity stays with
+ * the phone's /stream); a FULLSCREEN toggle upscales it 2x with LVGL to fill
+ * the 640x480 column (strip hides, tabs overlay the bottom) - same ~11 fps and
+ * same airtime, slightly soft.  No PHOTO/REC/SD widgets: the S3-CAM has no
+ * MicroSD, storage features dropped. */
 
 #define SIDE_W    160
 #define STRIP_H   36
@@ -135,11 +137,12 @@ typedef struct {
     lv_obj_t *res;
     lv_obj_t *drop_lbl;
     lv_obj_t *e2e;
-    lv_obj_t *prof[2];
+    lv_obj_t *full;
     lv_obj_t *to_vision;
     lv_obj_t *sensor;
     lv_obj_t *reason;
     ui_video_view_t view;
+    bool zoom2x;                /* fullscreen toggle: LVGL 2x upscale       */
     bool immersive_applied;
 } cam_ui_t;
 
@@ -148,9 +151,8 @@ static int s_panel_w, s_panel_h;
 
 /* ---- sidebar controls ----------------------------------------------------------*/
 /* One reason string serves both the sidebar row and the tap-time toast (design
- * doc 8.2), so they can never disagree.  "" = actionable.  The profile buttons
- * are gated with ui_set_blocked rather than LV_STATE_DISABLED precisely because
- * the tap has to report this string - a disabled widget gets no CLICKED at all. */
+ * doc 8.2), so they can never disagree.  "" = actionable.  FULLSCREEN is local
+ * (LVGL scaling) and works regardless of link state - no gate on it. */
 static const char *cam_block_why(const scr_state_t *st)
 {
     if (st->cam.conn != SCR_CAM_CONNECTED) {
@@ -165,17 +167,35 @@ static const char *cam_block_why(const scr_state_t *st)
     return "";
 }
 
-static void prof_cb(lv_event_t *e)
+/* 2x nearest-neighbour upscale around the image centre: 320x240 -> exactly the
+ * 640x480 video column.  Antialiasing stays off - cheaper and the softness is
+ * the accepted trade for full-rate QVGA airtime. */
+static void cam_apply_zoom(void)
 {
-    int idx = (int)(uintptr_t)lv_event_get_user_data(e);
-    scr_state_t st;
-    app_state_snapshot(&st);
-    const char *why = cam_block_why(&st);
-    if (why[0] != '\0') {
-        ui_toast("CAM: %s", why);
-        return;
+    if (s_cu.zoom2x) {
+        lv_image_set_scale(s_cu.view.img, 2u * LV_SCALE_NONE);
+        lv_image_set_pivot(s_cu.view.img, 160, 120);   /* QVGA centre */
+    } else {
+        lv_image_set_scale(s_cu.view.img, LV_SCALE_NONE);
+        lv_image_set_pivot(s_cu.view.img, 0, 0);
     }
-    scr_cam_cmd_profile(idx == 0 ? CAM_PROFILE_REMOTE : CAM_PROFILE_WEB);
+    lv_image_set_antialias(s_cu.view.img, false);
+    lv_obj_center(s_cu.view.img);
+    lv_obj_t *lbl = lv_obj_get_child(s_cu.full, 0);
+    ui_label_set_text(lbl, s_cu.zoom2x ? LV_SYMBOL_MINUS " WINDOW 1x"
+                                       : LV_SYMBOL_PLUS " FULLSCREEN 2x");
+    if (s_cu.zoom2x) {
+        lv_obj_add_state(s_cu.full, LV_STATE_CHECKED);
+    } else {
+        lv_obj_remove_state(s_cu.full, LV_STATE_CHECKED);
+    }
+}
+
+static void full_cb(lv_event_t *e)
+{
+    (void)e;
+    s_cu.zoom2x = !s_cu.zoom2x;
+    cam_apply_zoom();
 }
 
 static void to_vision_cb(lv_event_t *e)
@@ -335,12 +355,21 @@ void ui_camera_create(lv_obj_t *root)
     lv_obj_remove_flag(s_cu.side, LV_OBJ_FLAG_SCROLLABLE);
 
     s_cu.sensor = side_label(s_cu.side, "CAM -", 8);
-    s_cu.prof[0] = side_button(s_cu.side, "320 PREVIEW", 30, 30, prof_cb, (void *)0);
-    s_cu.prof[1] = side_button(s_cu.side, "640 FULL", 64, 30, prof_cb, (void *)1);
-    s_cu.to_vision = side_button(s_cu.side, "VISION PAGE", 100, 30, to_vision_cb, NULL);
-    s_cu.reason = side_label(s_cu.side, "", 140);
+    /* fullscreen toggle, radio-like checked styling (matches the tab bar):
+     * stream size itself is FIXED 320x240 - clarity stays with the phone's
+     * /stream, the handset only ever decides how big it is drawn */
+    s_cu.full = side_button(s_cu.side, LV_SYMBOL_PLUS " FULLSCREEN 2x", 30, 30,
+                            full_cb, NULL);
+    lv_obj_set_style_bg_color(s_cu.full, lv_color_hex(0x0B2A3A), LV_STATE_CHECKED);
+    lv_obj_set_style_border_color(s_cu.full, lv_color_hex(UI_COL_ACCENT), LV_STATE_CHECKED);
+    lv_obj_set_style_border_width(s_cu.full, 2, LV_STATE_CHECKED);
+    lv_obj_set_style_text_color(lv_obj_get_child(s_cu.full, 0),
+                                lv_color_hex(UI_COL_ACCENT), LV_STATE_CHECKED);
+    s_cu.to_vision = side_button(s_cu.side, "VISION PAGE", 64, 30, to_vision_cb, NULL);
+    s_cu.reason = side_label(s_cu.side, "", 104);
     ui_label_set_color(s_cu.reason, lv_color_hex(UI_COL_WARN));
 
+    s_cu.zoom2x = false;
     apply_layout(false);
 }
 
@@ -381,31 +410,18 @@ void ui_camera_refresh(const scr_state_t *st)
                      (unsigned long)st->cam.drop, (unsigned long)st->cam.seq);
     ui_label_set_fmt(s_cu.e2e, "e2e %u ms", st->cam.e2e_ms);
 
-    /* profile radio reflects the RETURNED dims, never a local guess (spec 106) */
-    int live_idx = (st->cam.w >= 640) ? 1 : 0;
-    for (int i = 0; i < 2; i++) {
-        if ((i == live_idx) != lv_obj_has_state(s_cu.prof[i], LV_STATE_CHECKED)) {
-            if (i == live_idx) {
-                lv_obj_add_state(s_cu.prof[i], LV_STATE_CHECKED);
-            } else {
-                lv_obj_remove_state(s_cu.prof[i], LV_STATE_CHECKED);
-            }
-        }
-    }
-
     /* sidebar rows */
     set_side(s_cu.sensor, "CAM",
              st->cam.sensor[0] != '\0' ? st->cam.sensor : "-",
              lv_color_hex(UI_COL_TXT));
 
-    /* CTRL gating: dim + state the reason, and the tap still explains itself
-     * (design doc 8.2) */
+    /* LINK state dims the VISION hand-off only; FULLSCREEN is local scaling
+     * and stays usable regardless (design doc 8.2 gate discipline) */
     const char *why = cam_block_why(st);
-    ui_set_blocked(s_cu.prof[0], why[0] != '\0');
-    ui_set_blocked(s_cu.prof[1], why[0] != '\0');
+    ui_set_blocked(s_cu.to_vision, why[0] != '\0');
     ui_label_set_text(s_cu.reason, why);
 
-    apply_layout(ui_video_immersive());
+    apply_layout(s_cu.zoom2x || ui_video_immersive());
     ui_video_view_pump(&s_cu.view, st);
 }
 
