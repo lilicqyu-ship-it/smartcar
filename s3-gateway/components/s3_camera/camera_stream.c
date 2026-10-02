@@ -6,6 +6,7 @@
  * the sensor (no encode path on the S3), delivered as multipart/x-mixed-replace
  * on /stream and as text-plane-gated binary frames on /ws/camera.
  */
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -404,6 +405,7 @@ static esp_err_t stream_handler(httpd_req_t *req)
 #define WS_TX_LOCK_MS     600u    /* > the 500 ms SO_SNDTIMEO, so a lock timeout
                                    * can only mean a genuinely stalled peer      */
 #define WS_TX_FAIL_MAX      3u    /* consecutive failed writes = the peer is gone */
+#define WS_FRAME_BUDGET_MS 1500u   /* whole-frame write budget (several SO_SNDTIMEO ticks) */
 #define WS_STATE_PERIOD_MS 1000u
 #define WS_TASK_STACK       3072
 
@@ -460,14 +462,96 @@ static const char *ws_profile_name(void)
  *     off the httpd task itself answered every PING - two writers interleaving
  *     byte-wise is what the peer then reads as a bogus opcode.  The control
  *     plane learned it first: s3_http/http_server.c:ws_tx. */
+/* Write all of buf or report how far it got.  send() on this socket blocks for
+ * at most SO_SNDTIMEO (500 ms) and lwIP then returns the bytes it DID queue -
+ * a positive short count, not an error.  httpd_ws_send_frame_async() only
+ * checks for < 0, so under Wi-Fi congestion a 20 KB JPEG went out truncated,
+ * the next frame header landed mid-payload, and the handset's parser read JPEG
+ * bytes as "RSV bits set" / "reserved opcode" and tore the camera WS down
+ * (bench 10-02: every reconnect followed a "ws send stalled" line). */
+static size_t ws_write_all(int fd, const uint8_t *buf, size_t len, int64_t deadline_us)
+{
+    size_t off = 0u;
+    while (off < len)
+    {
+        int n = send(fd, buf + off, len - off, 0);
+        if (n > 0)
+        {
+            off += (size_t)n;
+            continue;
+        }
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR) &&
+            esp_timer_get_time() < deadline_us)
+        {
+            continue;                           /* SO_SNDTIMEO tick: keep going */
+        }
+        break;                                  /* hard error or out of budget */
+    }
+    return off;
+}
+
+/* Unmasked server->client frame, header and payload written to completion.
+ * A frame that died after its first byte left can never be resynchronised on
+ * the peer's side, so that case closes the socket instead of leaving a torn
+ * stream behind - a clean redial is ~200 ms, a desynced stream is a dead one. */
+static esp_err_t ws_frame_write(ws_session_t *s, const httpd_ws_frame_t *pkt)
+{
+    uint8_t hdr[10];
+    size_t  hl = 0u;
+    hdr[hl++] = (uint8_t)(0x80u | ((uint8_t)pkt->type & 0x0Fu));   /* FIN + opcode */
+    if (pkt->len <= 125u)
+    {
+        hdr[hl++] = (uint8_t)pkt->len;
+    }
+    else if (pkt->len <= 0xFFFFu)
+    {
+        hdr[hl++] = 126u;
+        hdr[hl++] = (uint8_t)(pkt->len >> 8);
+        hdr[hl++] = (uint8_t)(pkt->len);
+    }
+    else
+    {
+        uint64_t l = pkt->len;
+        hdr[hl++] = 127u;
+        for (int i = 7; i >= 0; i--)
+        {
+            hdr[hl++] = (uint8_t)(l >> (i * 8));
+        }
+    }
+
+    const int64_t deadline = esp_timer_get_time() + (int64_t)WS_FRAME_BUDGET_MS * 1000;
+    size_t sent = ws_write_all(s->fd, hdr, hl, deadline);
+    if (sent == hl && pkt->len > 0u && pkt->payload != NULL)
+    {
+        sent += ws_write_all(s->fd, pkt->payload, pkt->len, deadline);
+    }
+    if (sent == hl + pkt->len)
+    {
+        return ESP_OK;
+    }
+    if (sent == 0u)
+    {
+        return ESP_ERR_TIMEOUT;                 /* nothing left: stream intact */
+    }
+    ESP_LOGW(TAG, "ws/camera torn write %u/%u B on fd=%d - closing to resync",
+             (unsigned)sent, (unsigned)(hl + pkt->len), s->fd);
+    s->tx_fail = WS_TX_FAIL_MAX;                /* pump retires on its next loop */
+    (void)httpd_sess_trigger_close(s->hd, s->fd);
+    return ESP_FAIL;
+}
+
 static esp_err_t ws_send_frame(ws_session_t *s, httpd_ws_frame_t *pkt)
 {
     if (xSemaphoreTake(s->tx_mtx, pdMS_TO_TICKS(WS_TX_LOCK_MS)) != pdTRUE)
     {
         return ESP_ERR_TIMEOUT;
     }
-    esp_err_t err = httpd_ws_send_frame_async(s->hd, s->fd, pkt);
+    esp_err_t err = ws_frame_write(s, pkt);
     (void)xSemaphoreGive(s->tx_mtx);
+    if (err == ESP_FAIL)
+    {
+        return err;                             /* torn: tx_fail already maxed */
+    }
     /* A peer that dies without a CLOSE frame shows up only as a failed write,
      * and while unsubscribed the cam_state tick is all this socket carries - so
      * the count, not the binary send, is what lets the pump notice. */
@@ -662,12 +746,17 @@ static void ws_pump_task(void *arg)
                              (unsigned)s_stalls, (unsigned)send_ms,
                              (unsigned)s_worst_send_ms);
                 }
-                if (res != ESP_OK) {
+                if (res == ESP_ERR_TIMEOUT) {
+                    /* not one byte left: the stream is still in sync, so this
+                     * is a latest-only drop; WS_TX_FAIL_MAX in a row retires */
+                    s_ws_dropped++;
+                } else if (res != ESP_OK) {
                     esp_camera_fb_return(fb);
                     ESP_LOGW(TAG, "ws/camera send failed: %s", esp_err_to_name(res));
                     break;
+                } else {
+                    s_frames++;
                 }
-                s_frames++;
             }
         }
         else if (!s->subscribed)
