@@ -142,7 +142,10 @@ static void tab_cb(lv_event_t *e)
  * TAB stays clickable and dims itself while tab_cb fires the toast. */
 static void tabs_refresh(const scr_state_t *st)
 {
-    tabs_set_visible(page_is_video(s_cur) && !ui_video_immersive());
+    /* tabs stay up in immersive (640x480) too: they carry the only way
+     * back to HOME, and hiding them stranded the user on the video page
+     * (bench 10-02); they overlay the bottom 44 px of the frame instead */
+    tabs_set_visible(page_is_video(s_cur));
     for (int i = 0; i < 3; i++) {
         bool on = (s_cur == TAB_PAGE[i]);
         if (on != lv_obj_has_state(s_tab_btn[i], LV_STATE_CHECKED)) {
@@ -169,7 +172,7 @@ void ui_nav_open(ui_page_t p)
     ui_service_on_leave(old);
     s_cur = p;
     ui_service_on_enter(p);
-    tabs_set_visible(page_is_video(p) && !ui_video_immersive());
+    tabs_set_visible(page_is_video(p));
 
     /* preview subscription follows page visibility (design doc 4.2: enter
      * subscribes, leave only pauses - the Camera WS stays up, R-ADR-06) */

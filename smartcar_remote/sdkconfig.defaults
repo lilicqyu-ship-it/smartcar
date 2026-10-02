@@ -128,3 +128,16 @@ CONFIG_SCR_CAM_MAX_FPS=12
 # CONFIG_JD_USE_ROM is not set
 CONFIG_JD_FORMAT_RGB565=y
 CONFIG_JD_FASTDECODE_TABLE=y
+
+# ---- Wi-Fi / lwIP receive path for the camera plane ---------------------------
+# The 5760 B (4 x MSS) default window caps one TCP stream at ~window/RTT: at the
+# 70-100 ms RTT seen under video that is ~60 KB/s, below WEB_PREVIEW's ~140 KB/s,
+# so the gateway's send stalled (up to 2 s), the shared air backed up and the
+# control WS hit its 150 ms write abort -> RADIO LOST + CAM OFF (bench 10-02).
+# 16 x MSS window, wider A-MPDU RX block-ack, and lwIP/Wi-Fi buffers in PSRAM so
+# the bigger window does not come out of the ~53 KB internal heap.
+CONFIG_LWIP_TCP_WND_DEFAULT=23040
+CONFIG_LWIP_TCP_RECVMBOX_SIZE=16
+CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=10
+CONFIG_ESP_WIFI_RX_BA_WIN=10
+CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP=y
