@@ -143,6 +143,16 @@ void    XCORE_evtPop(void);                         /* CPU2: after send OK     *
 boolean XCORE_cmdPush(const XcoreCmdMsg *msg);
 boolean XCORE_cmdPop(XcoreCmdMsg *msg);
 
+/* Newest-wins variant of XCORE_cmdPush: if a message with the same cmd byte is
+ * still queued, it is overwritten in place (the newest of them, so CPU0
+ * applies this message's data last) and nothing is appended. Meant for
+ * periodic state commands where every queued copy is superseded by the one
+ * arriving now (the 30 Hz SET_SPEED joystick/heartbeat stream): a burst of
+ * stale copies collapses into one entry instead of filling the queue and
+ * being rejected. One-shot and safety commands (e-stop) must use the plain
+ * push - their ordering is their meaning. */
+boolean XCORE_cmdPushLatest(const XcoreCmdMsg *msg);
+
 /* Log bridge: CPU1/CPU2 write lines into a shared ring, CPU0 drains to UART */
 void XCORE_log(const char *s);            /* append without newline */
 void XCORE_logln(const char *s);          /* append one line */

@@ -8,6 +8,15 @@
 ## [未发布]
 
 ### 变更
+- **tc275_car 命令队列抗突发（v1.1.1）**：根治台架"大量 `LINK cmdq full` 后失控"——链路泵
+  任何秒级停摆都会让 C6 把整段积压（q_cmd 32 + q_tx 32 + 在途段 ≈ 96 帧）一次性突发灌入，
+  8 深 CPU0 命令队列瞬间打满且每条被拒命令打一行日志，而 CPU0 用阻塞 UART 排日志环
+  （全环 ≈180 ms @115200）又拖慢同一循环里的出队，洪水自持。修复四件套：队列 8→16 深；
+  `SET_SPEED`（30 Hz 摇杆/心跳流）走新 API `XCORE_cmdPushLatest` 新者胜入队（积压塌缩成
+  1 条，急停/一次性命令仍严格 FIFO）；`cmdq full` 日志限速 1 行/s 携带抑制计数（计数器
+  仍一比一，LINKDBG 新增第 19 字段 `cmdqRej`）；`XCORE_logService` 每调用只排空一行
+  （控制周期不再被日志背压绑架）。新增主机单测 `test_xcore`（1095 断言，CI 同步加跑）；
+  真源 22 号升 V1.8、31 号 V2.6、33 号 V1.4、00-index 同步
 - **五个工程 clangd 全量可解析**（编辑器跳转/补全/诊断）：三个 ESP-IDF 工程沿用各自
   `build/compile_commands.json`（clangd 自动向上发现，无需配置）；TC275 两工程本机无
   SCons + TASKING 工具链，新增 `scripts/gen-tc275-cdb.py`（`just clangd-db` 生成）——

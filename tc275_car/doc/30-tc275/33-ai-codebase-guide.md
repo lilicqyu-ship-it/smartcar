@@ -4,7 +4,7 @@
 |---|---|
 | 文档编号 | 33 |
 | 域 | TC275 侧（3x） |
-| 版本 | V1.3（2026-09-30，编码器刻度修正随 34 V1.4）：第 9 节编码器 260 线→**13 PPR**（52 计数/电机转、1061.27 计数/轮转、0.1421 mm/计数），默认轮径 65→**48**（`CALIB_WHEELDIA_DEF` 同批）。V1.2（2026-09-27，随 34 号 V1.3 闭环使能门同步）：第 2 节代码地图 `rt/motor_algo` 条目补门；第 5.2 节"方向不对"条目补门上电行为；第 6 节安全机制新增**闭环使能门**（src=0 记录强制开环等价，34 §13）。V1.1（2026-09-27，随 34 号标定/DPT 落地同步）：第 2 节代码地图加 `mw/calib/`；第 4 节 xcore 块表补 CalibResult/Jog/RecordLive/EVT 出站队列四行 + "用版本计数不要用 valid 位"规约；第 5.1 节写清 DPT op 家族（0x70~0x74）与 EVT 0x22/0x23 的组帧侧；第 5.2 节改为"标定参数是运行时变量、换轮径走 0x73"；第 6 节加 DFlash 写入的安全姿态；第 7 节单测命令加入 `mw/calib/calib_record.c`（2948 断言）并扩写覆盖盲区；第 8 节红线增至 10 条（新增"只有 CPU0 能写 DFlash"）。V1.0 = 2026-09-27 首版 |
+| 版本 | V1.4（2026-10-03，命令队列抗突发随 22 号 V1.8）：第 3 节数据流图与第 4 节块表的命令队列改 **16 深 + `SET_SPEED` 走 `XCORE_cmdPushLatest` 新者胜**；第 7 节新增 `test_xcore` 可粘贴命令（1095 断言）并把覆盖盲区改为"已有覆盖"口径；CI（`tc275-car.yml`）同步加跑。V1.3（2026-09-30，编码器刻度修正随 34 V1.4）：第 9 节编码器 260 线→**13 PPR**（52 计数/电机转、1061.27 计数/轮转、0.1421 mm/计数），默认轮径 65→**48**（`CALIB_WHEELDIA_DEF` 同批）。V1.2（2026-09-27，随 34 号 V1.3 闭环使能门同步）：第 2 节代码地图 `rt/motor_algo` 条目补门；第 5.2 节"方向不对"条目补门上电行为；第 6 节安全机制新增**闭环使能门**（src=0 记录强制开环等价，34 §13）。V1.1（2026-09-27，随 34 号标定/DPT 落地同步）：第 2 节代码地图加 `mw/calib/`；第 4 节 xcore 块表补 CalibResult/Jog/RecordLive/EVT 出站队列四行 + "用版本计数不要用 valid 位"规约；第 5.1 节写清 DPT op 家族（0x70~0x74）与 EVT 0x22/0x23 的组帧侧；第 5.2 节改为"标定参数是运行时变量、换轮径走 0x73"；第 6 节加 DFlash 写入的安全姿态；第 7 节单测命令加入 `mw/calib/calib_record.c`（2948 断言）并扩写覆盖盲区；第 8 节红线增至 10 条（新增"只有 CPU0 能写 DFlash"）。V1.0 = 2026-09-27 首版 |
 | 代码基线 | `main`（默认构建 `USE_SPI_LINK`，含 servo 闭环 + CPU 看门狗 + 0x70 方向标定） |
 | 读者 | **AI 编码助手**（Kiro / Claude / Copilot 等）在本仓库作业前必读 |
 | 上级索引 | [00-index.md](../00-index.md) |
@@ -74,9 +74,10 @@ tc275_car/
    ▼
 [C6 从机] ──SF-over-QSPI3──► com/link.c (CPU2)
                               │ link_dispatch：按 CID/op 解码
-                              │ XCORE_cmdPush(命令) / XCORE_estopRequest(急停旁路)
+                              │ XCORE_cmdPush(命令) / XCORE_cmdPushLatest(SET_SPEED 新者胜)
+                              │ / XCORE_estopRequest(急停旁路)
                               ▼
-                        mw/xcore 命令队列(8深)
+                        mw/xcore 命令队列(16深, SET_SPEED 新者胜)
                               │
                               ▼
 app/robot.c ◄── PROTO_handleCommand ◄── vRobotControlTask(10ms, CPU0)
@@ -110,7 +111,7 @@ rt/motor_algo.c (CPU1 1kHz)：
 | MotorStatus | CPU1 → 遥测 | 伺服实际输出占空 |
 | XcoreEncoder | CPU1 → CPU0/CPU2 | 双单位域：pct×10（显示）+ mm/s + 里程 + `alive` |
 | ProtocolStatus | CPU0 → CPU2 | robot 状态镜像，供 GET_STATUS/HTTP 回复 |
-| 命令队列(8深) | CPU2 → CPU0 | 解码后的命令 |
+| 命令队列(16深) | CPU2 → CPU0 | 解码后的命令；**周期性状态命令（30 Hz `SET_SPEED` 摇杆/心跳流）走 `XCORE_cmdPushLatest` 新者胜**——队里已有同 cmd 未消费消息则原地覆盖最新一条，链路泵停摆后的积压突发塌缩成一条（22 §5.4 V1.8）；一次性/安全命令仍走严格 FIFO 的 `XCORE_cmdPush` |
 | 急停旁路 `g_estopReq` | CPU2 置位 / CPU0 清除 | 无锁 volatile 快旁路（⚠️ 见第 8 节竞态说明） |
 | 方向标定请求 | CPU0 置位 / CPU1 消费 | 0x70 触发一次性标定 |
 | CalibResult | CPU1 → CPU0 | 标定结束发布 `{op, status(DONE/ABORTED/BUSY), invert[4], delta[4]}`；CPU0 排空后组 EVT 0x22 并在 DONE 时持久化 |
@@ -180,11 +181,18 @@ gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
 # DIV_NUM x1000 量纲回归守卫——曾把 11000 写成 11，读数小 1000 倍）
 gcc -std=c99 -Wall -Wextra -Werror -O2 -I . -I test/host/stub \
     test/host/test_adc.c -o test/host/out/test_adc && test/host/out/test_adc
+
+# xcore 命令队列/日志环纪律（FIFO、容量、SET_SPEED 新者胜塌缩、每调用一行排空；
+# 1095 断言。注意 stub 目录必须排在 -I 首位——bsp/uart.h 与 IfxCpu.h 用的是
+# host 替身，不是 iLLD 原件）
+gcc -std=c99 -Wall -Wextra -Werror -O2 -I test/host/stub -I . \
+    test/host/test_xcore.c mw/xcore/xcore.c \
+    -o test/host/out/test_xcore && test/host/out/test_xcore
 ```
 
 **固件构建**：只能在 AURIX Development Studio（TASKING 编译器）里构建 `TriCore Debug (TASKING)`，**主机/CI 无法编译固件**（专有编译器）。AI 不要假装能在命令行编出固件；能做的是保证主机单测通过 + 代码符合 iLLD/MISRA 习惯。
 
-**覆盖盲区（诚实告知）**：`link.c`/`motor_algo`/`encoder`/`robot.c` 无单测（依赖 iLLD/FreeRTOS），改这些只能靠代码审查 + 台架。改动这类文件时，AI 应在回复里明确说明"此改动未被单测覆盖，需台架验证"。**同类盲区（本轮新增）**：xcore 新块（CalibResult/Jog/RecordLive/EVT 队列）、`0x71` jog 时序、**DFlash 擦写与回读**——只有 `mw/calib/calib_record.c` 的纯编解码有单测，**存储与跨核那半截没有**。
+**覆盖盲区（诚实告知）**：`link.c`/`motor_algo`/`encoder`/`robot.c` 无单测（依赖 iLLD/FreeRTOS），改这些只能靠代码审查 + 台架。改动这类文件时，AI 应在回复里明确说明"此改动未被单测覆盖，需台架验证"。**同类盲区**：xcore 新块（CalibResult/Jog/RecordLive/EVT 队列）、`0x71` jog 时序、**DFlash 擦写与回读**——只有 `mw/calib/calib_record.c` 的纯编解码有单测，**存储与跨核那半截没有**。**已有覆盖**：命令队列/日志环的入队出队纪律（FIFO、容量、新者胜、每调用一行排空）自 2026-10-03 起有 `test_xcore.c`（锁与核间原子性仍只有目标机上有，主机替身是空锁）。
 
 ---
 

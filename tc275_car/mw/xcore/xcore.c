@@ -4,7 +4,11 @@
 
 #include <string.h>
 
-#define XCORE_CMD_QUEUE_LEN   8
+/* 16 slots: twice the drain rate of one CPU0 control period, so a burst of
+ * superseded commands (the C6 packs a whole 512 B backlog segment after any
+ * pump stall) saturates the coalescing path below before it saturates this
+ * queue. Depth only buys time; correctness comes from XCORE_cmdPushLatest. */
+#define XCORE_CMD_QUEUE_LEN   16
 #define XCORE_LOG_RING_SIZE   2048U    /* power of two; holds several long lines */
 /* One LINKDBG line is "LINKDBG=" + up to XCORE_LOG_MAX_VALS decimal u32 groups
  * (11 chars each) = ~228 chars, so the line buffer must clear that. */
@@ -415,6 +419,49 @@ boolean XCORE_cmdPush(const XcoreCmdMsg *msg)
     return ok;
 }
 
+boolean XCORE_cmdPushLatest(const XcoreCmdMsg *msg)
+{
+    boolean ok = FALSE;
+    uint32  idx;
+
+    XCORE_lock();
+    /* Newest-wins: overwrite the most recently queued message carrying the
+     * same cmd byte instead of appending. For a periodic state command (the
+     * 30 Hz SET_SPEED joystick/heartbeat stream) every queued copy older than
+     * the one arriving now is superseded the moment it exists, so keeping any
+     * of them only occupies depth - the burst of ~100 stale copies a link pump
+     * stall produces must collapse into one entry, not into 100 rejections.
+     *
+     * The newest match is replaced, not the oldest: with [S1, S2] queued and
+     * S3 arriving, replacing S2 leaves [S1, S3] so CPU0 still applies S3 last;
+     * replacing S1 would leave [S3, S2] and the stale S2 would win. Commands
+     * of any other cmd byte keep their relative order, so a STOP queued after
+     * the stream still stops after it. */
+    for (idx = g_cmdQueue.head; idx != g_cmdQueue.tail;)
+    {
+        idx--;
+        if (g_cmdQueue.buf[idx % XCORE_CMD_QUEUE_LEN].cmd == msg->cmd)
+        {
+            g_cmdQueue.buf[idx % XCORE_CMD_QUEUE_LEN] = *msg;
+            __dsync();
+            ok = TRUE;
+            break;
+        }
+    }
+    if (ok == FALSE)
+    {
+        if ((g_cmdQueue.head - g_cmdQueue.tail) < XCORE_CMD_QUEUE_LEN)
+        {
+            g_cmdQueue.buf[g_cmdQueue.head % XCORE_CMD_QUEUE_LEN] = *msg;
+            g_cmdQueue.head++;
+            __dsync();
+            ok = TRUE;
+        }
+    }
+    XCORE_unlock();
+    return ok;
+}
+
 boolean XCORE_cmdPop(XcoreCmdMsg *msg)
 {
     boolean ok = FALSE;
@@ -586,7 +633,18 @@ void XCORE_logService(void)
 {
     char line[XCORE_LOG_LINE_MAX + 1];
 
-    while (g_logRd != g_logWr)
+    /* Exactly one line per call. This runs inside CPU0's 10 ms control task,
+     * and UART_println blocks on the ASCLIN0 FIFO at line rate (~87 us/byte
+     * at 115200): draining the whole ring in one go parked the task for the
+     * ~180 ms a full 2 KB backlog takes to shift out, which starved the
+     * command queue drain in the same loop and turned any log burst into a
+     * control stall. One line bounds the block at one line's transmit time
+     * (worst case XCORE_LOG_LINE_MAX bytes ~= 22 ms) while still draining
+     * 100 lines/s - 25x the steady-state producer rate of ~4 lines/s
+     * (LINKDBG 2/s + SPD 1/s + SRV 1/s). A larger backlog then takes seconds
+     * to clear, but it clears without ever touching the control period's
+     * budget, and producers drop whole lines on a full ring by design. */
+    if (g_logRd != g_logWr)
     {
         uint32 idx = 0;
 

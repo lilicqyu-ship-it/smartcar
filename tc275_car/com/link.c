@@ -19,6 +19,12 @@
  * shortened. 640 B is two and a half maximum segments. */
 #define LINK_RX_BURST_MAX     640u
 
+/* Rate limit of the "LINK cmdq full" console line: first rejection logs at
+ * once, then at most one line per second carries the suppressed count. The
+ * counter in Link_Stats stays one-for-one either way - the line is for the
+ * human, the counter is for the tripwire. */
+#define LINK_CMDQ_FULL_LOG_MS 1000u
+
 typedef struct
 {
     uint8 type;
@@ -199,10 +205,18 @@ static void link_driveSpeeds(sint16 v, sint16 w, uint8 *out)
     out[1] = (uint8)(sint8)rPct;
 }
 
-/* Queue one command for CPU0, with the e-stop bypassed ahead of the queue. */
+/* Queue one command for CPU0, with the e-stop bypassed ahead of the queue.
+ *
+ * SET_SPEED rides XCORE_cmdPushLatest: it is the carrier of the 30 Hz
+ * joystick/heartbeat stream, where each frame supersedes the previous one, so
+ * a burst of stale copies (the C6 packs its whole backlog into one 512 B
+ * segment after any pump stall) collapses into the latest position instead of
+ * overflowing the queue. Every other command keeps strict FIFO - for one-shot
+ * and safety commands the ordering is part of their meaning. */
 static void link_forward(uint8 cmd, const uint8 *data, uint8 len)
 {
     XcoreCmdMsg msg;
+    boolean     queued;
 
     if (len > LINK_CMD_DATA_MAX)
     {
@@ -226,10 +240,34 @@ static void link_forward(uint8 cmd, const uint8 *data, uint8 len)
         memcpy(msg.data, data, len);
     }
 
-    if (XCORE_cmdPush(&msg) == FALSE)
+    queued = (cmd == PROTO_CMD_SET_SPEED) ? XCORE_cmdPushLatest(&msg)
+                                          : XCORE_cmdPush(&msg);
+    if (queued == FALSE)
     {
+        /* Rejection is still counted one-for-one (the counter is the tripwire
+         * the LINKDBG line carries), but the log line is rate limited: with
+         * coalescing above this only fires on genuinely diverse traffic, and
+         * one line per rejected command used to be its own congestion
+         * amplifier - CPU0 burned a full ring drain printing the burst while
+         * the queue it was complaining about stayed full. */
+        static uint32 s_lastLogMs = 0u;
+        static uint32 s_lastCount = 0u;
+        static boolean s_everLogged = FALSE;
+        uint32 nowMs = STIME_nowMs();
+
         g_stats.cmdRejectedQueue++;
-        XCORE_logln("LINK cmdq full");
+        if ((s_everLogged == FALSE) ||
+            ((uint32)(nowMs - s_lastLogMs) >= LINK_CMDQ_FULL_LOG_MS))
+        {
+            uint32 suppressed = g_stats.cmdRejectedQueue - s_lastCount;
+            uint32 vals[1];
+
+            vals[0] = suppressed;
+            XCORE_logu("LINK cmdq full x", vals, 1u);
+            s_everLogged = TRUE;
+            s_lastLogMs  = nowMs;
+            s_lastCount  = g_stats.cmdRejectedQueue;
+        }
         return;
     }
     g_stats.cmdForwarded++;
@@ -833,6 +871,9 @@ void LINK_getHealth(Link_Health *health)
  *   txFrames    SF frames actually put on the wire (telemetry + commands)
  *   txQFull     LINK_send() refused because the TX queue was full (backpressure)
  *   rdSeg       RDDMA segments taken from the slave (compare to the slave's rddma)
+ *   cmdqRej     CPU0 command-queue rejections in link_forward: must stay 0;
+ *               non-zero means diverse (non-coalescable) commands arrived
+ *               faster than CPU0's 10 ms drain - the burst tripwire
  *
  * Printing policy (bench log hygiene): a healthy idle link would otherwise emit
  * the same line every LINK_DIAG_PERIOD_MS forever and bury the one line that
@@ -854,7 +895,7 @@ void LINK_diagPrint(void)
     static uint32  s_prevErrSum  = 0xFFFFFFFFu;
     static uint32  s_sinceForced = LINK_DIAG_HEARTBEAT;
 
-    uint32 vals[18];
+    uint32 vals[19];
     uint32 state;
     uint32 clockHz;
     uint32 ready;
@@ -911,11 +952,12 @@ void LINK_diagPrint(void)
     vals[15] = g_health.stats.txFrames;
     vals[16] = g_health.stats.txQueueFull;
     vals[17] = g_health.stats.rdSegments;
+    vals[18] = g_health.stats.cmdRejectedQueue;
 
     /* Tag the line so a fault jumps out of the stream; the field order is
      * identical under both labels so any parser keys off the values, not the
      * tag. */
     isError = (boolean)(errSum != 0u);
-    XCORE_logu(isError ? "LINKERR=" : "LINKDBG=", vals, 18u);
+    XCORE_logu(isError ? "LINKERR=" : "LINKDBG=", vals, 19u);
 }
 
