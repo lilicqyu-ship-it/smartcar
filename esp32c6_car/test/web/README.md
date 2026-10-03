@@ -36,3 +36,16 @@ This test reads the actual packed bundle and the firmware's registered asset
 routes, then taps the driving link in a 375 × 667 touch browser. It checks
 stopping an active jog and navigation with JavaScript disabled. Calibration
 styles ship through `/style.css`, so existing firmware serves every resource.
+
+Battery display regression check:
+
+```sh
+node esp32c6_car/test/web/battery-ui.cjs
+```
+
+It feeds the actual telemetry handler with virtual 50 Hz measurements. It checks
+small jitter, isolated low spikes, sustained declines, no increase after voltage
+recovery or a telemetry gap, zero measurements, fresh-page initialization, and
+unchanged fault presentation and raw low-battery warning colors. Percent checks
+cover 1% boundary jitter, isolated spikes, sustained decline confirmation,
+monotonic display, gaps, invalid measurements, valid 0%, and page reload.
