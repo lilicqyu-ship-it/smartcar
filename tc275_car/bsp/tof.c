@@ -61,10 +61,10 @@
  * Set back to 0 after the disconnected-SDA electrical check. */
 #define TOF_GPIO_ISOLATION      0
 
-/* 100 kHz for alternate-pin bring-up; 400 kHz is the design ceiling. FM+ requires
+/* User-requested 1 MHz bench trial after the 100 kHz ranging pass. FM+ requires
  * SCL/SDA tR <= 120 ns, which jumper wires behind 2.2 k pull-ups are not known
  * to meet until a scope has measured them (doc 23 section 11.3). */
-#define TOF_I2C_BAUDRATE        100000.0f
+#define TOF_I2C_BAUDRATE        1000000.0f
 
 /* Ranging setup. 4x4 first, because doc 23 section 11.4 step 6 runs the first
  * bench pass at 4x4 with a 5 ms integration time, and because wiring that has
@@ -1192,7 +1192,7 @@ void TOF_init(void)
 #else
     tof_gpioProbe();
 #endif
-    XCORE_logln("ToF I2C0 SCL=P02.5(X304-7) SDA=P02.4(X304-8) 100kHz");
+    XCORE_logln("ToF I2C0 SCL=P02.5(X304-7) SDA=P02.4(X304-8) 1MHz requested");
 
     /* Ordinary input, no internal pull device: the module drives INT open-drain
      * and the 47 k pull-up to IOVDD is the datasheet's own requirement (doc 23

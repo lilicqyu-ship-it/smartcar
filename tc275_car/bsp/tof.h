@@ -7,7 +7,7 @@
  * truth source doc/20-design/23-wiring.md section 11).
  *
  * Bus: I2C0 hardware master, SCL=P02.5 / SDA=P02.4 (X304 holes 7/8),
- * 100 kHz during alternate-pin bring-up, 8-bit slave address 0x52. Register addressing is 16-bit: the first
+ * 1 MHz requested for the bench trial, 8-bit slave address 0x52. Register addressing is 16-bit: the first
  * byte after the slave address carries the unmodified high index byte, the
  * second the low byte, then the payload (DS13754, and the same convention the
  * ST Ultra Lite Driver's platform contract assumes).
