@@ -188,6 +188,9 @@ gcc -std=c99 -Wall -Wextra -Werror -O2 -I . -I test/host/stub \
 gcc -std=c99 -Wall -Wextra -Werror -O2 -I test/host/stub -I . \
     test/host/test_xcore.c mw/xcore/xcore.c \
     -o test/host/out/test_xcore && test/host/out/test_xcore
+
+# 实际标定保存调度代码，flash/xcore/时钟边界使用主机桩；不编译硬件原语
+python3 test/host/test_calib_store.py
 ```
 
 **固件构建**：只能在 AURIX Development Studio（TASKING 编译器）里构建 `TriCore Debug (TASKING)`，**主机/CI 无法编译固件**（专有编译器）。AI 不要假装能在命令行编出固件；能做的是保证主机单测通过 + 代码符合 iLLD/MISRA 习惯。
@@ -195,6 +198,8 @@ gcc -std=c99 -Wall -Wextra -Werror -O2 -I test/host/stub -I . \
 **覆盖盲区（诚实告知）**：`link.c`/`motor_algo`/`encoder`/`robot.c` 无单测（依赖 iLLD/FreeRTOS），改这些只能靠代码审查 + 台架。改动这类文件时，AI 应在回复里明确说明"此改动未被单测覆盖，需台架验证"。**同类盲区**：xcore 新块（CalibResult/Jog/RecordLive/EVT 队列）、`0x71` jog 时序、**DFlash 擦写与回读**——只有 `mw/calib/calib_record.c` 的纯编解码有单测，**存储与跨核那半截没有**。**已有覆盖**：命令队列/日志环的入队出队纪律（FIFO、容量、新者胜、每调用一行排空）自 2026-10-03 起有 `test_xcore.c`（锁与核间原子性仍只有目标机上有，主机替身是空锁）。
 
 ---
+
+2026-10-03 补充：`test_calib_store.py` 覆盖实际保存队列和回执时序；上节所述盲区仍包括真实三核同步、FMU 擦写与回读，主机桩测试不能替代台架验证。
 
 ## 8. 已知红线与陷阱（AI 高频踩坑点）
 

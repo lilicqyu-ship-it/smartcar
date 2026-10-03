@@ -65,8 +65,8 @@ static uint32 g_calibSectorAddr = CALIB_SECTOR_ADDR_128K;
  * cycle on the single slot and another multi-100-ms __disable() window on
  * CPU0, and an operation that fails deterministically (byte order, wiring,
  * FMU state) never self-heals - it just hammers the slot forever. Bounded
- * now: the live record stays applied in RAM for this power cycle, the EVT
- * already carried saved=2, and the console says why. */
+ * now: the live record stays applied in RAM for this power cycle; only the
+ * final outcome is sent in the EVT, and the console says why. */
 #define CALIB_FLASH_RETRIES  3u
 
 typedef struct
@@ -78,12 +78,15 @@ typedef struct
 } PendingWrite;
 
 static PendingWrite g_pending;
+static void calib_finishHeldResult(uint8 saved);
 
 /* Arm a deferred operation. CALIB_tick runs it once the bench has been quiet
  * for CALIB_WRITE_IDLE_MS, and re-arms through calib_delayWrite() on motion or
  * a failed flash operation. */
 static void calib_queueWrite(uint8 action, const CalibRecord *rec)
 {
+    /* A replacement operation cannot confirm the older calibration's save. */
+    calib_finishHeldResult(CALIB_SAVED_NONE);
     g_pending.action   = action;
     g_pending.rec      = *rec;
     g_pending.quietMs  = STIME_nowMs();
@@ -468,9 +471,18 @@ static void calib_sendResultEvt(const XcoreCalibResult *res, uint8 saved)
     (void)XCORE_evtPush(&frame);
 }
 
+static void calib_finishHeldResult(uint8 saved)
+{
+    if (g_holdActive != FALSE)
+    {
+        calib_sendResultEvt(&g_holdResult, saved);
+        g_holdActive = FALSE;
+    }
+}
+
 /* Merge an invert set into the live record and queue the write (doc 34
  * SS8.3: 0x70 success auto-persists, everything else is kept). */
-static void calib_persistInvert(const sint8 invert[CALIB_REC_WHEELS])
+static boolean calib_persistInvert(const sint8 invert[CALIB_REC_WHEELS])
 {
     XcoreRecordLive live;
     CalibRecord     rec;
@@ -484,12 +496,13 @@ static void calib_persistInvert(const sint8 invert[CALIB_REC_WHEELS])
     }
     if (CALIBREC_paramsOk(&rec) == 0u)
     {
-        return;                  /* live params corrupted: refuse to persist  */
+        return FALSE;            /* live params corrupted: refuse to persist  */
     }
     rec.src = CALIB_SRC_DFLASH;
     XCORE_recordSet(&rec);
 
     calib_queueWrite(CALIB_ACT_WRITE, &rec);
+    return TRUE;
 }
 
 /* ---- vehicle-quiet gate ------------------------------------------------------ */
@@ -553,15 +566,6 @@ static void calib_handleResult(void)
 {
     XcoreCalibResult res;
 
-    if (g_holdActive != FALSE)
-    {
-        /* A second DONE result arrived while the first save is still in
-         * flight: answer the older one as if the save failed, then follow
-         * the newer (cannot legitimately happen - one run at a time). */
-        calib_sendResultEvt(&g_holdResult, CALIB_SAVED_FAILED);
-        g_holdActive = FALSE;
-    }
-
     if (XCORE_calibResultTake(&res) == FALSE)
     {
         return;
@@ -569,8 +573,7 @@ static void calib_handleResult(void)
 
     if (res.status == CALIB_STATUS_DONE)
     {
-        calib_persistInvert(res.invert);
-        if (g_pending.action == CALIB_ACT_WRITE)
+        if (calib_persistInvert(res.invert) != FALSE)
         {
             g_holdResult = res;
             g_holdActive = TRUE;
@@ -733,27 +736,23 @@ void CALIB_tick(void)
         saved = (calib_flashSave(&g_pending.rec) != FALSE)
                     ? CALIB_SAVED_WRITTEN : CALIB_SAVED_FAILED;
 
-        if (g_holdActive != FALSE)
-        {
-            calib_sendResultEvt(&g_holdResult, saved);
-            g_holdActive = FALSE;
-        }
-
         if (saved == CALIB_SAVED_WRITTEN)
         {
             g_pending.action = CALIB_ACT_IDLE;
+            calib_finishHeldResult(saved);
         }
         else if (++g_pending.attempts >= CALIB_FLASH_RETRIES)
         {
             /* Give up, loudly: the calibrated record stays applied in RAM
              * (signs, closed-loop gate) for this power cycle only; the
-             * result frame already went out with saved=2. */
+             * result frame now reports the final failure with saved=2. */
             g_pending.action = CALIB_ACT_IDLE;
+            calib_finishHeldResult(saved);
             XCORE_logln("CALSAVE failed (flash)");
         }
         else
         {
-            /* retry quietly; the result frame has already gone out */
+            /* Keep the result held: a later attempt may still succeed. */
             calib_delayWrite();
         }
     }
