@@ -33,7 +33,7 @@ jobs:
         id: sim
         run: |
           NAME=$(xcrun simctl list devices available | \
-                 awk -F' (' '/iPhone/ {sub(/^ +/,"",$1); print $1; exit}')
+                 grep -m1 "iPhone" | sed -E 's/^[[:space:]]+//; s/[[:space:]]*\(.*$//')
           if [ -z "$NAME" ]; then
             echo "no available iPhone simulator" >&2
             xcrun simctl list devices available >&2
