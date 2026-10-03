@@ -1,13 +1,14 @@
 # smartcar
 
-[![contracts](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/contracts.yml/badge.svg)](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/contracts.yml) [![version](https://img.shields.io/github/v/tag/lilicqyu-ship-it/smartcar?label=version&sort=semver)](https://github.com/lilicqyu-ship-it/smartcar/tags)
+[![contracts](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/contracts.yml/badge.svg)](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/contracts.yml) [![整车基线](https://img.shields.io/github/v/tag/lilicqyu-ship-it/smartcar?filter=v*&label=%E6%95%B4%E8%BD%A6%E5%9F%BA%E7%BA%BF&sort=semver)](https://github.com/lilicqyu-ship-it/smartcar/tags?q=v)
 
-智能车固件 **monorepo**。四个固件工程与共享接口契约、固件工具链同仓管理——
+智能车固件 **monorepo**。五个固件工程、iOS 遥控器 App 与共享接口契约、固件工具链同仓管理——
 一次提交一次推送，`git status` 只会出现真实文件差异，跨工程改动天然原子。
 本仓库承担三件事：
 
-1. **四个固件工程** — `esp32c6_car/`（C6 小车主控）、`smartcar_remote/`（S3 遥控器）、
-   `tc275_car/`（TC275 车体控制）、`tc275_sbl/`（TC275 OTA 二级引导）。
+1. **五个固件工程** — `esp32c6_car/`（C6 小车主控）、`smartcar_remote/`（S3 遥控器）、
+   `s3-gateway/`（S3-CAM 车端网关）、`tc275_car/`（TC275 车体控制）、
+   `tc275_sbl/`（TC275 OTA 二级引导）；外加 `ios_remote/`（iPhone 遥控器 App，不经 fw.py）。
 2. **共享接口契约** — `contracts/` 是跨工程接口的唯一权威版本，
    `scripts/check-contracts.sh` 逐字节校验各工程副本，杜绝拷贝漂移。
 3. **固件工具链** — `firmware/fw.py` 统一编译/烧录/归档/OTA 入口，`justfile` 一条命令直达。
@@ -19,12 +20,27 @@
 > （`lilicqyu-ship-it/esp32c6_car` 等，已随 monorepo 化归档只读）。工程历史经
 > subtree 合并完整保留在本仓库中，旧 tag 仍可从旧仓库查阅。
 
+## 工程版本
+
+tag 前缀即工程别名（`just tag <别名> <版本>`；未发版的工程在首个 tag 后自动点亮）：
+
+| 工程 | 版本 | CI |
+|---|---|---|
+| `esp32c6_car` · C6 小车主控 | [![c6](https://img.shields.io/github/v/tag/lilicqyu-ship-it/smartcar?filter=c6%2F*&label=c6&sort=semver)](https://github.com/lilicqyu-ship-it/smartcar/tags?q=c6%2F) | [![CI](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/esp32c6-car.yml/badge.svg)](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/esp32c6-car.yml) |
+| `s3-gateway` · S3-CAM 车端网关 | [![gw-s3](https://img.shields.io/github/v/tag/lilicqyu-ship-it/smartcar?filter=gw-s3%2F*&label=gw-s3&sort=semver)](https://github.com/lilicqyu-ship-it/smartcar/tags?q=gw-s3%2F) | [![CI](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/s3-gateway.yml/badge.svg)](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/s3-gateway.yml) |
+| `smartcar_remote` · S3 遥控器固件 | [![r-s3](https://img.shields.io/github/v/tag/lilicqyu-ship-it/smartcar?filter=r-s3%2F*&label=r-s3&sort=semver)](https://github.com/lilicqyu-ship-it/smartcar/tags?q=r-s3%2F) | [![CI](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/smartcar-remote.yml/badge.svg)](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/smartcar-remote.yml) |
+| `tc275_car` · TC275 车体控制 | [![app](https://img.shields.io/github/v/tag/lilicqyu-ship-it/smartcar?filter=app%2F*&label=app&sort=semver)](https://github.com/lilicqyu-ship-it/smartcar/tags?q=app%2F) | [![CI](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/tc275-car.yml/badge.svg)](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/tc275-car.yml) |
+| `tc275_sbl` · TC275 OTA 二级引导 | [![sbl](https://img.shields.io/github/v/tag/lilicqyu-ship-it/smartcar?filter=sbl%2F*&label=sbl&sort=semver)](https://github.com/lilicqyu-ship-it/smartcar/tags?q=sbl%2F) | [![CI](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/tc275-sbl.yml/badge.svg)](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/tc275-sbl.yml) |
+| `ios_remote` · iPhone 遥控器 App | [![ios](https://img.shields.io/github/v/tag/lilicqyu-ship-it/smartcar?filter=ios%2F*&label=ios&sort=semver)](https://github.com/lilicqyu-ship-it/smartcar/tags?q=ios%2F) | [![CI](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/ios-remote.yml/badge.svg)](https://github.com/lilicqyu-ship-it/smartcar/actions/workflows/ios-remote.yml) |
+
 ## 布局
 
 ```
 smartcar/
 ├── esp32c6_car/       ESP32-C6 小车主控固件（ESP-IDF）
 ├── smartcar_remote/   ESP32-S3 遥控器（LVGL + proto）
+├── s3-gateway/        ESP32-S3-CAM 车端网关固件（视觉 + Camera WS）
+├── ios_remote/        iPhone 遥控器 App（SwiftUI，proto v2 over WS）
 ├── tc275_car/         TC275 车体控制固件（TriCore/AUTOSAR 风格）
 ├── tc275_sbl/          TC275 OTA 二级引导（PFlash 双 bank + 自动回滚）
 ├── contracts/
@@ -35,7 +51,7 @@ smartcar/
 │   ├── sync-gh.sh     旧多仓 GitHub 配置下发（旧仓库归档后可删）
 │   └── check-contracts.sh  接口副本一致性校验（--apply 用 contracts/ 覆盖副本）
 ├── firmware/
-│   ├── fw.py          四工程固件统一入口: 编译/烧录/归档（详见 firmware/README.md）
+│   ├── fw.py          五工程固件统一入口: 编译/烧录/归档（详见 firmware/README.md）
 │   └── dist/          归档产物（时间戳 + 提交号，gitignore 部分入库）
 └── justfile           批量命令
 ```
@@ -54,15 +70,17 @@ just doctor   # 检查本机环境
 | `just contracts` | 校验接口副本与 contracts/ 一致 |
 | `just contracts-apply` | 用 contracts/ 覆盖各工程副本（接口变更后同步） |
 | `just tag <proj> <ver>` | 打工程版本 tag（如 `just tag c6 v1.0.1` → `c6/v1.0.1`） |
-| `just fw-list` | 四工程固件产物 / 归档状态一览 |
-| `just fw-build <工程>` | 编译固件（esp32c6_car/smartcar_remote/tc275_car/tc275_sbl） |
+| `just fw-list` | 五工程固件产物 / 归档状态一览 |
+| `just fw-build <工程>` | 编译固件（五个 ESP/TASKING 工程，别名见 fw-list） |
 | `just fw-flash <工程>` | 烧录固件（串口自动识别，参数透传各工程入口） |
 | `just fw-collect` | 归档产物到 firmware/dist/（含 manifest 记录源码版本） |
+| `just ios-install` | 编译+下载 iOS 遥控器 App 到 iPhone（`just ios-test` 跑单测） |
 | `just fw-factory` | SBL+App 出厂整包合成（--flash 顺带烧录） |
 | `just scons-car` / `just scons-sbl` | TASKING SCons 直编 TC275 两工程（免 ADS 生成文件） |
 
-版本 tag 带工程前缀（与 fw.py 别名一致）：`c6/`（esp32c6_car）、`r-s3/`（smartcar_remote）、
-`app/`（tc275_car）、`sbl/`（tc275_sbl）——四工程曾有同名 `v1.0.0`，前缀避免 tag 撞名。
+版本 tag 带工程前缀（与 fw.py 别名一致）：`c6/`（esp32c6_car）、`gw-s3/`（s3-gateway）、
+`r-s3/`（smartcar_remote）、`app/`（tc275_car）、`sbl/`（tc275_sbl）、`ios/`（ios_remote）
+——工程间曾有同名版本，前缀避免 tag 撞名。
 
 ## 改共享接口的流程
 
