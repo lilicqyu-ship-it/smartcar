@@ -24,8 +24,9 @@ C6 ──SPI/SF帧── TC275 ── 车辆
 - 配对凭证：使用安全输入框，网关地址支持 IP 或主机名。
 
 ![新版驾驶页](doc/ui-home-redesign.png)
+![整车拓扑页](doc/ui-topology.png)
 
-开发参数：`--tab 0..3` 指定初始页，`--no-alert` 抑制告警覆盖层（用于截图/联调）。
+开发参数：`--tab 0..4` 指定初始页，`--no-alert` 抑制告警覆盖层（用于截图/联调）。
 截图为模拟器未连接状态，不代表实车联调结果。
 
 ## 功能对照（固件模块 → iOS 实现）
@@ -40,6 +41,7 @@ C6 ──SPI/SF帧── TC275 ── 车辆
 | `safety_watch` | `S3Remote/Control/SafetyMonitor.swift` | 失联 1.2 s 去抖全屏告警 + 恢复事件、故障码、低电 20 %/临界 10 % + 5 % 回差 |
 | 遥测丢包统计（spec 28） | `S3Remote/Control/TelemetryLossCounter.swift` | seq 缺口 Δ∈(1,1000) 记 Δ−1，loss ‰ |
 | 电池显示防抖（C6 cee1189） | `S3Remote/Control/BatteryDisplayFilter.swift` | 电压：5 点中值 + 500 ms EMA + ≤2 Hz 显示闸 + 20 mV 下降迟滞；电量：5 点中值 + 持续 1.5 s 下降确认；会话内只降不升、重连不解除、零电压视为未就绪；告警/颜色仍用真实遥测 |
+| 拓扑/芯片版本 | `S3Remote/UI/TopologyView.swift` + AppState `tcAppVer/tcSblVer` | tcver 信标（{"t":"tcver","app","sbl"}）、hello ver、遥测 fw_ver/hw_rev/link_rtt/link_err——零固件改动；s3-gateway 相机面为虚线占位（v1 控制面） |
 | 信号强度 | `S3Remote/Control/LinkQuality.swift` + UI `SignalBarsView` | 两级：网关在 hello 带可选 `rssi` 字段或周期发 `{"t":"rssi","dbm":N}` 时显示真实 dBm（分档与 S3 遥控器 Kconfig 同源：−60/−67/−75/−85）；否则用 RTT+遥测丢包合成 4 格预估（UI 标注"预估 · x"）。状态舱与诊断页常驻显示 |
 | `app_state.c` | `S3Remote/Model/AppState.swift` | UI 单一事实源、600 ms 遥测过期（"--"）、事件环形日志、快照式发布 |
 | LVGL P1/P2/P4/P5/P9 | `S3Remote/UI/*.swift` | Home（摇杆/大速度/STOP）、Vehicle、Diag（统计+配对+事件日志）、Settings、全屏告警覆盖层（急停 RELEASE / 失联自动清除 / 其余 ACK） |
@@ -50,6 +52,10 @@ C6 ──SPI/SF帧── TC275 ── 车辆
   T/S 与"实际发出"值、模式限幅、STOP（单击停止锁存 / 长按 1.2 s 急停，带进度提示）。
 - **车辆**：电池 SOC/电压、左右目标/实测速度、本次/总里程、任务状态、故障码、
   运行时间、C6/TC275 固件版本。
+- **拓扑**：整车网络拓扑（iPhone → Wi-Fi/WS proto v2 → C6 → SPI/SF 帧 → TC275，
+  外设芯片与 s3-gateway 视觉网关虚线占位），链路状态实时点亮（WS/TV 通道、
+  两级 RTT、误码）；**芯片版本清单**：本 App / C6 固件（hello ver）/
+  TC275 App（tcver/遥测 fw_ver）/ TC275 SBL（tcver）/ 硬件 rev。
 - **诊断**：TX/RX 帧率、遥测丢包 ‰、RTT last/min/max、配对按钮与结果、事件日志。
 - **设置**：网关地址（默认 192.168.4.1）、token、摇杆死区、默认模式、应用并重连。
 

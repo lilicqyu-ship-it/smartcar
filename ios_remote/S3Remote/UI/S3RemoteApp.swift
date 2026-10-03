@@ -24,13 +24,13 @@ struct S3RemoteApp: App {
 
 struct RootView: View {
     @Environment(AppState.self) private var app
-    // dev/screenshot hook: `--tab 0..3` picks the initial tab
+    // dev/screenshot hook: `--tab 0..4` picks the initial tab
     @State private var selection = RootView.initialTab
 
     static let initialTab: Int = {
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: "--tab"), i + 1 < args.count,
-              let n = Int(args[i + 1]), (0...3).contains(n) else { return 0 }
+              let n = Int(args[i + 1]), (0...4).contains(n) else { return 0 }
         return n
     }()
 
@@ -43,12 +43,15 @@ struct RootView: View {
                 VehicleView()
                     .tabItem { Label("车辆", systemImage: "car.fill") }
                     .tag(1)
+                TopologyView()
+                    .tabItem { Label("拓扑", systemImage: "network") }
+                    .tag(2)
                 DiagView()
                     .tabItem { Label("连接", systemImage: "waveform.path.ecg") }
-                    .tag(2)
+                    .tag(3)
                 SettingsView()
                     .tabItem { Label("设置", systemImage: "gearshape.fill") }
-                    .tag(3)
+                    .tag(4)
             }
             AlertOverlayView()
 

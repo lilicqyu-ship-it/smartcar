@@ -77,6 +77,10 @@ public final class AppState {
     /// Per-client RSSI from the gateway when provided; nil = not available
     /// (signal bars then fall back to the RTT/loss estimate).
     public private(set) var rssiDbm: Int?
+    /// TC275 version beacon (`{"t":"tcver","app":..,"sbl":..}` from the C6
+    /// bridge). Empty = not received yet this session.
+    public private(set) var tcAppVer = ""
+    public private(set) var tcSblVer = ""
 
     // ---- telemetry (snapshot; freshness per spec 101: 600 ms → "--") -------
     public private(set) var telemetry: Telemetry?
@@ -188,6 +192,8 @@ public final class AppState {
         ctrlRole = false
         tcUp = false
         rssiDbm = nil
+        tcAppVer = ""
+        tcSblVer = ""
         outV = 0
         outW = 0
         log("WARN", "连接断开：\(reason) — 车辆由 TC275 心跳看门狗停车")
@@ -247,6 +253,12 @@ public final class AppState {
 
     func applyRssi(_ dbm: Int) {
         rssiDbm = dbm
+    }
+
+    /// TC275 版本信标（C6 bridge 周期广播），拓扑页与版本清单展示用
+    func applyTcVer(app: String, sbl: String) {
+        tcAppVer = app
+        tcSblVer = sbl
     }
 
     func publishStats(tx: Int, rx: Int) {

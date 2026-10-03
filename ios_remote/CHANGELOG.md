@@ -7,7 +7,17 @@
 
 ## [未发布]
 
-（暂无——下一项改动记录在这里）
+### 新增
+- **整车拓扑页**：iPhone → Wi-Fi/WS proto v2 → C6 → SPI/SF 帧 → TC275 节点链，
+  链路状态实时点亮（WS/TV 通道、两级 RTT、SPI 误码），TC275 外设芯片
+  （xcore 命令队列/DFlash 标定/电机编码器）与 s3-gateway 视觉网关虚线占位
+- **芯片版本清单**：本 App（Bundle）/ C6 固件（hello ver）/ TC275 App（tcver
+  信标，遥测 fw_ver 兜底）/ TC275 SBL（tcver）/ 硬件 rev——零固件改动；
+  AppState 新增 tcver 存储并随断链清零
+
+### 修复
+- App 版本号链路：Info.plist 的 CFBundleShortVersionString 改用
+  `$(MARKETING_VERSION)` 占位（此前硬编码 1.0.0，`just ios-version` 升版到不了包内）
 
 ## [1.1.0] - 2026-10-03
 

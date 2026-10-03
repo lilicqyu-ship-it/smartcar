@@ -290,7 +290,7 @@ public final class LinkEngine: NSObject, URLSessionWebSocketDelegate {
         case .errAuth:
             app.applyAuthRejected()
         case .tcVer(let a, let b):
-            app.log("INFO", "TC 版本 app=\(a) sbl=\(b)")
+            app.applyTcVer(app: a, sbl: b)
         case .rssi(let dbm):
             app.applyRssi(dbm)
         }
