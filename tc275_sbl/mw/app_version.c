@@ -1,4 +1,4 @@
-#include "mw/app_version.h"
+#include "app_version.h"
 
 /* SBL 版本串，LSL 定死在 0x80007E00（Lcf_SBL.lsl 的 sbl_version 组，32KB
  * SBL 区尾部）：App（tc275_car 的 SBL_VERSION_ADDR 同一地址约定）与调试器

@@ -35,6 +35,12 @@
 #define IMU_REG_CTRL1           0x10u   /* XL: odr[3:0] low, op_mode[6:4]    */
 #define IMU_REG_CTRL2           0x11u   /* GY: odr[3:0] low, op_mode[6:4]    */
 #define IMU_REG_CTRL3           0x12u   /* sw_reset bit0, if_inc bit2, bdu bit6 */
+#define IMU_REG_CTRL4           0x13u   /* drdy_pulsed bit1: 1 = INT1 data-ready is a
+                                         * short pulse per ODR period. Default 0
+                                         * (latched) holds INT1 until the data
+                                         * registers are read, so the ERU DRDY
+                                         * counter then tracks the read cadence
+                                         * instead of the ODR (bench 2026-10-03) */
 #define IMU_REG_CTRL6           0x15u   /* GY: fs_g[3:0]                     */
 #define IMU_REG_CTRL8           0x17u   /* XL: fs_xl[1:0]                    */
 #define IMU_REG_OUT_TEMP_L      0x20u   /* burst start: temp 2 + gyro 6 +
@@ -212,9 +218,14 @@ static inline sint16 IMU_le16(uint8 lo, uint8 hi)
     return (sint16)((uint16)lo | ((uint16)hi << 8));
 }
 
-/* Offsets inside the 14-byte burst from OUT_TEMP_L (0x20): temp 0..1,
- * gyro 2..7 (OUTX_L_G 0x22, X/Y/Z), accel 8..13 (OUTZ_L_A 0x28, Z/Y/X).
- * axis is always this driver's 0=X, 1=Y, 2=Z. */
+/* Offsets inside the 14-byte burst from OUT_TEMP_L (0x20), every sample a
+ * little-endian pair (IMU_le16: low index = LSB):
+ *   temp   d[0:1]                          OUT_TEMP_L 0x20
+ *   gyro   d[2:7]   X = d[2:3], Y, Z       OUTX_L_G   0x22, declared X,Y,Z
+ *   accel  d[8:13]  Z = d[8:9], Y, X       OUTZ_L_A   0x28, declared Z,Y,X
+ * The accel block runs in the OPPOSITE axis order to the gyro block, so
+ * d[8 + 2*axis] would hand axis 0 the Z sample. The axis argument below is
+ * always this driver's 0=X, 1=Y, 2=Z. */
 static inline sint16 IMU_burstTempRaw(const uint8 *d)
 {
     return IMU_le16(d[0u], d[1u]);
@@ -230,6 +241,26 @@ static inline sint16 IMU_burstAccRaw(const uint8 *d, uint8 axis)
     static const uint8 lo[3] = { 12u, 10u, 8u };  /* X@0x2C, Y@0x2A, Z@0x28 */
 
     return IMU_le16(d[lo[axis]], d[lo[axis] + 1u]);
+}
+
+/* A burst of all-zero bytes is not a sample - it is MISO never having been
+ * driven for the whole frame. No physical state produces it: gravity is on
+ * some axis whenever the part is powered, and OUT_TEMP raw 0 is exactly
+ * 25.00 degC. The QSPI status cannot tell this from a good read (the
+ * transaction completes cleanly either way), so the payload itself is the
+ * only evidence - see imu_readData(). len is the payload byte count. */
+static inline boolean IMU_burstIsBlank(const uint8 *d, uint8 len)
+{
+    uint8 i;
+
+    for (i = 0u; i < len; i++)
+    {
+        if (d[i] != 0u)
+        {
+            return FALSE;
+        }
+    }
+    return TRUE;
 }
 
 /* ---- clock ladder (doc 23 section 10.2: start 1 MHz, bench-verify each

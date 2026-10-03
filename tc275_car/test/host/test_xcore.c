@@ -302,7 +302,7 @@ static void test_imu_block(void)
 
     memset(&pub, 0, sizeof(pub));
     pub.alive         = TRUE;
-    pub.whoAmI        = 0x70;
+    pub.whoAmI        = 0x71;
     pub.accMilliG[0]  = -999;
     pub.gyroMilliDps[2] = 17500;
     pub.tempCentiC    = 2560;
@@ -312,7 +312,7 @@ static void test_imu_block(void)
     XCORE_imuRead(&out);
     CHECK_EQ(out.seq, 1u);                          /* first publish = 1    */
     CHECK(out.alive == TRUE);
-    CHECK_EQ(out.whoAmI, 0x70);
+    CHECK_EQ(out.whoAmI, 0x71);
     CHECK_EQ(out.accMilliG[0], -999);
     CHECK_EQ(out.accMilliG[1], 0);
     CHECK_EQ(out.gyroMilliDps[2], 17500);

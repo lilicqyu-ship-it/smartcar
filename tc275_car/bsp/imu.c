@@ -66,6 +66,17 @@
 #define IMU_INT1_PORT           (&MODULE_P15)
 #define IMU_INT1_PIN            4u
 
+/* CS = SLSO3 = P11.10. iLLD drives it as a plain GPIO around each exchange
+ * (activate/deactivateSlso use IfxPort_setPinState), so bench code may use
+ * the same primitives while the sensor is absent. */
+#define IMU_CS_PORT             (&MODULE_P11)
+#define IMU_CS_PIN              10u
+
+/* Bench CS probe (dead state only): pull CS low for this many 1 kHz ticks
+ * each second so the wire can be verified with a multimeter or LED instead
+ * of a scope race against a 16 us pulse. Purely diagnostic, no protocol. */
+#define IMU_CS_WIGGLE_TICKS     300u
+
 static IfxQspi_SpiMaster         g_spi;
 static IfxQspi_SpiMaster_Channel g_spiChannel;
 static ImuClockTier              g_tier = IMU_CLK_1M;
@@ -83,6 +94,8 @@ static uint8   g_failRun;                  /* consecutive failed reads     */
 static uint32 g_taskDiv;
 static uint32 g_reprobeMs;                 /* next re-probe deadline       */
 static uint32 g_logMs;                     /* next IMU= line deadline      */
+static uint16 g_csWiggle;                  /* dead-state CS probe counter  */
+static boolean g_csWiggleAnnounced;
 
 static const uint32 g_clockHz[IMU_CLK_COUNT] = {
     1000000u, 2000000u, 5000000u, 10000000u
@@ -370,6 +383,14 @@ static boolean imu_configure(void)
     {
         return FALSE;
     }
+    /* Data-ready as a pulse, not latched: with the default the line stays
+     * high until the data registers are read and the ERU DRDY counter
+     * measured our 200 Hz read cadence instead of the 240 Hz ODR
+     * (bench evidence, doc 35 section 7 step 3). */
+    if (IMU_writeReg(IMU_REG_CTRL4, 0x02u) != IMU_OK)
+    {
+        return FALSE;
+    }
     if (IMU_writeReg(IMU_REG_CTRL1, IMU_ctrlOdrByte(IMU_CFG_ODR)) != IMU_OK)
     {
         return FALSE;
@@ -401,7 +422,10 @@ static boolean imu_configure(void)
 
 static void imu_publish(void)
 {
-    const uint8 *d = &g_rxBuf[1];          /* burst payload: temp@0, gyro X/Y/Z@2, accel Z/Y/X@8 */
+    /* Burst layout, little-endian pairs (d[0] = the first byte read after the
+     * 0x20 command byte): temp d[0:1] | gyro d[2:7] in X,Y,Z | accel d[8:13]
+     * in the register order Z,Y,X, i.e. X = d[12:13], Y = d[10:11], Z = d[8:9]. */
+    const uint8 *d = &g_rxBuf[1];
     XcoreImu imu;
     uint8 i;
 
@@ -422,10 +446,23 @@ static void imu_publish(void)
 }
 
 /* One 14-byte burst: temp + gyro + accel, auto-increment from 0x20. Returns
- * TRUE on a clean transaction; failure counting lives in imu_xfer. */
+ * TRUE on a clean transaction carrying data; failure counting lives in
+ * imu_xfer and in IMU_task's fail-run.
+ *
+ * An all-zero payload counts as a failure. A module that brownouts and resets
+ * itself (CTRL1/2 back to ODR off) stops clocking INT1 and answers reads with
+ * 0x00 while every QSPI transaction stays clean - so status alone reports it
+ * as healthy, alive never drops, and the fusion layer keeps being fed a flat
+ * zero stream. Treating it as a failed read hands it to the existing recovery:
+ * 20 x 5 ms -> alive FALSE -> 1 Hz re-probe reconfigures the part, and if it
+ * really is unpowered the serial shows IMUERR instead of a lying IMU row. */
 static boolean imu_readData(void)
 {
-    return (IMU_readRegs(IMU_REG_OUT_TEMP_L, &g_rxBuf[1], IMU_MAX_DATA) == IMU_OK);
+    if (IMU_readRegs(IMU_REG_OUT_TEMP_L, &g_rxBuf[1], IMU_MAX_DATA) != IMU_OK)
+    {
+        return FALSE;
+    }
+    return !IMU_burstIsBlank(&g_rxBuf[1], (uint8)IMU_MAX_DATA);
 }
 
 void IMU_init(void)
@@ -440,6 +477,8 @@ void IMU_init(void)
     g_failRun    = 0u;
     g_taskDiv    = 0u;
     g_drdyCount  = 0u;
+    g_csWiggle   = 0u;
+    g_csWiggleAnnounced = FALSE;
 
     imu_spiSetup(IMU_CLK_1M);
     imu_eruSetup();
@@ -451,9 +490,10 @@ void IMU_init(void)
     if ((st == IMU_OK) && imu_configure())
     {
         g_alive = TRUE;
+        g_csWiggleAnnounced = FALSE;
         (void)imu_readData();
         imu_publish();
-        XCORE_logln("IMU ready (WHOAMI=0x70, ODR 240Hz, +-4g/+-500dps, 1MHz)");
+        XCORE_logln("IMU ready (WHOAMI=0x71, ODR 240Hz, +-4g/+-500dps, 1MHz)");
     }
     else
     {
@@ -472,18 +512,39 @@ void IMU_task(void)
 
     if (!g_alive)
     {
+        /* Bench aid while dead: wiggle CS (300 ms low per second) so the
+         * wire can be checked without a scope. Runs on the wait ticks only;
+         * the probe tick below lets iLLD own the pin again. */
+        if (!g_csWiggleAnnounced)
+        {
+            g_csWiggleAnnounced = TRUE;
+            XCORE_logln("IMU CS wiggle 300ms/s until sensor found");
+        }
+        if (g_csWiggle < IMU_CS_WIGGLE_TICKS)
+        {
+            IfxPort_setPinState(IMU_CS_PORT, IMU_CS_PIN, IfxPort_State_low);
+        }
+        else
+        {
+            IfxPort_setPinState(IMU_CS_PORT, IMU_CS_PIN, IfxPort_State_high);
+        }
+        g_csWiggle = (uint16)((g_csWiggle + 1u) % 1000u);
+
         /* Dead/absent sensor: stay cheap, retry the probe once a second. */
         if ((uint32)(STIME_nowMs() - g_reprobeMs) < IMU_REPROBE_MS)
         {
             return;
         }
+        g_csWiggle = 0u;                     /* probe tick: iLLD owns CS    */
         g_reprobeMs = STIME_nowMs();
         st = imu_probe();
         if ((st == IMU_OK) && imu_configure())
         {
             g_failRun = 0u;
             g_alive   = TRUE;
-            XCORE_logln("IMU found (WHOAMI=0x70), configured");
+            g_csWiggleAnnounced = FALSE;
+            IfxPort_setPinState(IMU_CS_PORT, IMU_CS_PIN, IfxPort_State_high);
+            XCORE_logln("IMU found (WHOAMI=0x71), configured");
             return;
         }
         /* Report the cause, but at the same 0.5 Hz discipline as the IMU= row:

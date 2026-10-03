@@ -280,8 +280,20 @@ def build(env, *, cfg_name, artifact, lsl, variant, opt='-O0'):
         ],
     )
 
-    objs = [env.Object(os.path.join(outdir, 'obj', s[:-2] + '.o'), s)
-            for s in sources]
+    # mw/crypto/ 是 esp32c6_car components/c6_ota 的逐字拷贝（doc 24：两侧共用真源，
+    # 不许漂移），而它生成的 c6_consts.h 把 SHA-512 与 ed25519 两组常量塞在同一个头
+    # 文件里；ed25519v.c 只用后者，ctc 就报 W537 unused variable（gcc/clang 默认不报，
+    # 所以上游一直没暴露）。这些未用数组是 per-object 的 .rodata 段，链接期即被丢弃
+    # （.map 里只挂在 sha512.o 下），不进镜像。所以既不改被拷贝的源文件，也不全局关
+    # 这个告警号——只对该目录关，本工程自有代码的死变量检测照旧生效。
+    objs = []
+    for src in sources:
+        build_env = env
+        if src.replace(os.sep, '/').startswith('mw/crypto/'):
+            build_env = env.Clone()
+            build_env.Append(CCFLAGS=['-Wc-w537'])
+        objs.append(build_env.Object(
+            os.path.join(outdir, 'obj', src[:-2] + '.o'), src))
 
     # Windows 命令行长度受限（IDE 同样用 argfile）：对象列表写入 TASKING 响应文件
     rsp = os.path.join(outdir, artifact + '.rsp')

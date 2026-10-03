@@ -73,7 +73,7 @@ typedef struct
 {
     uint32  seq;                          /* bumped by XCORE_imuPublish       */
     boolean alive;
-    uint8   whoAmI;                       /* last probe result (0x70 expected)*/
+    uint8   whoAmI;                       /* last probe result (0x71 expected)*/
     sint16  accMilliG[3];                 /* X/Y/Z, mg                        */
     sint32  gyroMilliDps[3];              /* X/Y/Z, mdps                      */
     sint16  tempCentiC;                   /* die temperature, 0.01 degC       */
