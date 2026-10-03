@@ -22,6 +22,12 @@ Calibration checks cover SE2 (375 × 667), sticky stop visibility, airborne
 confirmation, calibration/jog interlocks, device results, jog release, numeric
 parameter validation and loss of control authority.
 
+Save receipt checks distinguish live-record echoes from final flash outcomes,
+cover unknown/invalid `saved`, timeout recovery, a real failure followed by a
+successful final receipt, and consistent results/status in step 4. TC275's
+production scheduler has a separate host test with mocked hardware:
+`python3 tc275_car/test/host/test_calib_store.py`.
+
 Motor checks inspect the transmitted 0x71 bytes for all A/B/C/D channels in both
 directions, plus zero-duty release frames and non-default position layouts.
 

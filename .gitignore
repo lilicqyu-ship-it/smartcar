@@ -16,3 +16,5 @@ firmware/dist/**/*.mdf
 # 外部工具残留的差异文件（TortoiseGit/对比工具临时补丁等）
 *.diff
 smartcar_remote/.cache
+# clangd/工具链本地缓存
+tc275_car/.cache/

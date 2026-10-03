@@ -355,6 +355,14 @@ typedef struct { boolean valid; XcoreCalibRecord rec; } XcoreRecordLive; /* CPU0
 - 0x72/0x73/0x74 → 触发 §8.3 流程（读/写/清），完成后组 EVT 0x23 payload 经 CPU2 发送（M2a 同款 take-send 通道，或复用 `CalibResult` 块扩展——实现时保持"一次标定/一次变更恰好一帧"）；
 - 0x22 payload 追加 `saved u8`（22→23 B，偏移 `[22]`）：0=未持久化 1=已写 DFlash 2=写入失败。
 
+**2026-10-03 · 保存成功但网页仍显示失败的回执修复**：
+
+- `calib_handleResult()` 先检查并取走新结果；信箱为空时保持 `g_holdResult`，不得在每个 10ms tick 把等待保存的 DONE 结果误发为 `saved=2`。BUSY/ABORTED 回执也不取消已有 DONE 的保存。
+- 写失败但尚可重试时继续保留结果；写入并回读成功才发送 `saved=1`，三次尝试全部失败才发送 `saved=2`。一次 DONE 的自动保存仍只有一个最终回执。
+- 新的 DONE/REC_SET/REC_CLEAR 替换待写操作时，旧 DONE 回 `saved=0`（已被替换、未持久化）；不能将新记录的写成功记到旧标定上。`calib_persistInvert()` 明确返回是否成功排队，参数无效时不能误用其他记录的待写队列。
+- `REC_GET/REC_SET` 的 `0x23` 是当前 RAM 参数回显，`crcOk` 不是本轮物理写入证明；`src=DFLASH` 在自动标定排队时已设置，最终保存结论以 `0x22.saved` 为准。帧长度、偏移和 flash 原语均未改。
+- 主机测试 `python3 test/host/test_calib_store.py` 编译实际生产代码的队列、结果和 tick 段，仅替换 flash/xcore/时钟边界，覆盖上述时序。实际三核同步、FMU 擦写及手机到车辆的回执仍需台架验证；本机不能构建 TASKING 固件。
+
 ### 9.5 主机单测与文档同步
 
 - `test/host/test_sf.c`：0x22 扩展字段 + 0x23 往返用例；`test_sf_telemetry` 不动（38 B 遥测布局零改动）；
@@ -418,7 +426,7 @@ typedef struct { boolean valid; XcoreCalibRecord rec; } XcoreRecordLive; /* CPU0
 - **C3 · 0x22 长度算错**：见 D5。对端 `esp32c6_car` 已在 `doc/17-calib-ui.md` §4.1 与 `bridge.c:bridge_emit_cal` 用 23 B（`saved` 在 `[22]`，`n>=23` 才读），主机单测现按"字段偏移 + 长度下限"两侧对齐。
 - **C4 · `0x71~0x74` 在 esp32c6_car 的常量表里另有名字**（`proto_frames.h`：0x71 `DPT_LED` / 0x72 `DPT_MOTOR_RUN` / 0x73 `DPT_ENC_READ` / 0x74 `DPT_CAL`）。同一个字节两仓库两名，与 §3 记录的 0x70 双语义同源；c6 侧 `c6_link/link.c:285` 按 `0x70..0x79` **整段**路由到 `CID_DPT`，故通道无冲突，但**页面与 C6 代码不得真的发送 LED/MOTOR_RUN 语义**——只能按本文 §9.1 的四个新语义发。
 - **C5 · 写入期间的中断掩蔽**：`CALIB_tick` 的保存序列整段 `__disable()`（最长 ≈ 擦除 + 3 页编程 + 回读，预算内几十 ms）。CPU0 的 FreeRTOS tick 与 UART RX 在此期间挂起；三核取指都在 PFlash0（`Lcf_*.lsl` 未把任何段放进 DF0），故 CPU1/CPU2 不停顿。喂狗在轮询循环内持续服务，超时上限仍按失败处理。
-- **C6 · 保存失败无重试上限**（实现取舍，原稿未规定）：`g_pending` 只在**写成功**后清零，擦除或编程失败则每 `CALIB_WRITE_IDLE_MS`(500 ms) 再试一次，**不设次数上限**。意图是"标定结果不能悄悄丢"；代价是 FMU 永久故障时 CPU0 会周期性关中断几十 ms（表现为链路 20 ms 遥测偶发抖动）。台架若见到规律性停顿而 `saved` 始终 =2，即命中此路径，应先修 flash 而不是加计数器。
+- **C6 · 保存失败重试与回执**：早期版本无上限重试，现实现 `CALIB_FLASH_RETRIES=3`、失败后间隔 `CALIB_WRITE_IDLE_MS`(500 ms) 再试。2026-10-03 修复回执时序：重试期间不发最终失败，成功或耗尽三次尝试后才解除 hold 并发最终结果（§9.4）。
 - **C7 · 只有 `TriCore Debug (TASKING)` 一个配置能编这批代码**：读 `.cproject` 得到 —— Release (TASKING) 的 include 路径列表里**没有** `com`、`rt`、`mw/sf`、`mw/calib`（只有 `app/bsp/mw/mw/xcore/mw/proto`），并且**仍排除** `Flash`/`Flash/Std`；两个 GCC 配置同样没有这批路径。也就是说 Release 从 SF 链路落地那次起就与源码脱节（它定义了 `USE_SPI_LINK` 却找不到 `com/link.h`），本轮只是又多欠一项。**本轮不动 Release/GCC 配置**（构建配置改动风险大、且无人验证过 Release 产物）；要用 Release 出镜像前先补 include 路径 + 解除 Flash 排除。→ §12 Q4
 
 ### 11.5 验证状态（红线：不许把"编不出来"说成"已验证"）

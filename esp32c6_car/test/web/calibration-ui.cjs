@@ -35,6 +35,25 @@ const pathModule=require('path');
  await page.evaluate(()=>onCtl({t:'cal',status:0,saved:1,invert:[1,-1,1,1],delta:[20,-20,20,20]}));
  if(!await page.locator('#s1').innerText().then(t=>t.includes('翻转')))throw Error('calibration result missing');
  await page.evaluate(()=>onCtl({t:'rec',src:1,crcOk:true,pos:[0,2,3,1],invert:[1,-1,1,1],fullScale:3000,wheelDia:100}));
+ // A live RAM echo is not a flash receipt. Only the final saved byte decides
+ // whether this calibration was persisted, including receipts after timeout.
+ const cal={t:'cal',status:0,invert:[1,-1,1,1],delta:[20,-20,20,20]};
+ await page.evaluate(()=>{state.running=true;calibTimeout();});
+ if(!await page.locator('#calib_msg').innerText().then(t=>t.includes('状态待确认')))throw Error('timeout falsely reports failure');
+ await page.evaluate(()=>onCtl({t:'rec',src:1,crcOk:true,pos:[0,2,3,1],invert:[1,-1,1,1],fullScale:3000,wheelDia:100}));
+ if(await page.locator('#st_4').evaluate(el=>el.classList.contains('done')))throw Error('RAM echo confirms timed-out flash write');
+ for(const saved of [undefined,0,255]) {
+   await page.evaluate(m=>onCtl(m),{...cal,saved});
+   if(await page.locator('#st_4').evaluate(el=>el.classList.contains('done')||el.classList.contains('bad')))throw Error('unknown/unpersisted save misclassified');
+ }
+ await page.evaluate(m=>onCtl(m),{...cal,saved:2});
+ if(!await page.locator('#st_4').evaluate(el=>el.classList.contains('bad')))throw Error('save failure not reflected in storage step');
+ await page.evaluate(()=>onCtl({t:'rec',src:1,crcOk:true,pos:[0,2,3,1],invert:[1,-1,1,1],fullScale:3000,wheelDia:100}));
+ if(!await page.locator('#calib_msg').innerText().then(t=>t.includes('保存失败')))throw Error('RAM CRC hides save failure');
+ if(!await page.locator('#st_4').evaluate(el=>el.classList.contains('bad')))throw Error('RAM CRC clears save failure');
+ await page.evaluate(m=>onCtl(m),{...cal,saved:1});
+ if(!await page.locator('#calib_msg').innerText().then(t=>t.includes('保存成功')&&!t.includes('失败')))throw Error('final success leaves stale failure');
+ if(!await page.locator('#st_4').evaluate(el=>el.classList.contains('done')&&!el.classList.contains('bad')))throw Error('final success storage step wrong');
  await page.locator('#jp0').scrollIntoViewIfNeeded();
  const jog=await page.locator('#jp0').boundingBox();
  await page.mouse.move(jog.x+jog.width/2,jog.y+jog.height/2);await page.mouse.down();
@@ -76,6 +95,6 @@ const pathModule=require('path');
  await page.evaluate(()=>onCtl({t:'err',e:'auth'}));
  if(!await page.locator('#jp0').isDisabled())throw Error('jog after auth loss');
  if(errors.length)throw Error(errors.join('\n'));
- console.log('PASS: calibration layouts, sticky stop, prerequisite gates, run interlock, results, jog release, parameter validation, all channel/sign payloads, spatial remapping, auth loss');
+ console.log('PASS: calibration layouts, sticky stop, prerequisite gates, run interlock, final save receipts, timeout recovery, RAM/flash distinction, jog release, parameter validation, all channel/sign payloads, spatial remapping, auth loss');
  await browser.close();
 })().catch(error=>{console.error(error);process.exit(1);});

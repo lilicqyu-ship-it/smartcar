@@ -49,7 +49,7 @@ const state = {
   token: localStorage.getItem("sd_token") || sessionStorage.getItem("sd_token") || new URLSearchParams(location.search).get("token") || "",
   ws: null, wsOn: false, ctrl: false, tc: false, navigating: false,
   running: false, lastTrigger: 0, runTimer: 0,     /* 判向标定状态机 */
-  calib: { done: false, status: -1, invert: null }, /* ② 最近一轮判向结果 */
+  calib: { done: false, status: -1, invert: null, saved: null }, /* ② 判向及最终保存结果 */
   jog: { motor: -1, dir: 0, timer: 0 },            /* 逐电机点动（同一时刻至多一路） */
   jogged: false,                                   /* ③ 是否点动复核过 */
   jogGated: false,                                 /* ③ 故障锁存门禁，跃变时刷一次按钮 */
@@ -80,13 +80,17 @@ function refreshFlow() {
   setStep(1, preOk() ? "done" : "act");
   setStep(2, state.calib.done ? "done" : (state.calib.status > 0 ? "bad" : (preOk() ? "act" : "")));
   setStep(3, state.jogged ? "done" : (jogFaultGated() ? "bad" : (state.calib.done ? "act" : "")));
-  setStep(4, state.recOk === 1 ? "done" : (state.recOk === 2 ? "bad" : (state.calib.done ? "act" : "")));
+  // A live-record echo confirms applied values, not this run's flash write.
+  const storage = state.running || state.calib.status === -2 ? 0 :
+    state.calib.done ? state.calib.saved : state.recOk;
+  setStep(4, storage === 1 ? "done" : (storage === 2 ? "bad" : (state.calib.done ? "act" : "")));
   const role = $("cal_role");
   role.textContent = !state.wsOn ? "未连接" : state.ctrl ? "控制端" : "观察端";
   role.className = "pill " + (state.wsOn && state.ctrl ? "ctrl" : "spec");
   let hint, target, action;
   if (miss.length) { hint = "先完成：" + miss.join("、") + "。"; target = "setup"; action = "检查准备"; }
   else if (state.running) { hint = "正在逐轮判向，请等待设备回传结果。"; target = "direction"; action = "查看进度"; }
+  else if (state.calib.status === -2) { hint = "正在等待最终保存回执，请保持车辆静止。"; target = "direction"; action = "查看回执"; }
   else if (state.calib.status > 0) { hint = "本次判向未完成，请查看结果后重试。"; target = "direction"; action = "查看结果"; }
   else if (!state.calib.done) { hint = "准备就绪，可以开始自动判向。"; target = "direction"; action = "开始判向"; }
   else if (jogFaultGated()) { hint = "设备报告故障，请排除故障后再点动。"; target = "carcard"; action = "查看车况"; }
@@ -236,7 +240,7 @@ function startCalib() {
 
   state.running = true;
   state.lastTrigger = Date.now();
-  state.calib = { done: false, status: -1, invert: null };      /* 本轮结果待回传 */
+  state.calib = { done: false, status: -1, invert: null, saved: null }; /* 本轮结果待回传 */
   sendCmd(CMD.CAL_DIR, new Uint8Array(0));         /* 一次确认只发一帧 0x70 */
   $("calib_msg").textContent = "标定进行中：车轮将逐个短暂转动…";
   setProgress(true);
@@ -253,23 +257,26 @@ function calibEnd() {
   refreshFlow();
 }
 function calibTimeout() {                           /* 无结果回传时的降级（doc/17 §2.4） */
+  state.calib.status = -2;
   calibEnd();
   $("calib_msg").textContent =
-    "结果回传未启用（需 tc275_car 固件 M2/M3'）：请在 TC275 调试串口查看 ENCCAL= 行（invert[0..3] delta[0..3]）。";
+    "尚未收到最终标定与保存回执，保存状态待确认。请保持车辆静止；回执到达后会自动更新，也可查看 TC275 串口。";
 }
 function calibAbortOnDisconnect() {
   if (!state.running) return;
+  state.calib.status = -2;
   calibEnd();
   $("calib_msg").textContent = "WS 已断开，本次标定状态未知：请查看 TC275 串口 ENCCAL= 行。";
 }
 
 /* ---- 结果表：EVT 0x22 {"t":"cal",status,saved,invert[4],delta[4]}（doc/17 §4.2/§8.3） ---- */
-const SAVED_TXT = { 0: "未持久化", 1: "已写 DFlash", 2: "DFlash 写入失败⚠" };
+const SAVED_TXT = { 0: "未持久化", 1: "已写入 DFlash，保存成功", 2: "DFlash 保存失败，请重试⚠" };
 function onCalibResult(m) {
   const reasons = { 1: "急停中止", 2: "忙：已有标定在跑" };
   const st = m.status | 0;
   calibEnd();                                       /* 内部会 refreshFlow，需在其后落状态 */
-  state.calib = { done: st === 0, status: st, invert: m.invert.slice(0, 4) };
+  const saved = Number.isInteger(m.saved) && m.saved >= 0 && m.saved <= 2 ? m.saved : null;
+  state.calib = { done: st === 0, status: st, invert: m.invert.slice(0, 4), saved };
   for (let i = 0; i < 4; i++) {
     const d = m.delta[i] | 0, inv = m.invert[i] | 0;
     $("d" + i).textContent = (d > 0 ? "+" : "") + d;
@@ -301,7 +308,7 @@ function onCalibResult(m) {
     refreshFlow();
     return;
   }
-  $("calib_msg").textContent = "标定完成（" + (SAVED_TXT[m.saved | 0] || "保存状态未知") +
+  $("calib_msg").textContent = "标定完成（" + (SAVED_TXT[saved] || "保存状态待确认") +
     "）。③ 可点动复核真轮转向，④ 生效参数刷新中…";
   requestRec();                                     /* 判向自动持久化后回读（§8.3） */
   refreshFlow();

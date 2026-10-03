@@ -69,5 +69,8 @@ jobs:
               -o test/host/out/test_xcore
           test/host/out/test_xcore
 
+      - name: Calibration persistence scheduler tests (mocked hardware)
+        run: python3 test/host/test_calib_store.py
+
       - name: Sequence diagram source is valid JSON
         run: python3 -m json.tool doc/20-design/link-c6.sequence.json > /dev/null

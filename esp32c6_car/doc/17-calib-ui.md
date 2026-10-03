@@ -94,13 +94,13 @@ idle → confirm(二次确认弹窗) → sending(发1帧) → running(1.4s+余�
 5. STOP 按钮永远可用（不受互锁限制）；
 6. 防连点：上次触发后 3s 内再次点击无效。
 
-### 2.4 超时与降级（M1 的预期终点）
+### 2.4 回执超时与状态待确认
 
 发出 0x70 后 3s 内未收到结果事件 → 结果区显示固定文案：
 
-> 结果回传未启用（需 tc275_car 固件 M2）：请在 TC275 调试串口查看 `ENCCAL=` 行（invert[0..3] delta[0..3]）。
+> 尚未收到最终标定与保存回执，保存状态待确认。请保持车辆静止；回执到达后会自动更新，也可查看 TC275 串口。
 
-页面不报错、不复位，进度照常结束。
+页面不报保存失败、不复位，进度照常结束；第④步不能因为 RAM 参数回读正常而显示本轮保存成功。DFlash 等待静止或重试可能超过 3s，后到的 `cal` 回执仍须更新结果。
 
 ---
 
@@ -241,6 +241,8 @@ ENCCAL 是 RAM 态，**每次上电回到全 +1**。台架确认各轮符号后�
 - 进入页面即发 `0x72 REC_GET`，用 EVT `0x23` 渲染**当前生效参数表**：每轮 位置 / 编码器方向（±1，`-1` 标"已翻转"）/ 全局 满量程速度 `fullScaleMmS` / 轮径 `wheelDiaMm` / 数据来源（默认值 · DFlash · 在线设置）；
 - 编辑 `fullScaleMmS`（100..5000）、`wheelDiaMm`（30..200，前端范围校验）→ `0x73 REC_SET` **生效并写入 DFlash**；`0x74 REC_CLEAR` 恢复默认并擦除；
 - `0x70` 自动判向成功后由 TC275 **自动持久化**，UI 无需手动存；EVT `0x22` 追加 `saved u8`（0 未持久化 / 1 已写 / 2 写失败），结果表显示保存状态；
+- **2026-10-03 保存回执修复**：TC275 保留 DONE 结果直到写入及回读成功（`saved=1`），或三次写入尝试全部失败（`saved=2`）；等待静止、空结果信箱、尚可重试的失败均不提前发失败回执。网页记录本轮 `saved`，同步更新结果说明和第④步；迟到的成功回执会清除之前的失败显示。缺失或非法 `saved` 显示待确认。`rec.crcOk` 只说明生效记录有效，不能覆盖本轮保存结果：自动标定在物理写入前就可能将 RAM `src` 设为 DFlash。
+- `REC_SET` 的 EVT `0x23` 是参数生效回显；当前协议没有该操作的独立最终写入回执，不能仅凭回显宣称已写入 DFlash。
 - "运动方向"指**编码器计数方向 invert**（0x70 判向结果，生效项）；电机驱动方向属接线级事实（tc275_car `g_dirInvert` 编译期表），**不在本协议字段范围**，页面不显示、不下发。
 
 ### 8.4 协议追加（与 tc275_car 34 §9 同源；既有 0x70 通路与 c6_link 映射零改动）
@@ -252,7 +254,7 @@ DPT 命令族（SF `CMD` / `CID_DPT`，`payload[0]=op`；c6_link 现有 0x70~0x7
 | 0x70 | CAL_DIR（既有） | ∅ | EVT 0x22（追加 `saved u8` → 23 B，见 §4.1 更正） |
 | 0x71 | MOTOR_JOG | `{motor u8, duty i16}`（3 B，duty=percent×10，钳 ±500） | 无（newest-wins，300 ms 固件超时） |
 | 0x72 | REC_GET | ∅ | EVT 0x23 |
-| 0x73 | REC_SET | `{pos u8×4, invert i8×4, fullScale i16, wheelDia i16}`（12 B） | EVT 0x23（生效+持久化回执） |
+| 0x73 | REC_SET | `{pos u8×4, invert i8×4, fullScale i16, wheelDia i16}`（12 B） | EVT 0x23（参数生效回显，写入由 TC275 延迟队列处理） |
 | 0x74 | REC_CLEAR | ∅ | EVT 0x23（默认值回执） |
 
 > 0x71/0x73 载荷偏移已与 tc275_car 实码逐字节核对：jog `{motor@0, duty i16LE@1..2}`（`calib_record.c:CALIBREC_jogDecode`，钳 ±500、`motor<4` 校验）；REC_SET `{pos@0..3, invert@4..7, fullScale i16LE@8..9, wheelDia i16LE@10..11}`（`CALIBREC_recSetDecode`，`len != 12` 直接拒收，`ver` 由固件置 1、`src` 由固件置 2，**不在线上载荷里**）。
