@@ -462,12 +462,22 @@ void CALIB_sendRecord(void)
 static void calib_sendResultEvt(const XcoreCalibResult *res, uint8 saved)
 {
     XcoreEvtFrame frame;
+    int32_t       delta[CALIB_REC_WHEELS];
+    uint8         i;
+
+    /* xcore's mailbox is iLLD-typed (sint32 is `long` on TriCore) and the pure
+     * C99 codec takes stdint int32_t (`int`), so the element types differ even
+     * though the width does not: copy across instead of casting the pointer. */
+    for (i = 0u; i < CALIB_REC_WHEELS; i++)
+    {
+        delta[i] = res->delta[i];
+    }
 
     frame.type = SF_TYPE_EVT;
     frame.cid  = SF_CID_DPT_RESULT;
     frame.len  = CALIB_EVT_RESULT_LEN;
     CALIBREC_buildEvtResult(frame.payload, res->status, res->invert,
-                            res->delta, saved);
+                            delta, saved);
     (void)XCORE_evtPush(&frame);
 }
 
