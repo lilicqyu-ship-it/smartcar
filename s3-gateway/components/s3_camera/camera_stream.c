@@ -72,6 +72,21 @@ static volatile uint16_t     s_width;
 static volatile uint16_t     s_height;
 static volatile uint32_t     s_seq;    /* monotonic across viewers, per 表 14 SEQ */
 
+/* DRIVE-heartbeat recency (doc/22: while the car is being driven the camera
+ * plane may not spend airtime on VGA).  Written from the control-WS context
+ * on every accepted DRIVE frame, read from the :81 session paths. */
+#define DRIVE_FRESH_MS      1000u
+static volatile int64_t      s_last_drive_ms;
+void camera_set_drive_heartbeat(void)
+{
+    s_last_drive_ms = esp_timer_get_time() / 1000;
+}
+static bool driving_now(void)
+{
+    return s_last_drive_ms != 0 &&
+           esp_timer_get_time() / 1000 - s_last_drive_ms < (int64_t)DRIVE_FRESH_MS;
+}
+
 /* Stall = the socket write for one frame outlived 2.5 frame periods (100 ms at
  * 25 fps), i.e. the viewer - not the sensor - is the bottleneck and
  * CAMERA_GRAB_LATEST is already dropping frames on its way in.  Cumulative
@@ -404,7 +419,12 @@ static esp_err_t stream_handler(httpd_req_t *req)
 #define WS_TX_LOCK_MS     600u    /* > the 500 ms SO_SNDTIMEO, so a lock timeout
                                    * can only mean a genuinely stalled peer      */
 #define WS_TX_FAIL_MAX      3u    /* consecutive failed writes = the peer is gone */
-#define WS_VGA_MIN_GAP_MS   400u   /* VGA pacing: ~2.5 fps = handset decode rate */
+/* VGA pacing recalibrated for the handset's current decoder (bench 10-02:
+ * QVGA decode 58-101 ms on the HW path; VGA is 4x the pixels -> ~240-400 ms,
+ * HW amortising per-frame overhead towards the low end).  300 ms ≈ 3.3 fps
+ * with margin; QVGA is the driven default (see driving_now), so this only
+ * bites a stationary VGA viewer.  Re-measure if the decode path changes. */
+#define WS_VGA_MIN_GAP_MS   300u
 #define WS_FRAME_BUDGET_MS 1500u   /* whole-frame write budget (several SO_SNDTIMEO ticks) */
 #define WS_STATE_PERIOD_MS 1000u
 #define WS_TASK_STACK       3072
@@ -801,12 +821,15 @@ static void ws_pump_task(void *arg)
     /* framesize is one set of registers shared with /stream, and the handset asked
      * for its own size on the text plane: without this the phone page would keep
      * the handset's 320x240 long after the handset left.  Restore the Kconfig size
-     * the device was built for (register-only write, the driver is not restarted). */
+     * the device was built for (register-only write, the driver is not restarted) -
+     * unless the car is being driven right now, then REMOTE_PREVIEW stays locked
+     * (doc/22): the phone's VGA would compete with the control uplink. */
     {
+        framesize_t restore = driving_now() ? FRAMESIZE_QVGA : CAM_FRAME_SIZE;
         sensor_t *sen = esp_camera_sensor_get();
-        if (sen != NULL && sen->set_framesize(sen, CAM_FRAME_SIZE) == 0) {
+        if (sen != NULL && sen->set_framesize(sen, restore) == 0) {
             uint16_t w = 0, h = 0;
-            frame_size_dims(CAM_FRAME_SIZE, &w, &h);
+            frame_size_dims(restore, &w, &h);
             s_width  = w;
             s_height = h;
         }
@@ -857,7 +880,15 @@ static void ws_handle_ops(ws_session_t *s, const char *text)
     else if (strcmp(name, CAM_OP_PROFILE) == 0)
     {
         const cJSON *prof = cJSON_GetObjectItemCaseSensitive(root, "name");
-        if (!cJSON_IsString(prof) || !ws_apply_profile(s, prof->valuestring))
+        if (cJSON_IsString(prof) && driving_now() &&
+            strcmp(prof->valuestring, CAM_PROFILE_WEB) == 0)
+        {
+            /* doc/22: driving locks the sensor to REMOTE_PREVIEW - a VGA ask
+             * would spend the control uplink's airtime (bench 10-02). */
+            ESP_LOGW(TAG, "ws/camera WEB_PREVIEW refused: drive heartbeat fresh");
+            ws_send_text(s, "{\"t\":\"" VISION_T_ERR "\",\"e\":\"driving\"}");
+        }
+        else if (!cJSON_IsString(prof) || !ws_apply_profile(s, prof->valuestring))
         {
             ws_send_text(s, "{\"t\":\"" VISION_T_ERR "\",\"e\":\"bad\"}");
         }
@@ -907,7 +938,17 @@ static esp_err_t ws_camera_pre_handshake(httpd_req_t *req)
     s_ws.subscribed  = false;  /* gated: nothing on the air until subscribe */
     s_ws.tx_fail     = 0u;     /* the slot is static: stale counts would retire the new pump */
     s_ws.started_ms  = (uint32_t)(esp_timer_get_time() / 1000);
-    strlcpy(s_ws.profile, ws_profile_name(), sizeof(s_ws.profile));
+    if (driving_now())
+    {
+        /* doc/22: a session attaching while the car is driven defaults to
+         * REMOTE_PREVIEW (register write here, not just the label), so even a
+         * viewer that never sends ops cannot hold VGA against the uplink. */
+        ws_apply_profile(&s_ws, CAM_PROFILE_REMOTE);
+    }
+    else
+    {
+        strlcpy(s_ws.profile, ws_profile_name(), sizeof(s_ws.profile));
+    }
     s_ws.in_use      = true;
     return ESP_OK;
 }

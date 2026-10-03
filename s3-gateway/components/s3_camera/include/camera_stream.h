@@ -59,6 +59,14 @@ const char *camera_sensor_name(void);
 /* fill *out with the live stream counters; zeroed when the sensor is absent */
 void camera_stats(camera_stats_t *out);
 
+/* Drive-activity beacon, called by s3_bridge on every DRIVE frame it accepts
+ * (doc/22 vision-resource policy): while heartbeats are fresh the camera WS
+ * locks the sensor to REMOTE_PREVIEW - WEB_PREVIEW profile ops are refused
+ * and session restore skips the VGA write-back, so nothing (handset, phone
+ * page, future client) can spend the control uplink's airtime on VGA while
+ * the car is being driven. */
+void camera_set_drive_heartbeat(void);
+
 #ifdef __cplusplus
 }
 #endif

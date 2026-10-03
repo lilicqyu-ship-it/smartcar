@@ -8,11 +8,14 @@
 ## [未发布]
 
 ### 新增
+- **自动关机**（`CONFIG_SCR_AUTO_OFF_ENABLE`，默认开）：无触摸 `SCR_AUTO_OFF_IDLE_MIN`（默认 5 min）后全屏遮罩倒计时 `SCR_AUTO_OFF_WARN_S`（默认 15 s），任意触摸取消并重置空闲时钟；归零后锁存车辆 STOP（尽力补发 0,0 帧）→ 熄背光 → 深度睡眠。本板无软电源锁存、无触摸 INT 线，唤醒源即 BOOT 键（GPIO0，ext0 低电平），深睡唤醒走正常启动路径（事件环记 "Power on: BOOT key"）。看门狗用 LVGL 自带的 `lv_display_get_inactive_time()`（app_main 的去抖触摸喂入），另设两处抑制：C6/TC275 OTA 传输中（VERIFY/SEND/WAIT_TC，上传本就是数分钟无触摸）不倒计时；BENCH 台架构建不启动。倒计时遮罩自身可点击（吞掉取消那次 tap，不穿透到下层页面）
+- **Camera WS 主解码改走 S3 PIE SIMD**（`CONFIG_SCR_CAM_JPEG_SIMD`，默认开）：ESP32-S3 **没有** JPEG 解码外设（那是 P4/S31 的 `driver/jpeg_decode.h` / `SOC_JPEG_DECODE_SUPPORTED`，在本芯片上等于死代码）。`cam_decode` 用 `esp_new_jpeg`（RGB565_LE、16 字节对齐槽与输入拷贝）；截断或 `jpeg_dec_process` 失败同帧回退 TJpgDec，连续 3 次 SIMD 失败直到下一次 `cam_hello`。DIAG 与 `cam … dec=Nms simd|sw` 区分路径。TJpgDec 64 KB scratch 改为首次软解才分配。**禁止**再引入 `CONFIG_SCR_CAM_JPEG_HW`。
 - **Remote 视频面（scr_cam）+ CAMERA/VISION 页落地**（按 Remote 设计文档 §16 文件清单）：Camera WS 客户端（独立 `esp_websocket_client` 实例、`cam_monitor_task` 独占拨号、3 s 重拨节拍、Control 断链联动拆链）、`cam_frame.h` 20 B 头校验、esp_jpeg(TJpgDec) RGB565 解码、深度-1 pending + 3 帧槽最新帧环 + 一代延迟释放、10 Hz LVGL 泵；app_state 扩 cam/vision 字段组与告警槽；host 自测新增 `test_cam_frame` / `test_vision`
 - Camera WS URI 带端口 `CONFIG_SCR_CAM_STREAM_PORT`（默认 81，对齐网关 `s3_camera` 流实例；此前按 LLDD 表 12 拨 :80 永远连不上）
 - 暂停期 4 s keepalive ping：用 pong 采样本平面（Camera WS 自己那条连接）的 RTT 进 DIAG 页，并在串口打一行 `camera pong: rtt=..ms`，不开 CAMERA 页也能台架证明文本面往返通。**注意它不是续命租约**：`esp_http_server` 只在 socket 可读时进 handler，`recv_wait_timeout` 只是 accept 时设的 `SO_RCVTIMEO`，网关不会因入站静默回收空闲 WS 会话（此前 changelog 写的"守住网关入站超时否则单观众位被回收"是错的，已更正）
 
 ### 变更
+- **S3-gateway（S3-CAM）相关功能整体宏化，默认关闭**（新总开关 `CONFIG_SCR_S3GW_ENABLE`，默认 **n**）：遥控器的主链路是与 C6 的连接（控制/遥测/配对/OTA/诊断），所有涉及 S3-gateway 的功能统一收进「Camera / Vision」菜单并由总开关门控——关闭时 `scr_cam.c`、`ui_camera.c`、`ui_vision.c` 三个源文件连同 JPEG 解码依赖从构建中整体剔除，CAMERA/VISION 页、TAB 栏、HOME 页 CAM 徽标、RADIO 页 CAM link 行、DIAG 页 CAMERA/VISION 区块、控制面 `{"t":"vision"}`/`{"t":"drive_mode"}` JSON 处理、快照的 cam.stale/vision.fresh 计算全部编译排除（快照字段保留、恒为零值）。原 `SCR_CAM_WS_ENABLE` 降级为总开关下的视频面子开关。开启总开关后行为与此前完全一致；体积差约 52 KB
 - PROJECT_VER 升至 1.1.0（整车 1.1 基线，迎接 S3-CAM 替换 C6）
 - **视频档位改为遥控器固定 320×240 + FULLSCREEN ×2 放大，删除 640×480 选项**：手持机不再向网关要 VGA（订阅时仍声明 REMOTE_PREVIEW，清晰度留给手机网页 /stream），侧栏两个 profile 按钮换成一个 FULLSCREEN 切换——LVGL `lv_image_set_scale` 2x 最近邻放大（关抗锯齿）绕图心铺满 640×480 列（条带隐藏、TAB 常驻覆盖底部），同帧率同空口，画质略软是 QVGA 全速率换来的已接受取舍；1x 时绕回窗口态。全屏是本地缩放，不设链路门控；VISION 页保持 1:1（结果叠加层按帧像素坐标映射，缩放会错位）
 - **视频面解码提速 + 显示延迟减半**：esp_jpeg 弃用 ROM 固化的 TJpgDec（它对 RGB565 输出走逐像素 3→2 字节转换、哈夫曼无查表加速），改编译新版解码器——`JD_FASTDECODE=2` 表驱动哈夫曼（63 KB 工作区由 `scr_cam_start` 锁进内部 RAM，PSRAM 回退兜底，启动日志标注落位）+ `JD_FORMAT_RGB565` 原生 2 字节直写。CAMERA/VISION 页另立 33 ms 视频泵（`ui_camera_pump_video` / `ui_vision_pump_video`，帧槽 seq 门控让无新帧的 tick 零开销）：新帧平均 ~17 ms 上面板，替代原先最长 100 ms 的 UI tick 等待；NO SIGNAL 遮罩只在可见性边沿搬前景，30 Hz 空转不再搅动绘制顺序。`SCR_CAM_MAX_FPS` 显示上限 10→12，对齐传感器 QVGA 实际 ~11.5 fps

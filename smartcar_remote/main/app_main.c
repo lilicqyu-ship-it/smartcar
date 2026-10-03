@@ -14,6 +14,7 @@
 
 #include "esp_log.h"
 #include "esp_err.h"
+#include "esp_sleep.h"
 #include "nvs_flash.h"
 
 #include "bsp/esp-bsp.h"
@@ -22,9 +23,13 @@
 #include "scr_settings.h"
 #include "scr_link.h"
 #include "scr_ctrl.h"
+#if CONFIG_SCR_S3GW_ENABLE
 #include "scr_cam.h"
+#endif
 #include "scr_svc.h"
+#include "scr_power.h"
 #include "esp_heap_caps.h"
+#include "sdkconfig.h"
 #include "ui/ui.h"
 
 static const char *TAG = "scr_main";
@@ -69,6 +74,12 @@ void app_main(void)
 
     app_state_init();
     scr_settings_init();
+
+    /* deep-sleep wake = power on (BOOT key, scr_power.c): land it in the
+     * event ring so a bench log distinguishes cold boot from wake */
+    if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_EXT0) {
+        app_state_log(SCR_LOG_INFO, "Power on: BOOT key");
+    }
 
     scr_settings_t set;
     scr_settings_get(&set);
@@ -118,12 +129,17 @@ void app_main(void)
     scr_link_start();
     scr_ctrl_start();
     scr_svc_start();        /* core 0: OTA / diag / calibration (doc/08) */
+#if CONFIG_SCR_S3GW_ENABLE
     scr_cam_start();        /* core 0: Camera WS video plane (doc 08 §2) */
+#endif
 #endif
 
     /* UI runs in the LVGL task context: take the display lock while building */
     bsp_display_lock(0);
     ui_init();
+#if !CONFIG_SCR_BENCH_DISP_ONLY
+    scr_power_start();      /* LVGL context: idle -> countdown -> deep sleep */
+#endif
     bsp_display_unlock();
 
     ESP_LOGI(TAG, "heap after init: internal %u KB (min block %u KB), psram %u KB",

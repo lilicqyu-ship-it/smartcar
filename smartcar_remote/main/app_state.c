@@ -89,11 +89,15 @@ void app_state_snapshot(scr_state_t *out)
                        ((now - s_last_tele_ms) < CONFIG_SCR_TELE_TIMEOUT_MS);
     /* video: subscribed but no decodable frame inside the window -> STALE.
      * s_last_cam_frame_ms == 0 means "never received a frame since the
-     * subscription started", which is stale by the same rule. */
+     * subscription started", which is stale by the same rule.  Both planes
+     * are S3-gateway features: with CONFIG_SCR_S3GW_ENABLE=n they stay
+     * zero/false forever (memset above). */
+#if CONFIG_SCR_S3GW_ENABLE
     out->cam.stale   = out->cam.subscribed &&
                        ((now - s_last_cam_frame_ms) > CONFIG_SCR_CAM_FRAME_TIMEOUT_MS);
     out->vision.fresh = (s_last_vision_ms != 0) &&
                         ((now - s_last_vision_ms) < CONFIG_SCR_VISION_STALE_MS);
+#endif
     xSemaphoreGive(s_mtx);
 }
 
@@ -264,6 +268,13 @@ void app_state_set_cam_stats(uint8_t fps_x10, uint16_t decode_ms_max, uint16_t e
     s_state.cam.fps_x10 = fps_x10;
     s_state.cam.decode_ms_max = decode_ms_max;
     s_state.cam.e2e_ms = e2e_ms;
+    xSemaphoreGive(s_mtx);
+}
+
+void app_state_set_cam_jpeg_simd(bool on)
+{
+    xSemaphoreTake(s_mtx, portMAX_DELAY);
+    s_state.cam.jpeg_simd = on;
     xSemaphoreGive(s_mtx);
 }
 

@@ -115,16 +115,24 @@ CONFIG_LV_FONT_MONTSERRAT_48=y
 CONFIG_LV_USE_CUSTOM_MALLOC=y
 
 # ---- Camera WS video plane ---------------------------------------------------
+# S3-gateway (S3-CAM) video/vision plane: DEFAULT OFF.  The remote's primary
+# link is the C6 (control / telemetry / pairing / OTA); with the master off,
+# scr_cam, the CAMERA/VISION pages and the vision JSON all compile out.
+# Flip to y only when a camera-equipped S3-gateway joins the vehicle.
+# CONFIG_SCR_S3GW_ENABLE is not set
 # Sensor QVGA delivers ~11.5 fps; the display cap must not clamp the honest
 # reading to 10.0 (CONFIG only - the Kconfig default stays a conservative 10).
 CONFIG_SCR_CAM_MAX_FPS=12
 
-# ---- JPEG decoder (esp_jpeg / TJpgDec) ----------------------------------------
-# The ROM's frozen TJpgDec converts every pixel RGB888->RGB565 and has no fast
-# huffman.  Compile the newer decoder: native RGB565 output (2-byte direct
-# writes instead of a per-pixel 3->2 conversion) + table-driven huffman
-# (JD_FASTDECODE=2, wants the 64 KB scratch pad scr_cam allocates for it).
-# QVGA decode on the bench: ~100 ms -> ~35 ms.
+# ---- JPEG decoder -------------------------------------------------------------
+# ESP32-S3 has no JPEG decode peripheral.  Primary path is esp_new_jpeg
+# (S3 PIE SIMD, RGB565_LE, 16-byte-aligned slot buffers).  Espressif bench:
+# 320x240 YUV420 -> RGB565_LE ~66 fps (~15 ms), under the 25 ms budget.
+# TJpgDec stays as fallback (~35 ms QVGA on this board).
+CONFIG_SCR_CAM_JPEG_SIMD=y
+# Fallback TJpgDec: native RGB565 + table huffman.  Scratch is allocated
+# lazily on the first software decode so a healthy SIMD path does not spend
+# 64 KB of internal RAM.
 # CONFIG_JD_USE_ROM is not set
 CONFIG_JD_FORMAT_RGB565=y
 CONFIG_JD_FASTDECODE_TABLE=y

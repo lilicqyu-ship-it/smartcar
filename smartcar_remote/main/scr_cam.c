@@ -17,9 +17,13 @@
 #include "esp_timer.h"
 #include "esp_heap_caps.h"
 #include "esp_websocket_client.h"
-#include "jpeg_decoder.h"
-#include "cJSON.h"
 #include "sdkconfig.h"
+#include "jpeg_decoder.h"
+#ifdef CONFIG_SCR_CAM_JPEG_SIMD
+#include "esp_jpeg_dec.h"
+#include "esp_jpeg_common.h"
+#endif
+#include "cJSON.h"
 
 #include "app_state.h"
 #include "scr_cam.h"
@@ -48,9 +52,16 @@ static const char *TAG = "scr_cam";
 #endif
 
 #define MAX_SLOT_PX         (640u * 480u)   /* decode budget: 614 KB RGB565    */
+#define JPEG_SIMD_FAIL_MAX  3u              /* consecutive SIMD errors -> SW   */
+#if CONFIG_JD_FASTDECODE == 2
+#define JPEG_WS_SIZE        65472
+#else
+#define JPEG_WS_SIZE        8192
+#endif
 
 typedef struct {
-    uint8_t  *rgb;          /* PSRAM, w*h*2 bytes                              */
+    uint8_t  *rgb;          /* PSRAM RGB565, 16-byte aligned when SIMD         */
+    size_t    cap;          /* allocated bytes (MCU-padded when SIMD)          */
     uint32_t  seq;          /* frame seq this slot holds (0 = empty)           */
     uint16_t  w, h;
 } slot_t;
@@ -73,7 +84,7 @@ typedef struct {
 
     /* Latest-only pending frame, depth 1, double buffered: the WS task fills
      * pend[pend_idx] while the decoder swaps ownership under pend_mtx and
-     * decodes the other buffer, so esp_jpeg_decode never reads bytes being written. */
+     * decodes the other buffer, so the decoder never reads bytes being written. */
     uint8_t *pend[2];
     int      pend_idx;
     size_t   pend_len;                /* bytes in pend[pend_idx], 0 = empty    */
@@ -97,9 +108,17 @@ typedef struct {
     int64_t  e2e_base_ms;             /* local_ms - gateway_ts, learned/frame  */
     int64_t  stat_tick_ms;
 
-    /* esp_jpeg 1.x is stateless (TJpgDec); it wants a static scratch pad */
-    uint8_t *jpeg_ws;                 /* working buffer, NULL = per-call alloc  */
+    /* TJpgDec scratch: allocated lazily on the first software decode so a
+     * healthy SIMD path does not park 64 KB in internal RAM. */
+    uint8_t *jpeg_ws;
     size_t   jpeg_ws_size;
+#ifdef CONFIG_SCR_CAM_JPEG_SIMD
+    jpeg_dec_handle_t simd;           /* NULL = engine never came up / reset   */
+    uint8_t *simd_in;                 /* 16-byte aligned JPEG copy             */
+    size_t   simd_in_cap;
+    uint8_t  simd_fail;               /* consecutive jpeg_dec_process fails    */
+    bool     simd_live;               /* false after JPEG_SIMD_FAIL_MAX        */
+#endif
     bool    degraded;                 /* PSRAM alloc failed: paused, no retry  */
 } cam_t;
 
@@ -120,8 +139,15 @@ static int64_t now_ms(void)
 static void slots_release(slot_t *ring)
 {
     for (int i = 0; i < CONFIG_SCR_CAM_SLOTS; i++) {
-        heap_caps_free(ring[i].rgb);
+        if (ring[i].rgb != NULL) {
+#ifdef CONFIG_SCR_CAM_JPEG_SIMD
+            jpeg_free_align(ring[i].rgb);
+#else
+            heap_caps_free(ring[i].rgb);
+#endif
+        }
         ring[i].rgb = NULL;
+        ring[i].cap = 0;
         ring[i].seq = 0;
         ring[i].w = 0;
         ring[i].h = 0;
@@ -135,15 +161,17 @@ static bool slots_ensure(uint16_t w, uint16_t h)
     if (s_cam.slot_w == w && s_cam.slot_h == h && s_cam.slot[0].rgb != NULL) {
         return true;
     }
-    size_t need = (size_t)w * h * 2u;
-    if (need == 0 || (size_t)w * h > MAX_SLOT_PX) {
+    size_t vis = (size_t)w * h * 2u;
+    if (vis == 0 || (size_t)w * h > MAX_SLOT_PX) {
         return false;
     }
+    size_t need = vis;
     xSemaphoreTake(s_cam.slot_mtx, portMAX_DELAY);
     slots_release(s_retire);            /* previous generation now unreachable */
     for (int i = 0; i < CONFIG_SCR_CAM_SLOTS; i++) {
         s_retire[i] = s_cam.slot[i];
         s_cam.slot[i].rgb = NULL;
+        s_cam.slot[i].cap = 0;
         s_cam.slot[i].seq = 0;
     }
     s_cam.display_idx = -1;
@@ -151,9 +179,20 @@ static bool slots_ensure(uint16_t w, uint16_t h)
 
     bool ok = true;
     for (int i = 0; i < CONFIG_SCR_CAM_SLOTS && ok; i++) {
+#ifdef CONFIG_SCR_CAM_JPEG_SIMD
+        /* PIE SIMD faults if RGB565 is not 16-byte aligned; pad to 16x16 MCUs. */
+        uint16_t aw = (uint16_t)((w + 15u) & ~15u);
+        uint16_t ah = (uint16_t)((h + 15u) & ~15u);
+        need = (size_t)aw * ah * 2u;
+        s_cam.slot[i].rgb = jpeg_calloc_align(need, 16);
+        s_cam.slot[i].cap = need;
+#else
         s_cam.slot[i].rgb = heap_caps_malloc(need, MALLOC_CAP_SPIRAM);
+        s_cam.slot[i].cap = need;
+#endif
         if (s_cam.slot[i].rgb == NULL) {
             ok = false;
+            s_cam.slot[i].cap = 0;
         }
         s_cam.slot[i].w = w;
         s_cam.slot[i].h = h;
@@ -195,6 +234,103 @@ const uint8_t *scr_cam_display_acquire(uint16_t *w, uint16_t *h, uint32_t *seq)
 }
 
 /* ---- decode ------------------------------------------------------------------*/
+static bool jpeg_ws_ensure(void)
+{
+    if (s_cam.jpeg_ws != NULL) {
+        return true;
+    }
+    s_cam.jpeg_ws_size = JPEG_WS_SIZE;
+    s_cam.jpeg_ws = heap_caps_malloc(s_cam.jpeg_ws_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    const char *where = "internal RAM";
+    if (s_cam.jpeg_ws == NULL) {
+        s_cam.jpeg_ws = heap_caps_malloc(s_cam.jpeg_ws_size, MALLOC_CAP_8BIT);
+        where = "PSRAM";
+    }
+    if (s_cam.jpeg_ws == NULL) {
+        s_cam.jpeg_ws_size = 0;
+        return false;
+    }
+    ESP_LOGI(TAG, "jpeg SW scratch %u KB in %s (fastdecode=%d)",
+             (unsigned)(s_cam.jpeg_ws_size / 1024), where, CONFIG_JD_FASTDECODE);
+    return true;
+}
+
+static bool decode_sw(const uint8_t *jpg, uint32_t jpeg_len, uint8_t *out, size_t vis)
+{
+    if (!jpeg_ws_ensure()) {
+        return false;
+    }
+    esp_jpeg_image_cfg_t cfg = {
+        .indata       = (uint8_t *)jpg,
+        .indata_size  = jpeg_len,
+        .outbuf       = out,
+        .outbuf_size  = (uint32_t)vis,
+        .out_format   = JPEG_IMAGE_FORMAT_RGB565,
+        .out_scale    = JPEG_IMAGE_SCALE_0,
+        /* NO swap: JD_FORMAT=1 stores native LE uint16 = LVGL RGB565.
+         * swap_color_bytes=1 produced the bench colour mosaic (10-02). */
+        .flags.swap_color_bytes = 0,
+        .advanced.working_buffer      = s_cam.jpeg_ws,
+        .advanced.working_buffer_size = s_cam.jpeg_ws_size,
+    };
+    esp_jpeg_image_output_t info = {0};
+    if (esp_jpeg_decode(&cfg, &info) != ESP_OK) {
+        return false;
+    }
+    return info.output_len == vis;
+}
+
+#ifdef CONFIG_SCR_CAM_JPEG_SIMD
+/* 1 = decoded, 0 = codec rejected a parseable JPEG (counts toward disable),
+ * -1 = skip (engine down / truncated header) — do not punish SIMD. */
+static int decode_simd(const uint8_t *jpg, uint32_t jpeg_len, uint8_t *out, size_t cap, size_t vis)
+{
+    if (!s_cam.simd_live || s_cam.simd == NULL || s_cam.simd_in == NULL) {
+        return -1;
+    }
+    if (jpeg_len == 0u || jpeg_len > s_cam.simd_in_cap || cap < vis) {
+        return -1;
+    }
+    /* WS payload sits 20 B into an unaligned PSRAM buffer; PIE wants 16-align. */
+    memcpy(s_cam.simd_in, jpg, jpeg_len);
+    jpeg_dec_io_t io = {
+        .inbuf = s_cam.simd_in,
+        .inbuf_len = (int)jpeg_len,
+        .outbuf = out,
+        .out_size = (int)cap,
+    };
+    jpeg_dec_header_info_t info = {0};
+    if (jpeg_dec_parse_header(s_cam.simd, &io, &info) != JPEG_ERR_OK) {
+        return -1;
+    }
+    int need = 0;
+    if (jpeg_dec_get_outbuf_len(s_cam.simd, &need) != JPEG_ERR_OK ||
+        need <= 0 || (size_t)need > cap) {
+        return 0;
+    }
+    io.out_size = need;
+    if (jpeg_dec_process(s_cam.simd, &io) != JPEG_ERR_OK) {
+        return 0;
+    }
+    (void)vis;
+    return 1;
+}
+
+static void jpeg_simd_note_fail(void)
+{
+    if (!s_cam.simd_live) {
+        return;
+    }
+    s_cam.simd_fail++;
+    if (s_cam.simd_fail >= JPEG_SIMD_FAIL_MAX) {
+        s_cam.simd_live = false;
+        app_state_set_cam_jpeg_simd(false);
+        ESP_LOGW(TAG, "jpeg SIMD disabled after %u fails, TJpgDec until next hello",
+                 (unsigned)s_cam.simd_fail);
+    }
+}
+#endif
+
 /* buf points at a whole reassembled WS frame (header + JPEG) that the caller
  * exclusively owns; hdr is its parsed header. */
 static void decode_frame(const uint8_t *buf, const cam_frame_hdr_t *hdr)
@@ -233,31 +369,33 @@ static void decode_frame(const uint8_t *buf, const cam_frame_hdr_t *hdr)
         return;
     }
     uint8_t *out = s_cam.slot[tgt].rgb;
-    size_t cap = (size_t)hdr->width * hdr->height * 2u;
+    size_t cap = s_cam.slot[tgt].cap;
     xSemaphoreGive(s_cam.slot_mtx);
 
-    esp_jpeg_image_cfg_t cfg = {
-        .indata       = (uint8_t *)jpg,
-        .indata_size  = hdr->jpeg_len,
-        .outbuf       = out,
-        .outbuf_size  = (uint32_t)cap,
-        .out_format   = JPEG_IMAGE_FORMAT_RGB565,
-        .out_scale    = JPEG_IMAGE_SCALE_0,
-        /* NO swap: with JD_FORMAT=1 TJpgDec stores each pixel as a native
-         * (little-endian) uint16, exactly LVGL's LV_COLOR_FORMAT_RGB565, and
-         * the panel has no swap_bytes.  swap_color_bytes=1 made the words
-         * big-endian -> the "colour mosaic" on the bench (host-verified 10-02:
-         * same JPEG, unswapped = reference image, swapped = mosaic). */
-        .flags.swap_color_bytes = 0,
-        .advanced.working_buffer      = s_cam.jpeg_ws,
-        .advanced.working_buffer_size = s_cam.jpeg_ws_size,
-    };
-    esp_jpeg_image_output_t info = {0};
-    esp_err_t err = esp_jpeg_decode(&cfg, &info);
-    int out_size = (err == ESP_OK) ? (int)info.output_len : -1;
+    size_t vis = (size_t)hdr->width * hdr->height * 2u;
+    if (out == NULL || cap < vis) {
+        s_cam.cnt_decode_err++;
+        return;
+    }
+
+    bool ok = false;
+#ifdef CONFIG_SCR_CAM_JPEG_SIMD
+    int simd = decode_simd(jpg, hdr->jpeg_len, out, cap, vis);
+    if (simd > 0) {
+        s_cam.simd_fail = 0;
+        ok = true;
+    } else {
+        if (simd == 0) {
+            jpeg_simd_note_fail();
+        }
+        ok = decode_sw(jpg, hdr->jpeg_len, out, vis);
+    }
+#else
+    ok = decode_sw(jpg, hdr->jpeg_len, out, vis);
+#endif
     int64_t dt = now_ms() - t0;
 
-    if (err != 0 || out_size <= 0 || (size_t)out_size != cap) {
+    if (!ok) {
         xSemaphoreTake(s_cam.slot_mtx, portMAX_DELAY);
         s_cam.slot[tgt].seq = 0;            /* poison: never display a torn slot */
         xSemaphoreGive(s_cam.slot_mtx);
@@ -326,6 +464,13 @@ static void cam_handle_text(const char *data, int len)
                      cJSON_IsString(sensor) ? sensor->valuestring : "?",
                      (unsigned)(cJSON_IsNumber(pw) ? pw->valuedouble : 0),
                      (unsigned)(cJSON_IsNumber(ph) ? ph->valuedouble : 0));
+#ifdef CONFIG_SCR_CAM_JPEG_SIMD
+            if (s_cam.simd != NULL) {
+                s_cam.simd_fail = 0;
+                s_cam.simd_live = true;
+                app_state_set_cam_jpeg_simd(true);
+            }
+#endif
         }
         s_cam.degraded = false;             /* gateway re-announced: retry budget */
     }
@@ -607,13 +752,19 @@ static void push_stats_1hz(void)
     static uint8_t trace_div;
     if (++trace_div % 2 == 0 && (s_cam.want_stream || win != 0u)) {
         ESP_LOGI(TAG, "cam want=%d %u.%ufps win=%u seq=%u drop=%u ferr=%u derr=%u "
-                      "dec=%ums e2e=%ums rtt=%ums",
+                      "dec=%ums %s e2e=%ums rtt=%ums",
                  s_cam.want_stream ? 1 : 0,
                  (unsigned)(fps_x10 / 10u), (unsigned)(fps_x10 % 10u),
                  (unsigned)win, (unsigned)s_cam.seq_last,
                  (unsigned)s_cam.cnt_drop, (unsigned)s_cam.cnt_frame_err,
                  (unsigned)s_cam.cnt_decode_err,
-                 (unsigned)s_cam.win_decode_ms_max, (unsigned)s_cam.e2e_ms,
+                 (unsigned)s_cam.win_decode_ms_max,
+#ifdef CONFIG_SCR_CAM_JPEG_SIMD
+                 s_cam.simd_live ? "simd" : "sw",
+#else
+                 "sw",
+#endif
+                 (unsigned)s_cam.e2e_ms,
                  (unsigned)s_cam.last_rtt_ms);
     }
 
@@ -744,31 +895,36 @@ void scr_cam_start(void)
         return;
     }
 
-    /* TJpgDec (esp_jpeg 1.x) needs a scratch pad it can address directly.
-     * Table-mode huffman (JD_FASTDECODE=2, sdkconfig.defaults) wants the full
-     * 64 KB esp_jpeg work area in INTERNAL RAM: the huffman LUTs are the hot
-     * path and PSRAM latency would eat the speedup.  Fall back to PSRAM
-     * (slower but working) rather than dropping video on a fragmented heap. */
-#if CONFIG_JD_FASTDECODE == 2
-#define JPEG_WS_SIZE 65472
+#ifdef CONFIG_SCR_CAM_JPEG_SIMD
+    /* S3 has no JPEG decode IP (that is P4/S31 driver/jpeg_decode.h).  PIE SIMD
+     * in esp_new_jpeg is the chip-specific accelerator. */
+    jpeg_dec_config_t jcfg = DEFAULT_JPEG_DEC_CONFIG();
+    jcfg.output_type = JPEG_PIXEL_FORMAT_RGB565_LE;
+    if (jpeg_dec_open(&jcfg, &s_cam.simd) != JPEG_ERR_OK) {
+        s_cam.simd = NULL;
+        ESP_LOGW(TAG, "jpeg SIMD engine unavailable, TJpgDec only");
+    } else {
+        s_cam.simd_in = jpeg_calloc_align(CONFIG_SCR_CAM_MAX_JPEG_BYTES, 16);
+        s_cam.simd_in_cap = CONFIG_SCR_CAM_MAX_JPEG_BYTES;
+        if (s_cam.simd_in == NULL) {
+            (void)jpeg_dec_close(s_cam.simd);
+            s_cam.simd = NULL;
+            ESP_LOGW(TAG, "jpeg SIMD input buffer alloc failed, TJpgDec only");
+        } else {
+            s_cam.simd_live = true;
+            app_state_set_cam_jpeg_simd(true);
+            ESP_LOGI(TAG, "jpeg SIMD engine up (in %u KB aligned)",
+                     (unsigned)(s_cam.simd_in_cap / 1024));
+        }
+    }
+    if (!s_cam.simd_live) {
+        app_state_set_cam_jpeg_simd(false);
+    }
 #else
-#define JPEG_WS_SIZE 8192
+    app_state_set_cam_jpeg_simd(false);
 #endif
-    s_cam.jpeg_ws_size = JPEG_WS_SIZE;
-    s_cam.jpeg_ws = heap_caps_malloc(s_cam.jpeg_ws_size, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
-    bool jpeg_ws_internal = s_cam.jpeg_ws != NULL;
-    if (s_cam.jpeg_ws == NULL) {
-        s_cam.jpeg_ws = heap_caps_malloc(s_cam.jpeg_ws_size, MALLOC_CAP_8BIT);
-    }
-    if (s_cam.jpeg_ws == NULL) {
-        app_state_log(SCR_LOG_WARN, "CAM: jpeg working buffer alloc failed");
-        s_cam.degraded = true;
-        return;
-    }
-    ESP_LOGI(TAG, "jpeg scratch %u KB in %s (fastdecode=%d)",
-             (unsigned)(s_cam.jpeg_ws_size / 1024),
-             jpeg_ws_internal ? "internal RAM" : "PSRAM",
-             CONFIG_JD_FASTDECODE);
+    /* TJpgDec scratch is allocated on the first software decode so a healthy
+     * SIMD path does not park 64 KB in internal RAM. */
 
     if (xTaskCreatePinnedToCore(cam_monitor_task, "scr_cam", 6144, NULL, 4, NULL, 0) != pdPASS ||
         xTaskCreatePinnedToCore(decode_task, "cam_decode", 8192, NULL, 4, NULL, 0) != pdPASS) {

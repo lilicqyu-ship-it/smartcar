@@ -76,6 +76,13 @@ static void guard_timer_cb(void *arg)
     {
         ESP_LOGW(TAG, "heap watermark low: %u", (unsigned)s_app.heap_min);
     }
+    /* TEMP A/B probe: TRY_ALLOCATE_WIFI_LWIP decision evidence (doc/22
+     * review) - default free / running min / internal largest, 10 s cadence.
+     * Strip with the A/B verdict. */
+    ESP_LOGI(TAG, "heapab: int_free=%u int_min=%u int_largest=%u",
+             (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_minimum_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 }
 
 /* ---- deferred rollback confirmation (LLDD 4.1 / 4.7 / 4.10) ------------------- */

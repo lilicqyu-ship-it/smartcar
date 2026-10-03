@@ -169,14 +169,14 @@ offset  size  field        校验规则
 
 ### 5.1 解码器选择
 
-ESP32-S3 无 JPEG 硬解，采用 `esp_jpeg` 1.x（TJpgDec 封装，IDF 组件管理引入；初稿写的 `esp_new_jpeg` 是 2.x 的另一套 API，锁 1.3.x 后按此回写，见 §12）：
+ESP32-S3 **没有 JPEG 解码外设**（该 IP 在 P4/S31，对应 IDF `driver/jpeg_decode.h` / `SOC_JPEG_DECODE_SUPPORTED`；在本芯片上把硬解编进去等于死代码）。本板可挖的是 **S3 PIE SIMD**：默认走 `espressif/esp_new_jpeg`（`esp_jpeg_dec.h`）输出 RGB565_LE，输入拷进 16 字节对齐缓冲；`cam_decode` 仍在核 0，WS 回调里仍然禁止解码。`esp_jpeg` 1.x（TJpgDec）保留为回退：截断帧、`jpeg_dec_process` 失败、或连续 3 次 SIMD 失败后直到下一次 `cam_hello`。Kconfig：`CONFIG_SCR_CAM_JPEG_SIMD`（**不要** `depends on SOC_JPEG_DECODE_SUPPORTED`）。
 
 | 项 | 口径 |
 |---|---|
-| 输入 | `JPEG_IMAGE_FORMAT_RGB565` + `swap_color_bytes` 直接输出，一次解码整帧 |
-| 320×240 耗时 | 实测基线目标 ≤25 ms/帧（240 MHz、释放 RGB 交织）；10 fps 占空 ≤25%，core 0 可承受 |
-| 内存 | 解码输出 buffer（帧槽）与 JPEG 输入槽一律 `MALLOC_CAP_SPIRAM`（内部 RAM 已被 Wi-Fi/lwIP/DMA 专属，08 §2.2 教训）；TJpgDec scratch ≈8 KB 单独分配、优先内部 RAM |
-| 失败帧 | 截断 JPEG（丢包产物）：`esp_jpeg_decode` 返回错误 → 计 `decode_err`，保留上一帧显示并尽快按 stale 处理，**不崩帧管线** |
+| 输入 | SIMD：`JPEG_PIXEL_FORMAT_RGB565_LE`（小端，对齐 LVGL / TJpgDec `swap_color_bytes=0`） |
+| 320×240 耗时 | TJpgDec 台架 ~35 ms（超 ≤25 ms 预算）；Espressif `esp_new_jpeg` 标称 QVGA RGB565_LE ~15 ms（约 66 fps 当量），以 DIAG `decode_ms` + `simd/sw` 为准 |
+| 内存 | 显示槽与 SIMD 输入：`jpeg_calloc_align(..., 16)`；TJpgDec scratch 64 KB **首次软解才分配**，优先内部 RAM |
+| 失败帧 | SIMD 失败则同帧改走 TJpgDec；两边都失败 → 计 `decode_err`，保留上一帧，**不崩管线** |
 
 ### 5.2 帧槽模型（latest-only，LLDD Table 15 的 Remote 侧兑现）
 
@@ -391,6 +391,7 @@ menu "Camera / Vision (S3-CAM video plane)"
   config SCR_CAM_FRAME_TIMEOUT_MS int    "帧级 stale 阈值"         default 2000   range 500..10000
   config SCR_CAM_RX_WATCHDOG_MS   int    "Camera WS 静默重连"      default 10000  range 3000..60000
   config SCR_CAM_SLOTS            int    "最新帧槽环数量"           default 3      range 2..4
+  config SCR_CAM_JPEG_SIMD        bool   "S3 PIE SIMD（esp_new_jpeg）" default y
   config SCR_CAM_OVERLAY          bool   "VISION 页画面叠加"        default y
   config SCR_VISION_STALE_MS      int    "视觉结果过期阈值"         default 1000   range 200..5000
 endmenu
@@ -405,7 +406,7 @@ endmenu
 - 新增 `SCR_CAM_SLOTS` 与 `SCR_CAM_PROFILE` choice（档位可切换 + 首选档位）。
 - `SCR_CAM_MAX_JPEG_BYTES` 与 `contracts/camera/cam_frame.h` 的 `CAM_JPEG_LEN_MAX` 保持等值（协议天花板 65536）。
 
-解码组件：`esp_jpeg` 锁定 **1.x**（`main/idf_component.yml: espressif/esp_jpeg "^1.3.0"`），其实为 TJpgDec 封装，`esp_jpeg_decode()` 无状态调用、需 ≤8 KB 内部 RAM scratch（scr_cam 启动时一次性分配，失败回退 per-call 分配）；RGB565 输出 `swap_color_bytes=1` 对齐 LVGL 小端序。
+解码组件：主路径 `esp_new_jpeg`（S3 PIE SIMD，`CONFIG_SCR_CAM_JPEG_SIMD`）。**不要**使用 `esp_driver_jpeg` / `SOC_JPEG_DECODE_SUPPORTED`（P4/S31）。回退仍锁定 `esp_jpeg` **1.x**（`espressif/esp_jpeg "^1.3.0"`，TJpgDec）；scratch 在首次软解时分配（FASTDECODE=2 时 64 KB，优先内部 RAM）。RGB565 小端：SIMD `JPEG_PIXEL_FORMAT_RGB565_LE`，软解 `swap_color_bytes=0`。
 
 ## 13. 网关侧依赖清单（本设计成立的前置，交付给 s3-gateway）
 
@@ -465,7 +466,7 @@ smartcar_remote/main/ui/ui.c        底部三 TAB（仅视频页可见）+ 页�
 smartcar_remote/main/ui/ui_home.c   顶栏 CAM 徽标（三态 + 点击进入 CAMERA）
 smartcar_remote/main/ui/ui_pages.c  Diagnostics "CAMERA / VISION" 段 + Radio CAM link 行
 smartcar_remote/main/Kconfig.projbuild  §12 menu（实装口径）
-smartcar_remote/main/idf_component.yml  espressif/esp_jpeg "^1.3.0"
+smartcar_remote/main/idf_component.yml  espressif/esp_new_jpeg "^0.6.1" + espressif/esp_jpeg "^1.3.0"
 smartcar_remote/test/host/          cam_frame / vision builders host 自测（make check）
 ```
 

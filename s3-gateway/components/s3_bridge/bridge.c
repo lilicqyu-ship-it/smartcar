@@ -11,6 +11,8 @@
 #include "esp_task_wdt.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
+
+#include "camera_stream.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -159,6 +161,12 @@ esp_err_t bridge_post_cmd(const proto_frame_t *f, int sd)
     if (f == NULL)
     {
         return ESP_ERR_INVALID_ARG;
+    }
+    /* every accepted DRIVE frame is the drive-activity beacon (doc/22): the
+     * camera plane locks to REMOTE_PREVIEW while it is fresh */
+    if (f->cmd == PROTO_CMD_DRIVE)
+    {
+        camera_set_drive_heartbeat();
     }
     if (s_br.q_cmd == NULL)
     {

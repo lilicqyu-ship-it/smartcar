@@ -181,6 +181,7 @@ typedef struct {
         uint32_t     frame_err;     /* header-level rejects                 */
         uint32_t     decode_err;    /* JPEG decode failures                 */
         uint16_t     decode_ms_max; /* windowed max decode time             */
+        bool         jpeg_simd;     /* true while esp_new_jpeg SIMD is live */
         uint16_t     e2e_ms;        /* now - frame TIMESTAMP_MS, smoothed   */
         uint16_t     ping_rtt_ms;   /* camera-plane text ping -> pong RTT   */
         bool         stale;         /* snapshot-time: subscribed but no frame */
@@ -253,6 +254,7 @@ void app_state_set_cam_conn(scr_cam_conn_t c);
 void app_state_set_cam_subscribed(bool on);
 void app_state_set_cam_hello(const char *sensor, uint16_t w, uint16_t h);
 void app_state_set_cam_stats(uint8_t fps_x10, uint16_t decode_ms_max, uint16_t e2e_ms);
+void app_state_set_cam_jpeg_simd(bool on);
 void app_state_set_cam_rtt(uint16_t rtt_ms);
 void app_state_set_cam_counters(uint32_t seq, uint32_t drop,
                                 uint32_t frame_err, uint32_t decode_err);

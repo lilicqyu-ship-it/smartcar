@@ -9,6 +9,7 @@ dependencies:
   # JSON control plane (hello/tc/pong/err, /api/pair).  IDF 6.x moved the
   # 'json' component into the registry.
   espressif/cjson: "^1.7.0"
-  # Software JPEG decode for the Camera WS preview plane (scr_cam).
-  # ESP32-S3 has no JPEG hardware codec; RGB565 output, PSRAM buffers.
+  # Primary Camera WS decoder on ESP32-S3: PIE SIMD (no JPEG peripheral on
+  # this chip).  TJpgDec remains the per-frame fallback.
+  espressif/esp_new_jpeg: "^0.6.1"
   espressif/esp_jpeg: "^1.3.0"

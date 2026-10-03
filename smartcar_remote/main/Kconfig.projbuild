@@ -106,14 +106,31 @@ menu "smartcar_remote"
             still ed25519-verified on-target. Production MUST set n together
             with C6_OTA_NO_AUTH=n.
 
-    menu "Camera / Vision (S3-CAM video plane)"
+    menu "Camera / Vision (S3-gateway / S3-CAM plane, off = C6-only remote)"
+
+        config SCR_S3GW_ENABLE
+            bool "S3-gateway video/vision plane (CAMERA + VISION)"
+            default n
+            help
+                Master switch for EVERY remote feature that talks to the
+                S3-gateway (S3-CAM board): the /ws/camera video plane
+                (scr_cam), the CAMERA + VISION pages, and the {"t":"vision"} /
+                {"t":"drive_mode"} text handled on the control plane (produced
+                by the S3-gateway's vision component and relayed by the C6).
+                The remote's primary link is the C6 - control, telemetry,
+                pairing, OTA and diagnostics all live there and stay fully
+                functional with this off.  Enable only when a camera-equipped
+                S3-gateway is part of the vehicle.
+
+        if SCR_S3GW_ENABLE
 
         config SCR_CAM_WS_ENABLE
             bool "Camera WS client (/ws/camera preview plane)"
             default y
             help
-                Master compile switch for scr_cam. Off = the remote never
-                touches the video plane; control/telemetry/OTA unaffected.
+                Video-plane switch under SCR_S3GW_ENABLE. Off = the remote
+                never touches the video plane; control/telemetry/OTA
+                unaffected.
 
         config SCR_CAM_STREAM_PORT
             int "Camera WS TCP port (gateway stream httpd)"
@@ -175,6 +192,18 @@ menu "smartcar_remote"
                 >= 3 so the LVGL-displayed slot is never written into while
                 the decoder targets a second slot (doc: 3-slot ring).
 
+        config SCR_CAM_JPEG_SIMD
+            bool "ESP32-S3 SIMD JPEG (esp_new_jpeg), TJpgDec fallback"
+            default y
+            help
+            ESP32-S3 has no JPEG decode peripheral (that IP is on P4/S31;
+            driver/jpeg_decode.h / SOC_JPEG_DECODE_SUPPORTED must never be
+            used on this target — the symbol is dead here).  Primary decode
+            uses espressif/esp_new_jpeg with S3 PIE SIMD and 16-byte-aligned
+            RGB565_LE buffers.  A bad frame falls back to esp_jpeg/TJpgDec;
+            three consecutive SIMD errors disable it until the next cam_hello.
+            Off = TJpgDec only.
+
         config SCR_CAM_OVERLAY
             bool "Draw vision overlay on the VISION page video"
             default y
@@ -186,6 +215,38 @@ menu "smartcar_remote"
             help
                 {"t":"vision"} older than this -> STALE, ASSIST falls back
                 to MANUAL on screen (S3CAM LLDD 13.4 / Table 21 row 4).
+
+        endif
+
+    endmenu
+
+    menu "Auto power-off (inactivity deep sleep)"
+
+        config SCR_AUTO_OFF_ENABLE
+            bool "Auto power-off after touch inactivity (deep sleep)"
+            default y
+            help
+                No touch for SCR_AUTO_OFF_IDLE_MIN minutes -> full-screen
+                countdown for SCR_AUTO_OFF_WARN_S seconds; any touch cancels
+                and restarts the idle clock; at zero the remote latches a
+                vehicle STOP, kills the backlight and enters deep sleep.  This
+                board has no soft power latch and no touch INT line, so the
+                wake source is the BOOT button (GPIO0, ext0 low level) and a
+                deep-sleep wake reboots through the normal boot path.  The
+                watchdog also pauses while a C6/TC275 OTA transfer runs.
+
+        config SCR_AUTO_OFF_IDLE_MIN
+            int "Touch inactivity before auto power-off, minutes"
+            default 5
+            range 1 120
+
+        config SCR_AUTO_OFF_WARN_S
+            int "Pre-off warning countdown, seconds"
+            default 15
+            range 5 60
+            help
+                Must stay well below the idle timeout: the countdown begins
+                at (timeout - warn).
 
     endmenu
 

@@ -35,7 +35,9 @@
 #include "scr_ctrl.h"
 #include "scr_svc.h"
 #include "proto/proto_frames.h"
+#if CONFIG_SCR_S3GW_ENABLE
 #include "proto/vision.h"
+#endif
 
 #define MON_PERIOD_MS       250     /* monitor task tick            */
 
@@ -67,6 +69,7 @@ typedef struct {
     uint32_t prev_seq;
     bool     prev_valid;
     uint16_t lat_min, lat_max;
+    uint16_t lat_last;                      /* TEMP A/B probe */
 } link_t;
 
 static link_t s_link;
@@ -178,7 +181,9 @@ static void ws_apply_hello(const cJSON *root)
 
 /* {"t":"vision",...} gateway result push (contracts/vision/vision.h units).
  * Non-safety data (design R-ADR-04): consumed into app_state for display only;
- * the control loop never reads it. */
+ * the control loop never reads it.  S3-gateway plane: compiled out entirely
+ * when CONFIG_SCR_S3GW_ENABLE=n (C6-only remote). */
+#if CONFIG_SCR_S3GW_ENABLE
 static void ws_handle_vision(const cJSON *root)
 {
     const cJSON *m = cJSON_GetObjectItem(root, VISION_F_MODE);
@@ -231,6 +236,7 @@ static void ws_handle_vision(const cJSON *root)
     }
     app_state_set_vision_result(&v);
 }
+#endif /* CONFIG_SCR_S3GW_ENABLE */
 
 static void ws_handle_text(const char *data, int len)
 {
@@ -252,6 +258,7 @@ static void ws_handle_text(const char *data, int len)
                 int64_t rtt = now_ms() - s_link.ping_sent_ms;
                 if (rtt >= 0 && rtt < 60000) {
                     app_state_set_latency((uint16_t)rtt);
+                    s_link.lat_last = (uint16_t)rtt;   /* TEMP A/B probe */
                     if (s_link.lat_min == 0 || rtt < s_link.lat_min) {
                         s_link.lat_min = (uint16_t)rtt;
                     }
@@ -278,6 +285,7 @@ static void ws_handle_text(const char *data, int len)
             const cJSON *b = cJSON_GetObjectItem(root, "sbl");
             app_state_set_tc_ver(cJSON_IsString(a) ? a->valuestring : "",
                                  cJSON_IsString(b) ? b->valuestring : "");
+#if CONFIG_SCR_S3GW_ENABLE
         } else if (strcmp(t->valuestring, VISION_T_VISION) == 0) {
             ws_handle_vision(root);
         } else if (strcmp(t->valuestring, VISION_T_DRIVE_MODE) == 0) {
@@ -290,6 +298,7 @@ static void ws_handle_text(const char *data, int len)
             if (dm >= 0 && (!cJSON_IsBool(ok) || cJSON_IsTrue(ok))) {
                 app_state_set_drive_mode((uint8_t)dm);
             }
+#endif
         } else if (strcmp(t->valuestring, "err") == 0) {
             const cJSON *e = cJSON_GetObjectItem(root, "e");
             if (cJSON_IsString(e) && strcmp(e->valuestring, "auth") == 0) {
@@ -624,6 +633,19 @@ static void housekeeping_1hz(void)
         s_link.ping_pending = true;
         s_link.ping_sent_ms = now_ms();
         scr_link_send_text("{\"t\":\"ping\"}");
+    }
+
+    /* TEMP A/B probe: control-plane RTT sample for the TRY_ALLOCATE_WIFI_LWIP
+     * A/B (doc/22 review) - 10 s cadence, per-leg serial evidence.  Strip
+     * with the A/B verdict. */
+    {
+        static uint8_t ctrlab_div;
+        if (++ctrlab_div >= 10u) {
+            ctrlab_div = 0;
+            ESP_LOGI(TAG, "ctrlab: rtt=%ums min=%ums max=%ums",
+                     (unsigned)s_link.lat_last,
+                     (unsigned)s_link.lat_min, (unsigned)s_link.lat_max);
+        }
     }
 
     if (s_link.tx_skip) {

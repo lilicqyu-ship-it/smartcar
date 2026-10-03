@@ -248,9 +248,10 @@ void ui_home_create(lv_obj_t *root)
 
     /* CAM entry (S3Remote design doc 8.1): a real button that doubles as the
      * stream state readout - green fps / grey STALE / red OFFLINE, text +
-     * colour never colour alone (spec 51).  Absent entirely when the video
-     * plane is compiled out: a dead 124x40 button would be worse than none. */
-#if CONFIG_SCR_CAM_WS_ENABLE
+     * colour never colour alone (spec 51).  Absent entirely when the
+     * S3-gateway plane is compiled out: a dead 124x40 button would be worse
+     * than none. */
+#if CONFIG_SCR_S3GW_ENABLE
     lv_obj_t *cam_btn = lv_button_create(bar);
     lv_obj_set_size(cam_btn, CAM_W, CAM_H);
     lv_obj_align(cam_btn, LV_ALIGN_LEFT_MID, CAM_X, 0);
@@ -591,7 +592,7 @@ void ui_home_refresh(const scr_state_t *st)
         ui_label_set_text(s_home.loss, "--");
     }
 
-#if CONFIG_SCR_CAM_WS_ENABLE
+#if CONFIG_SCR_S3GW_ENABLE
     /* CAM entry: the glyph is what makes it read as a button, the text +
      * colour carry the stream state (design doc 8.1, spec 51) */
     if (st->cam.conn == SCR_CAM_CONNECTED) {

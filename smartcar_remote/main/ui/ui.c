@@ -4,6 +4,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "sdkconfig.h"
 #include <bsp/esp-bsp.h>
 
 #include "ui.h"
@@ -12,14 +13,18 @@
 #include "ui_pages.h"
 #include "ui_service.h"
 #include "ui_alert.h"
+#if CONFIG_SCR_S3GW_ENABLE
 #include "ui_camera.h"
 #include "ui_vision.h"
+#endif
 #include "ui_joystick.h"
 
 #include "../app_state.h"
 #include "../scr_link.h"
 #include "../scr_ctrl.h"
+#if CONFIG_SCR_S3GW_ENABLE
 #include "../scr_cam.h"
+#endif
 #include "../scr_settings.h"
 #include "../proto/proto_frames.h"
 
@@ -46,11 +51,14 @@ static lv_timer_t *s_toast_timer;
 
 /* DRIVE / CAMERA / VISION tab bar (S3Remote design doc 8.1): shown on the
  * two video pages; the DRIVE page keeps its validated full-height layout
- * and reaches the video plane through the top-bar CAM badge. */
+ * and reaches the video plane through the top-bar CAM badge.  Exists only
+ * when the S3-gateway plane is compiled in (CONFIG_SCR_S3GW_ENABLE). */
+#if CONFIG_SCR_S3GW_ENABLE
 #define TAB_H 44
 static lv_obj_t *s_tabbar;
 static lv_obj_t *s_tab_btn[3];
 static const ui_page_t TAB_PAGE[3] = { UI_PAGE_HOME, UI_PAGE_CAMERA, UI_PAGE_VISION };
+#endif
 
 static const char * const BOOT_NAMES[4] = { "LCD", "Touch", "Radio", "System" };
 
@@ -101,6 +109,7 @@ void ui_toast(const char *fmt, ...)
 }
 
 /* ---- navigation --------------------------------------------------------------*/
+#if CONFIG_SCR_S3GW_ENABLE
 static bool page_is_video(ui_page_t p)
 {
     return p == UI_PAGE_CAMERA || p == UI_PAGE_VISION;
@@ -169,6 +178,7 @@ static void tabs_refresh(const scr_state_t *st)
         ui_set_blocked(s_tab_btn[i], st->conn != SCR_CONN_CONNECTED);
     }
 }
+#endif /* CONFIG_SCR_S3GW_ENABLE */
 
 void ui_nav_open(ui_page_t p)
 {
@@ -183,6 +193,7 @@ void ui_nav_open(ui_page_t p)
     ui_service_on_leave(old);
     s_cur = p;
     ui_service_on_enter(p);
+#if CONFIG_SCR_S3GW_ENABLE
     tabs_set_visible(page_is_video(p));
 
     /* preview subscription follows page visibility (design doc 4.2: enter
@@ -195,6 +206,7 @@ void ui_nav_open(ui_page_t p)
     } else if (!page_is_video(p) && page_is_video(old)) {
         scr_cam_page_leave();
     }
+#endif
 
     /* stale-data guard: a page never shows values captured before it opened
      * (spec 106) - every visible page is re-painted from the next tick on */
@@ -314,12 +326,15 @@ static void ui_timer_cb(lv_timer_t *t)
         case UI_PAGE_FW:       ui_service_fw_refresh(&st);     break;
         case UI_PAGE_CALIB:    ui_service_calib_refresh(&st);  break;
         case UI_PAGE_FDIAG:    ui_service_fdiag_refresh(&st);  break;
+#if CONFIG_SCR_S3GW_ENABLE
         case UI_PAGE_CAMERA:   ui_camera_refresh(&st);  tabs_refresh(&st); break;
         case UI_PAGE_VISION:   ui_vision_refresh(&st);  tabs_refresh(&st); break;
+#endif
         default: break;
     }
 }
 
+#if CONFIG_SCR_S3GW_ENABLE
 /* Video pump at 3x the label cadence: a decoded frame otherwise waits up to a
  * full 100 ms UI tick before reaching the panel (avg +50 ms glass-to-eye).
  * The seq gate inside the pump makes every tick without a new frame a no-op,
@@ -339,6 +354,7 @@ static void ui_video_timer_cb(lv_timer_t *t)
         ui_vision_pump_video(&st);
     }
 }
+#endif /* CONFIG_SCR_S3GW_ENABLE */
 
 /* ---- init -------------------------------------------------------------------------*/
 void ui_init(void)
@@ -362,8 +378,10 @@ void ui_init(void)
     s_pages[UI_PAGE_FW]       = lv_obj_create(s_scr_main);
     s_pages[UI_PAGE_CALIB]    = lv_obj_create(s_scr_main);
     s_pages[UI_PAGE_FDIAG]    = lv_obj_create(s_scr_main);
+#if CONFIG_SCR_S3GW_ENABLE
     s_pages[UI_PAGE_CAMERA]   = lv_obj_create(s_scr_main);
     s_pages[UI_PAGE_VISION]   = lv_obj_create(s_scr_main);
+#endif
 
     for (int i = 0; i < UI_PAGE_COUNT; i++) {
         lv_obj_t *p = s_pages[i];
@@ -381,11 +399,14 @@ void ui_init(void)
                     s_pages[UI_PAGE_DIAG], s_pages[UI_PAGE_SETTINGS],
                     s_pages[UI_PAGE_PAIR], s_pages[UI_PAGE_EVENTS]);
     ui_service_create(s_pages[UI_PAGE_FW], s_pages[UI_PAGE_CALIB], s_pages[UI_PAGE_FDIAG]);
+#if CONFIG_SCR_S3GW_ENABLE
     ui_camera_create(s_pages[UI_PAGE_CAMERA]);
     ui_vision_create(s_pages[UI_PAGE_VISION]);
+#endif
     ui_alert_create(s_scr_main);
 
     /* DRIVE / CAMERA / VISION tab bar, bottom of the two video pages */
+#if CONFIG_SCR_S3GW_ENABLE
     s_tabbar = lv_obj_create(s_scr_main);
     lv_obj_set_size(s_tabbar, LV_PCT(100), TAB_H);
     lv_obj_align(s_tabbar, LV_ALIGN_BOTTOM_LEFT, 0, 0);
@@ -414,6 +435,7 @@ void ui_init(void)
         lv_obj_add_flag(tl, LV_OBJ_FLAG_EVENT_BUBBLE);
     }
     lv_obj_add_flag(s_tabbar, LV_OBJ_FLAG_HIDDEN);
+#endif /* CONFIG_SCR_S3GW_ENABLE */
 
     /* toast on the top layer so every page can show feedback */
     s_toast = lv_label_create(lv_layer_top());
@@ -430,5 +452,7 @@ void ui_init(void)
     s_cur = UI_PAGE_HOME;
 
     lv_timer_create(ui_timer_cb, UI_PERIOD_MS, NULL);
+#if CONFIG_SCR_S3GW_ENABLE
     lv_timer_create(ui_video_timer_cb, 33, NULL);
+#endif
 }

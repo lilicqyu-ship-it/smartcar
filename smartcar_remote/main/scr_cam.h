@@ -10,7 +10,7 @@
  * Data path:
  *   cam_ws client task (core 0)   reassembly + header parse + seq accounting
  *        | pend slot (depth 1, latest-only)
- *   cam_decode task (core 0)      esp_jpeg -> RGB565 into slot ring
+ *   cam_decode task (core 0)      esp_new_jpeg PIE SIMD (TJpgDec fallback) -> RGB565
  *        | newest published
  *   LVGL timer (core 1)           scr_cam_display_acquire() swaps in newest
  *

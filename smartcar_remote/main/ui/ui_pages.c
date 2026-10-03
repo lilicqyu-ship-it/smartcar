@@ -18,7 +18,9 @@
 #include "../scr_link.h"
 #include "../scr_svc.h"
 #include "../proto/proto_frames.h"
+#if CONFIG_SCR_S3GW_ENABLE
 #include "../proto/vision.h"
+#endif
 
 /* ---- shared page scaffolding ---------------------------------------------------*/
 
@@ -178,9 +180,11 @@ void ui_pages_create_radio(lv_obj_t *root)
     ui_kv_row(body, "Channel", &s_radio.ch);
     ui_kv_row(body, "Peer (C6 fw)", &s_radio.peer);
     ui_kv_row(body, "C6-TC275 RTT", &s_radio.linkrtt);
+#if CONFIG_SCR_S3GW_ENABLE
     /* Camera WS half-open diagnosis (design doc 8.4): silent link shows here
      * long before it matters on the CAMERA page */
     ui_kv_row(body, "CAM link", &s_radio.camlink);
+#endif
 }
 
 void ui_pages_radio_refresh(const scr_state_t *st)
@@ -227,6 +231,7 @@ void ui_pages_radio_refresh(const scr_state_t *st)
     ui_label_set_fmt(s_radio.linkrtt, "%u ms (err %u.%u%%)",
                           st->link_rtt_ms, st->link_err_rate / 10, st->link_err_rate % 10);
 
+#if CONFIG_SCR_S3GW_ENABLE
     const char *cam_txt;
     lv_color_t cam_col;
     switch (st->cam.conn) {
@@ -240,6 +245,7 @@ void ui_pages_radio_refresh(const scr_state_t *st)
     }
     ui_label_set_text(s_radio.camlink, cam_txt);
     ui_label_set_color(s_radio.camlink, cam_col);
+#endif
 }
 
 /* ---- Diagnostics page (spec 29, engineer mode) ----------------------------------------*/
@@ -279,6 +285,7 @@ void ui_pages_create_diag(lv_obj_t *root)
     ui_kv_row(body, "TC275 state", &s_diag.vstate);
     ui_kv_row(body, "C6 firmware", &s_diag.c6fw);
 
+#if CONFIG_SCR_S3GW_ENABLE
     /* camera/vision plane (design doc 8.4): counters mirrored by scr_cam at
      * 1 Hz; drop/frame_err separate transport loss from bad frames */
     kv_section(body, "CAMERA / VISION");
@@ -286,6 +293,7 @@ void ui_pages_create_diag(lv_obj_t *root)
     ui_kv_row(body, "Cam stream", &s_diag.cam_stream);
     ui_kv_row(body, "Cam errors", &s_diag.cam_err);
     ui_kv_row(body, "Vision", &s_diag.vision);
+#endif
 
     lv_obj_t *btn = ui_button(body, "EVENT LOG", lv_color_hex(UI_COL_SURFACE2), diag_events_cb, NULL);
     lv_obj_set_size(btn, LV_PCT(100), 44);
@@ -317,6 +325,7 @@ void ui_pages_diag_refresh(const scr_state_t *st)
     }
     ui_label_set_text(s_diag.c6fw, st->c6_fw);
 
+#if CONFIG_SCR_S3GW_ENABLE
     ui_label_set_fmt(s_diag.cam_link, "%s %s %ux%u",
                           st->cam.conn == SCR_CAM_CONNECTED ? "UP"
                               : st->cam.conn == SCR_CAM_CONNECTING ? "LINKING" : "OFF",
@@ -325,11 +334,13 @@ void ui_pages_diag_refresh(const scr_state_t *st)
     ui_label_set_fmt(s_diag.cam_stream, "%u.%u fps  seq %lu",
                           st->cam.fps_x10 / 10, st->cam.fps_x10 % 10,
                           (unsigned long)st->cam.seq);
-    ui_label_set_fmt(s_diag.cam_err, "drop %lu  frame %lu  dec %lu (%ums) e2e %ums rtt %ums",
+    ui_label_set_fmt(s_diag.cam_err, "drop %lu  frame %lu  dec %lu (%ums %s) e2e %ums rtt %ums",
                           (unsigned long)st->cam.drop,
                           (unsigned long)st->cam.frame_err,
                           (unsigned long)st->cam.decode_err,
-                          st->cam.decode_ms_max, st->cam.e2e_ms, st->cam.ping_rtt_ms);
+                          st->cam.decode_ms_max,
+                          st->cam.jpeg_simd ? "simd" : "sw",
+                          st->cam.e2e_ms, st->cam.ping_rtt_ms);
     ui_label_set_fmt(s_diag.vision, "%s %s conf %u%% err %+d.%03d %s",
                           vision_mode_str(st->vision.mode < VISION_MODE_IDX_COUNT
                                               ? st->vision.mode : VISION_MODE_IDX_OFF),
@@ -339,6 +350,7 @@ void ui_pages_diag_refresh(const scr_state_t *st)
                           (int)(st->vision.error_x1000 < 0 ? -st->vision.error_x1000
                                                            : st->vision.error_x1000) % 1000,
                           st->vision.fresh ? "fresh" : "STALE");
+#endif
 }
 
 /* ---- Pairing page (spec 39-41) -----------------------------------------------------------*/
