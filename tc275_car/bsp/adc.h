@@ -22,19 +22,35 @@
  *   ADC_BATT_VAREF_MV - the kit's VAREF1 rail; X2-15 exposes it. The kit
  *                       powers the analog rail from VEXT (3.3 V default);
  *                       VAREF accuracy scales the whole reading.
- *   ADC_BATT_DIV_NUM  - divider ratio x1000: VIN = pin * 11 (10k+1k)/1k.
+ *   ADC_BATT_DIV_NUM  - divider ratio x1000 (11.000 = 11000u); the /1000 at
+ *                       the use site (ADC_pinMvToVinMv) belongs to the
+ *                       convention - a bare 11 here reads 1000x low.
  *                       VDDM/LOSUP: the iLLD supply-voltage select is set to
  *                       3.3 V to match this board; flip together with
  *                       VAREF_MV if the analog rail is ever moved to 5 V. */
 
 #define ADC_BATT_VAREF_MV       3300u   /* kit VAREF1 rail (X2-15), bench-verify */
-#define ADC_BATT_DIV_NUM        11u     /* VIN = pin_mV * (10k+1k)/1k            */
+#define ADC_BATT_DIV_NUM        11000u  /* ratio x1000: VIN_mV = pin_mV*(10k+1k)/1k */
 #define ADC_BATT_CELLS          3u      /* percent math, doc 23 SS6: 2S..3S;
                                          * SDD SS16 Q1: config item pending     */
 
 /* Li-ion window used for batteryPct only (4.2 V full / 3.3 V empty per cell) */
 #define ADC_CELL_FULL_MV        4200u
 #define ADC_CELL_EMPTY_MV       3300u
+
+/* Pure conversion chain, static inline so the host test (test/host/test_adc.c)
+ * compiles the exact math the firmware runs - bsp/adc.c itself needs the VADC.
+ * counts (0..4095) -> divider-node mV -> VIN mV; the EMA lives in adc.c,
+ * between the two steps, on the raw pin-mV domain. */
+static inline uint32 ADC_countsToPinMv(uint16 counts)
+{
+    return ((uint32)counts * ADC_BATT_VAREF_MV) / 4095u;
+}
+
+static inline uint16 ADC_pinMvToVinMv(uint32 pinMv)
+{
+    return (uint16)((pinMv * ADC_BATT_DIV_NUM) / 1000u);
+}
 
 void   ADC_init(void);                   /* CPU1, once, before the first ADC_task */
 void   ADC_task(void);                   /* CPU1: one conversion + EMA filter     */

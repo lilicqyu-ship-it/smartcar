@@ -94,10 +94,10 @@ void ADC_init(void)
 
         if (adc_convertOnce(&counts))
         {
-            uint32 pinMv = ((uint32)counts * ADC_BATT_VAREF_MV) / 4095u;
+            uint32 pinMv = ADC_countsToPinMv(counts);
 
             g_pinMvEma = pinMv;
-            g_vinMv    = (uint16)((pinMv * ADC_BATT_DIV_NUM) / 1000u);
+            g_vinMv    = ADC_pinMvToVinMv(pinMv);
             XCORE_battSetMv(g_vinMv);
         }
     }
@@ -121,11 +121,11 @@ void ADC_task(void)
     {
         /* pin voltage mV -> EMA -> VIN via the divider ratio; all unsigned,
          * both ends of the scale are physical clamp points (0 V / VAREF) */
-        uint32 pinMv = ((uint32)counts * ADC_BATT_VAREF_MV) / 4095u;
+        uint32 pinMv = ADC_countsToPinMv(counts);
         sint32 diff  = (sint32)pinMv - (sint32)g_pinMvEma;
 
         g_pinMvEma = (uint32)((sint32)g_pinMvEma + (diff >> ADC_EMA_SHIFT));
-        g_vinMv    = (uint16)(((uint32)g_pinMvEma * ADC_BATT_DIV_NUM) / 1000u);
+        g_vinMv    = ADC_pinMvToVinMv(g_pinMvEma);
     }
 
     XCORE_battSetMv(g_vinMv);

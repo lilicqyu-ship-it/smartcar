@@ -163,7 +163,7 @@ rt/motor_algo.c (CPU1 1kHz)：
 
 ## 7. 验证：改完怎么自证没坏
 
-**主机单测（gcc，CI 在跑，改 SF/遥测层后必跑）：**
+**主机单测（gcc，CI 在跑，改 SF/遥测/ADC 换算层后必跑）：**
 ```bash
 # SF 帧编解码 + 标定记录/EVT 0x22/0x23 编解码（含 200 万字节模糊测试，2948 断言）
 gcc -std=c99 -Wall -Wextra -Werror -O2 -I . \
@@ -175,6 +175,11 @@ gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
     -I esp32c6_car/components/c6_proto -I esp32c6_car/components/c6_sf \
     test/host/test_sf_telemetry.c mw/sf/sf_telemetry.c mw/sf/sf_frame.c \
     esp32c6_car/components/c6_proto/proto_frames.c -o test/host/out/test_sf_telemetry && test/host/out/test_sf_telemetry
+
+# 电池 VIN 换算链（counts -> 分压点 mV -> VIN mV，纯函数在 bsp/adc.h；含
+# DIV_NUM x1000 量纲回归守卫——曾把 11000 写成 11，读数小 1000 倍）
+gcc -std=c99 -Wall -Wextra -Werror -O2 -I . -I test/host/stub \
+    test/host/test_adc.c -o test/host/out/test_adc && test/host/out/test_adc
 ```
 
 **固件构建**：只能在 AURIX Development Studio（TASKING 编译器）里构建 `TriCore Debug (TASKING)`，**主机/CI 无法编译固件**（专有编译器）。AI 不要假装能在命令行编出固件；能做的是保证主机单测通过 + 代码符合 iLLD/MISRA 习惯。

@@ -2,7 +2,7 @@ name: CI (tc275_car)
 
 # Host 侧验证。TASKING 固件编译无法在托管 runner 上进行（专有编译器），
 # CI 覆盖 gcc 能证明的部分: SF 帧编解码、38 字节遥测布局对 C6 侧解码器的
-# 交叉校验、链路时序图的 JSON 源。
+# 交叉校验、电池 VIN 换算链（bsp/adc.h 纯函数）、链路时序图的 JSON 源。
 # monorepo: esp32c6_car 就在仓内——遥测交叉校验直接编译仓内 C6 源码，
 # 跨工程字节布局是"编译期锁定"而非复制（doc 22 E13/R12）；C6 侧契约变更
 # 必须在这里炸 CI，而不是在台架上。
@@ -53,6 +53,12 @@ jobs:
               mw/sf/sf_frame.c ../esp32c6_car/components/c6_proto/proto_frames.c \
               -o test/host/out/test_sf_telemetry
           test/host/out/test_sf_telemetry
+
+      - name: ADC battery conversion tests
+        run: |
+          gcc -std=c99 -Wall -Wextra -Werror -O2 -I . -I test/host/stub \
+              test/host/test_adc.c -o test/host/out/test_adc
+          test/host/out/test_adc
 
       - name: Sequence diagram source is valid JSON
         run: python3 -m json.tool doc/20-design/link-c6.sequence.json > /dev/null
