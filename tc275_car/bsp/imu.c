@@ -303,16 +303,36 @@ ImuStatus IMU_writeReg(uint8 reg, uint8 val)
 
 /* ---- probe + configuration (also the re-probe path) ---- */
 
-static boolean imu_probe(void)
+/* IMU_OK only when WHO_AM_I read clean AND matched. Any other code is the
+ * bench evidence for why it did not (doc 35 section 7.1). */
+static ImuStatus imu_probe(void)
 {
-    uint8 id = 0u;
+    uint8     id = 0u;
+    ImuStatus st;
 
-    if (IMU_readRegs(IMU_REG_WHO_AM_I, &id, 1u) != IMU_OK)
+    st = IMU_readRegs(IMU_REG_WHO_AM_I, &id, 1u);
+    if (st != IMU_OK)
     {
-        return FALSE;
+        return st;
     }
     g_whoAmI = id;
-    return (id == IMU_WHO_AM_I_VAL);
+    return (id == IMU_WHO_AM_I_VAL) ? IMU_OK : IMU_ERR_NO_DEV;
+}
+
+/* The raw byte is what separates the causes the absent line cannot: 0x00 =
+ * MISO never driven (wire/pad), 0x38 or 0xE2 = the frame arrived bit-shifted
+ * (clock phase; 0x71 >> 1 and 0x71 << 1), 0xFF = CS never reached the device,
+ * anything else = a part that is not the expected one. st = 0 here means the
+ * probe matched and a later configuration write is what failed. */
+static void imu_logProbeFailure(ImuStatus st)
+{
+    sint32 vals[4];
+
+    vals[0] = (sint32)st;
+    vals[1] = (sint32)g_whoAmI;
+    vals[2] = (sint32)g_errCount;
+    vals[3] = (sint32)IMU_actualClockHz();
+    XCORE_logi("IMUERR st/id/err/clk=", vals, 4u);
 }
 
 static boolean imu_configure(void)
@@ -381,7 +401,7 @@ static boolean imu_configure(void)
 
 static void imu_publish(void)
 {
-    const uint8 *d = &g_rxBuf[1];          /* burst payload: temp@0, gyro@2, accel@8 */
+    const uint8 *d = &g_rxBuf[1];          /* burst payload: temp@0, gyro X/Y/Z@2, accel Z/Y/X@8 */
     XcoreImu imu;
     uint8 i;
 
@@ -389,14 +409,12 @@ static void imu_publish(void)
     imu.whoAmI   = g_whoAmI;
     for (i = 0u; i < 3u; i++)
     {
-        sint16 rawGy  = (sint16)(((uint16)d[2u + (2u * i)] << 8) | d[3u + (2u * i)]);
-        sint16 rawAcc = (sint16)(((uint16)d[8u + (2u * i)] << 8) | d[9u + (2u * i)]);
-
-        imu.accMilliG[i]    = (sint16)IMU_rawToMilliG(rawAcc, IMU_CFG_XL_FS);
-        imu.gyroMilliDps[i] = IMU_rawToMilliDps(rawGy, IMU_CFG_GY_FS);
+        imu.accMilliG[i]    = (sint16)IMU_rawToMilliG(IMU_burstAccRaw(d, i),
+                                                     IMU_CFG_XL_FS);
+        imu.gyroMilliDps[i] = IMU_rawToMilliDps(IMU_burstGyroRaw(d, i),
+                                                IMU_CFG_GY_FS);
     }
-    imu.tempCentiC = (sint16)IMU_rawToCentiC(
-        (sint16)(((uint16)d[0] << 8) | d[1]));
+    imu.tempCentiC = (sint16)IMU_rawToCentiC(IMU_burstTempRaw(d));
     imu.drdyCount = g_drdyCount;
     imu.errCount  = g_errCount;
 
@@ -412,6 +430,8 @@ static boolean imu_readData(void)
 
 void IMU_init(void)
 {
+    ImuStatus st;
+
     memset(g_txBuf, 0, sizeof(g_txBuf));
     memset(g_rxBuf, 0, sizeof(g_rxBuf));
     g_alive      = FALSE;
@@ -427,7 +447,8 @@ void IMU_init(void)
     g_reprobeMs = STIME_nowMs() + IMU_REPROBE_MS;
     g_logMs     = STIME_nowMs() + IMU_LOG_PERIOD_MS;
 
-    if (imu_probe() && imu_configure())
+    st = imu_probe();
+    if ((st == IMU_OK) && imu_configure())
     {
         g_alive = TRUE;
         (void)imu_readData();
@@ -439,11 +460,14 @@ void IMU_init(void)
         /* The 1 kHz task retries once a second - wiring the sensor in
          * without a reboot is the normal bench flow. */
         XCORE_logln("IMU absent (WHOAMI mismatch or bus dead), retrying 1Hz");
+        imu_logProbeFailure(st);
     }
 }
 
 void IMU_task(void)
 {
+    ImuStatus st;
+
     g_taskDiv++;
 
     if (!g_alive)
@@ -454,11 +478,20 @@ void IMU_task(void)
             return;
         }
         g_reprobeMs = STIME_nowMs();
-        if (imu_probe() && imu_configure())
+        st = imu_probe();
+        if ((st == IMU_OK) && imu_configure())
         {
             g_failRun = 0u;
             g_alive   = TRUE;
             XCORE_logln("IMU found (WHOAMI=0x70), configured");
+            return;
+        }
+        /* Report the cause, but at the same 0.5 Hz discipline as the IMU= row:
+         * a dead sensor must not consume the log ring at 1 Hz. */
+        if ((uint32)(STIME_nowMs() - g_logMs) >= IMU_LOG_PERIOD_MS)
+        {
+            g_logMs = STIME_nowMs();
+            imu_logProbeFailure(st);
         }
         return;
     }

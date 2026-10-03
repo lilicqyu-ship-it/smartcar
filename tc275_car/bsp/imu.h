@@ -21,11 +21,13 @@
  * step 3 ("INT1 pulse rate must match ODR"); reading is time-driven, not
  * DRDY-driven, until the V2.0 fusion work needs edge timestamps.
  *
- * Register facts below are cross-checked against the official ST driver
- * (stm32duino LSM6DSV16X lsm6dsv16x_reg.h/.c, ID 0x70) - the DSV16X map
- * differs from the older LSM6DSL: ODR lives in the LOW nibble of CTRL1/2,
- * gyro FS is the 4-bit CTRL6 field (4000 dps = 0xC) and accel FS the 2-bit
- * CTRL8 field. */
+ * Register facts below are cross-checked against ST's official PID driver
+ * (github.com/STMicroelectronics/lsm6dsv16bx-pid, lsm6dsv16bx_reg.h /
+ * lsm6dsv16x_reg.c) - the DSV16X map differs from the older LSM6DSL: ODR
+ * lives in the LOW nibble of CTRL1/2, gyro FS is the 4-bit CTRL6 field
+ * (4000 dps = 0xC) and accel FS the 2-bit CTRL8 field. The 16-bit output
+ * registers are LITTLE-endian (low address = LSB) and the accel block is
+ * declared Z,Y,X while the gyro block is X,Y,Z. */
 
 /* ---- register map (subset used by this driver) ---- */
 #define IMU_REG_INT1_CTRL       0x0Du   /* drdy_xl bit0 / drdy_g bit1        */
@@ -39,7 +41,11 @@
                                          * accel 6 = 14 bytes, contiguous    */
 #define IMU_REG_OUTX_L_A        0x28u
 
-#define IMU_WHO_AM_I_VAL        0x70u   /* LSM6DSV16X family ID              */
+#define IMU_WHO_AM_I_VAL        0x71u   /* LSM6DSV16BX: datasheet 0Fh = 71h,
+                                         * LSM6DSV16BX_ID in the ST driver.
+                                         * NOT 0x70 - that is a different part
+                                         * and was the reason v1.0 reported a
+                                         * healthy sensor as absent.         */
 
 /* CTRL3_C bits */
 #define IMU_CTRL3_SW_RESET      0x01u
@@ -79,8 +85,9 @@
 
 /* ---- production defaults (doc 35 section 4): ±4 g / ±500 dps, 240 Hz.
  * ±4 g survives bumps a ±2 g range would clip; ±500 dps covers this
- * drivetrain's worst yaw rate with headroom; 240 Hz reads cleanly from the
- * 1 kHz loop every 4th tick. */
+ * drivetrain's worst yaw rate with headroom; 240 Hz ODR is the standard code
+ * the 1 kHz task can divide down to: every 5th tick (IMU_TASK_DIV_MS = 5)
+ * reads at 200 Hz, just under the ODR, so BDU hands over a fresh set. */
 #define IMU_CFG_ODR             IMU_ODR_240HZ
 #define IMU_CFG_XL_FS           IMU_XL_FS_4G
 #define IMU_CFG_GY_FS           IMU_GY_FS_500DPS
@@ -193,6 +200,36 @@ static inline sint32 IMU_rawToCentiC(sint16 raw)
 {
     return IMU_TEMP_OFF_CENTIC
          + IMU_divRound((sint32)raw * IMU_TEMP_NUM, IMU_TEMP_DEN);
+}
+
+/* ---- burst decode (pure, host-tested) ----
+ * The ST driver assembles every 16-bit sample as val = buff[0] | (buff[1] << 8),
+ * i.e. the low address holds the LSB. Reading the pair the other way round
+ * turns a small positive rate into a huge negative one instead of failing
+ * loudly, so the whole decode lives in these three helpers and in test_imu. */
+static inline sint16 IMU_le16(uint8 lo, uint8 hi)
+{
+    return (sint16)((uint16)lo | ((uint16)hi << 8));
+}
+
+/* Offsets inside the 14-byte burst from OUT_TEMP_L (0x20): temp 0..1,
+ * gyro 2..7 (OUTX_L_G 0x22, X/Y/Z), accel 8..13 (OUTZ_L_A 0x28, Z/Y/X).
+ * axis is always this driver's 0=X, 1=Y, 2=Z. */
+static inline sint16 IMU_burstTempRaw(const uint8 *d)
+{
+    return IMU_le16(d[0u], d[1u]);
+}
+
+static inline sint16 IMU_burstGyroRaw(const uint8 *d, uint8 axis)
+{
+    return IMU_le16(d[2u + (2u * axis)], d[3u + (2u * axis)]);
+}
+
+static inline sint16 IMU_burstAccRaw(const uint8 *d, uint8 axis)
+{
+    static const uint8 lo[3] = { 12u, 10u, 8u };  /* X@0x2C, Y@0x2A, Z@0x28 */
+
+    return IMU_le16(d[lo[axis]], d[lo[axis] + 1u]);
 }
 
 /* ---- clock ladder (doc 23 section 10.2: start 1 MHz, bench-verify each
