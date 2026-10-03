@@ -76,6 +76,11 @@ static uint32        g_evtTail;                /* reader: CPU2 */
  * CPU1, readers CPU0/CPU2; 0 until the first sample lands. */
 static uint16 g_battMv;
 
+/* CPU1 -> CPU0/CPU2: last converted IMU sample (bsp/imu). seq lives outside
+ * the struct so the writer cannot forget to bump it. */
+static XcoreImu g_imu;
+static uint32   g_imuSeq;
+
 /* CPU0 -> CPU2 robot status mirror */
 static ProtocolStatus g_status;
 
@@ -117,6 +122,8 @@ void XCORE_init(void)
     g_estopReq = FALSE;
     g_calibReq = FALSE;
     g_battMv   = 0u;
+    memset((void *)&g_imu, 0, sizeof(g_imu));
+    g_imuSeq   = 0u;
     g_logWr    = 0;
     g_logRd    = 0;
     g_jogSeq   = 0u;
@@ -386,6 +393,31 @@ uint16 XCORE_battGetMv(void)
     mv = g_battMv;
     XCORE_unlock();
     return mv;
+}
+
+void XCORE_imuPublish(const XcoreImu *imu)
+{
+    if (imu == NULL_PTR)
+    {
+        return;
+    }
+    XCORE_lock();
+    g_imu = *imu;
+    g_imuSeq++;
+    g_imu.seq = g_imuSeq;
+    __dsync();
+    XCORE_unlock();
+}
+
+void XCORE_imuRead(XcoreImu *imu)
+{
+    if (imu == NULL_PTR)
+    {
+        return;
+    }
+    XCORE_lock();
+    *imu = g_imu;
+    XCORE_unlock();
 }
 
 void XCORE_statusPublish(const ProtocolStatus *status)

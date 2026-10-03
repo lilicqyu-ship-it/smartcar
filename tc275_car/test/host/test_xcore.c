@@ -286,6 +286,53 @@ static void test_logu_line_format(void)
     CHECK(strcmp(g_uartLines[0], "LINK cmdq full x 1 42") == 0);
 }
 
+/* IMU block (doc 35): single-writer mailbox whose seq is bumped by the
+ * publisher, not the caller - the zero state after XCORE_init means "never
+ * published", so consumers watch seq for freshness, never the data. */
+static void test_imu_block(void)
+{
+    XcoreImu pub;
+    XcoreImu out;
+
+    XCORE_init();
+
+    XCORE_imuRead(&out);
+    CHECK_EQ(out.seq, 0u);                          /* never published      */
+    CHECK(out.alive == FALSE);
+
+    memset(&pub, 0, sizeof(pub));
+    pub.alive         = TRUE;
+    pub.whoAmI        = 0x70;
+    pub.accMilliG[0]  = -999;
+    pub.gyroMilliDps[2] = 17500;
+    pub.tempCentiC    = 2560;
+    pub.drdyCount     = 5u;
+    XCORE_imuPublish(&pub);
+
+    XCORE_imuRead(&out);
+    CHECK_EQ(out.seq, 1u);                          /* first publish = 1    */
+    CHECK(out.alive == TRUE);
+    CHECK_EQ(out.whoAmI, 0x70);
+    CHECK_EQ(out.accMilliG[0], -999);
+    CHECK_EQ(out.accMilliG[1], 0);
+    CHECK_EQ(out.gyroMilliDps[2], 17500);
+    CHECK_EQ(out.tempCentiC, 2560);
+    CHECK_EQ(out.drdyCount, 5u);
+
+    /* the caller's copy never gains the seq - the block owns the counter */
+    CHECK_EQ(pub.seq, 0u);
+
+    pub.accMilliG[0] = 123;
+    XCORE_imuPublish(&pub);
+    XCORE_imuRead(&out);
+    CHECK_EQ(out.seq, 2u);                          /* monotonic            */
+    CHECK_EQ(out.accMilliG[0], 123);
+
+    XCORE_imuPublish(NULL_PTR);                     /* no crash, no bump    */
+    XCORE_imuRead(&out);
+    CHECK_EQ(out.seq, 2u);
+}
+
 /* ---- main ------------------------------------------------------------------- */
 
 int main(void)
@@ -298,6 +345,7 @@ int main(void)
     test_cmdpush_latest_no_match_appends();
     test_logservice_one_line_per_call();
     test_logu_line_format();
+    test_imu_block();
 
     printf("%d checks, %d failures\n", g_checks, g_failed);
     return (g_failed == 0) ? 0 : 1;

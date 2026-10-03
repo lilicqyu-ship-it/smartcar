@@ -4,7 +4,7 @@
 |---|---|
 | 文档编号 | 33 |
 | 域 | TC275 侧（3x） |
-| 版本 | V1.4（2026-10-03，命令队列抗突发随 22 号 V1.8）：第 3 节数据流图与第 4 节块表的命令队列改 **16 深 + `SET_SPEED` 走 `XCORE_cmdPushLatest` 新者胜**；第 7 节新增 `test_xcore` 可粘贴命令（1095 断言）并把覆盖盲区改为"已有覆盖"口径；CI（`tc275-car.yml`）同步加跑。V1.3（2026-09-30，编码器刻度修正随 34 V1.4）：第 9 节编码器 260 线→**13 PPR**（52 计数/电机转、1061.27 计数/轮转、0.1421 mm/计数），默认轮径 65→**48**（`CALIB_WHEELDIA_DEF` 同批）。V1.2（2026-09-27，随 34 号 V1.3 闭环使能门同步）：第 2 节代码地图 `rt/motor_algo` 条目补门；第 5.2 节"方向不对"条目补门上电行为；第 6 节安全机制新增**闭环使能门**（src=0 记录强制开环等价，34 §13）。V1.1（2026-09-27，随 34 号标定/DPT 落地同步）：第 2 节代码地图加 `mw/calib/`；第 4 节 xcore 块表补 CalibResult/Jog/RecordLive/EVT 出站队列四行 + "用版本计数不要用 valid 位"规约；第 5.1 节写清 DPT op 家族（0x70~0x74）与 EVT 0x22/0x23 的组帧侧；第 5.2 节改为"标定参数是运行时变量、换轮径走 0x73"；第 6 节加 DFlash 写入的安全姿态；第 7 节单测命令加入 `mw/calib/calib_record.c`（2948 断言）并扩写覆盖盲区；第 8 节红线增至 10 条（新增"只有 CPU0 能写 DFlash"）。V1.0 = 2026-09-27 首版 |
+| 版本 | V1.5（2026-10-03，IMU 驱动落地随 35 号 V1.0）：第 2 节代码地图加 `bsp/imu`；第 4 节块表补 `XcoreImu` 行；第 7 节验证加 `test_imu` 命令（55 断言）、`test_xcore` 1095→1109；第 9 节硬件速查补 IMU 段（QSPI1/INT1/优先级 11·14·15·24）。V1.4（2026-10-03，命令队列抗突发随 22 号 V1.8）：第 3 节数据流图与第 4 节块表的命令队列改 **16 深 + `SET_SPEED` 走 `XCORE_cmdPushLatest` 新者胜**；第 7 节新增 `test_xcore` 可粘贴命令（1095 断言）并把覆盖盲区改为"已有覆盖"口径；CI（`tc275-car.yml`）同步加跑。V1.3（2026-09-30，编码器刻度修正随 34 V1.4）：第 9 节编码器 260 线→**13 PPR**（52 计数/电机转、1061.27 计数/轮转、0.1421 mm/计数），默认轮径 65→**48**（`CALIB_WHEELDIA_DEF` 同批）。V1.2（2026-09-27，随 34 号 V1.3 闭环使能门同步）：第 2 节代码地图 `rt/motor_algo` 条目补门；第 5.2 节"方向不对"条目补门上电行为；第 6 节安全机制新增**闭环使能门**（src=0 记录强制开环等价，34 §13）。V1.1（2026-09-27，随 34 号标定/DPT 落地同步）：第 2 节代码地图加 `mw/calib/`；第 4 节 xcore 块表补 CalibResult/Jog/RecordLive/EVT 出站队列四行 + "用版本计数不要用 valid 位"规约；第 5.1 节写清 DPT op 家族（0x70~0x74）与 EVT 0x22/0x23 的组帧侧；第 5.2 节改为"标定参数是运行时变量、换轮径走 0x73"；第 6 节加 DFlash 写入的安全姿态；第 7 节单测命令加入 `mw/calib/calib_record.c`（2948 断言）并扩写覆盖盲区；第 8 节红线增至 10 条（新增"只有 CPU0 能写 DFlash"）。V1.0 = 2026-09-27 首版 |
 | 代码基线 | `main`（默认构建 `USE_SPI_LINK`，含 servo 闭环 + CPU 看门狗 + 0x70 方向标定） |
 | 读者 | **AI 编码助手**（Kiro / Claude / Copilot 等）在本仓库作业前必读 |
 | 上级索引 | [00-index.md](../00-index.md) |
@@ -55,6 +55,9 @@ tc275_car/
 ├── mw/calib/calib_record.c/.h ★标定记录 20B blob + EVT 0x22/0x23 编解码（纯 C99，主机可测）
 ├── mw/calib/calib_store.c/.h  CPU0 专属：DFlash0 扇区 15 单槽持久化 + 静止后才写 + 结果转 EVT
 ├── bsp/motor.c/.h        GTM ATOM 20kHz PWM × 4 + TB6612 方向 GPIO（CPU1）
+├── bsp/imu.c/.h          LSM6DSV16BX 六轴 IMU：QSPI1 主机（SPI 模式 3，1 MHz 档位）
+│                         + ERU INT1 计数 + 1 kHz 采样/失联 1 Hz 重探（CPU1；
+│                         设计真源 [35](35-imu-driver.md)，接线真源 23 §10）
 ├── bsp/wdg.h             ★CPU 看门狗 helper（内联，各核自服务）
 ├── bsp/stime.c/.h        STM 毫秒时基（CPU1/CPU2）
 ├── bsp/uart.c/.h         调试串口 ASCLIN0（CPU0）
@@ -118,6 +121,7 @@ rt/motor_algo.c (CPU1 1kHz)：
 | Jog | CPU0 → CPU1 | 0x71 单电机开环 duty（percent×10，钳 ±500），带 `jogSeq`；CPU1 300ms 未续约自动停车并打 `JOG timeout` |
 | RecordLive（带 `version`） | CPU0 → CPU1/CPU2 | 当前生效标定记录（invert/满量程/轮径）；CPU1 按 `version` 边沿应用，CPU2 取 `vTarget` |
 | EVT 出站队列(8×≤32B) | CPU0 → CPU2 | 产测事件 0x22/0x23 的出帧口；CPU2 `link_sendPendingEvents()` 弹出，满则丢弃 |
+| XcoreImu（带 `seq`） | CPU1 → CPU0/CPU2 | IMU 采样信箱（`bsp/imu` 每 5 ms 发布一次）：mg / mdps / 0.01 °C 单位域 + `alive`/`drdyCount`/`errCount`；`seq` 由 `XCORE_imuPublish` 内部递增，消费者看它判新鲜度（35 §5） |
 | 日志环(2KB) | CPU1/CPU2 写 / CPU0 落地 | 无 printf 的核靠这个把行喂给 CPU0 的 UART |
 
 **AI 作业规约（xcore）：**
@@ -152,7 +156,7 @@ rt/motor_algo.c (CPU1 1kHz)：
 
 ## 6. 安全机制（现状，改动前必须知道不能破坏哪些）
 
-- **CPU 看门狗**已启用（`bsp/wdg.h`）：CPU0 在 robot 任务(10ms)、CPU1 在 1kHz 循环各自喂狗（`WDG_serviceCpu()`）。timeout ~0.3–0.5s。喂狗用 ENDINIT clear+set 对，**不要**改成 `IfxScuWdt_serviceCpuWatchdog`（会把 ENDINIT 饱和计数器顶死，卡住 flash/OTA）。**加长循环/加阻塞调用前，确认喂狗节奏不被破坏。**
+- **CPU 看门狗**已启用（`bsp/wdg.h`）：CPU0 在 robot 任务(10ms)、CPU1 在 1kHz 循环各自喂狗（`WDG_serviceCpu()`）。timeout ~**1.4 s**（`REL=0xF800`；旧稿 0.3~0.5 s 是算术错误）。**超时反应已闭合**（tc275_car v1.1.2，`21 §7.2` V1.13）：TC27x 的 WDT 到期只发 NMI 不自行复位，`Configurations/Ifx_Cfg.h` 的 NMI 钩子接 `IfxCpu_triggerSwReset()`——**别拆它**，拆了到期即整车假死；也**别往钩子里加打印/xcore 调用**（NMI 上下文会死锁）。喂狗用 ENDINIT clear+set 对，**不要**改成 `IfxScuWdt_serviceCpuWatchdog`（会把 ENDINIT 饱和计数器顶死，卡住 flash/OTA）。**加长循环/加阻塞调用前，确认喂狗节奏不被破坏。**
 - **急停三通道**：SF `EMERGENCY_STOP`(0x32) → CPU2 置 `g_estopReq` 旁路 + 入队；链路失联 → `LINK_LOST` 触发急停；CPU1 每周期检查 `g_targetEstop || XCORE_estopIsActive()` 立即刹车（不走斜坡）。
 - **双看门狗（软）**：CPU0 心跳超时 100ms、CPU1 命令失联 150ms，都会归零侧速。
 - **闭环失活兜底**：编码器 `!alive` 时 `SERVO_update` 退化为开环 `duty=target` 并丢弃积分（防重锁踢腿）——这是"8 根编码器线还没接也能安全出厂"的设计。
@@ -182,9 +186,14 @@ gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
 gcc -std=c99 -Wall -Wextra -Werror -O2 -I . -I test/host/stub \
     test/host/test_adc.c -o test/host/out/test_adc && test/host/out/test_adc
 
-# xcore 命令队列/日志环纪律（FIFO、容量、SET_SPEED 新者胜塌缩、每调用一行排空；
-# 1095 断言。注意 stub 目录必须排在 -I 首位——bsp/uart.h 与 IfxCpu.h 用的是
-# host 替身，不是 iLLD 原件）
+# IMU 换算链（LSM6DSV16BX，mg/mdps/温度 + SPI 命令字节，纯函数在 bsp/imu.h；
+# 灵敏度锚点取自 ST 官方驱动，FS 码 0xC=4000dps 的乱序映射有专项守卫）
+gcc -std=c99 -Wall -Wextra -Werror -O2 -I . -I test/host/stub \
+    test/host/test_imu.c -o test/host/out/test_imu && test/host/out/test_imu
+
+# xcore 命令队列/日志环纪律（FIFO、容量、SET_SPEED 新者胜塌缩、每调用一行排空、
+# IMU 信箱 seq；1109 断言。注意 stub 目录必须排在 -I 首位——bsp/uart.h 与
+# IfxCpu.h 用的是 host 替身，不是 iLLD 原件）
 gcc -std=c99 -Wall -Wextra -Werror -O2 -I test/host/stub -I . \
     test/host/test_xcore.c mw/xcore/xcore.c \
     -o test/host/out/test_xcore && test/host/out/test_xcore
@@ -195,7 +204,7 @@ python3 test/host/test_calib_store.py
 
 **固件构建**：只能在 AURIX Development Studio（TASKING 编译器）里构建 `TriCore Debug (TASKING)`，**主机/CI 无法编译固件**（专有编译器）。AI 不要假装能在命令行编出固件；能做的是保证主机单测通过 + 代码符合 iLLD/MISRA 习惯。
 
-**覆盖盲区（诚实告知）**：`link.c`/`motor_algo`/`encoder`/`robot.c` 无单测（依赖 iLLD/FreeRTOS），改这些只能靠代码审查 + 台架。改动这类文件时，AI 应在回复里明确说明"此改动未被单测覆盖，需台架验证"。**同类盲区**：xcore 新块（CalibResult/Jog/RecordLive/EVT 队列）、`0x71` jog 时序、**DFlash 擦写与回读**——只有 `mw/calib/calib_record.c` 的纯编解码有单测，**存储与跨核那半截没有**。**已有覆盖**：命令队列/日志环的入队出队纪律（FIFO、容量、新者胜、每调用一行排空）自 2026-10-03 起有 `test_xcore.c`（锁与核间原子性仍只有目标机上有，主机替身是空锁）。
+**覆盖盲区（诚实告知）**：`link.c`/`motor_algo`/`encoder`/`robot.c`/`imu.c` 无单测（依赖 iLLD/FreeRTOS/硬件），改这些只能靠代码审查 + 台架（IMU 的换算半截在 `bsp/imu.h` 纯函数里、有 `test_imu`；驱动主体无）。改动这类文件时，AI 应在回复里明确说明"此改动未被单测覆盖，需台架验证"。**同类盲区**：xcore 新块（CalibResult/Jog/RecordLive/EVT 队列/XcoreImu 的跨核半截）、`0x71` jog 时序、**DFlash 擦写与回读**——只有 `mw/calib/calib_record.c` 的纯编解码有单测，**存储与跨核那半截没有**。**已有覆盖**：命令队列/日志环的入队出队纪律（FIFO、容量、新者胜、每调用一行排空）自 2026-10-03 起有 `test_xcore.c`（锁与核间原子性仍只有目标机上有，主机替身是空锁）。
 
 ---
 
@@ -235,6 +244,12 @@ python3 test/host/test_calib_store.py
 **编码器（MG310 内置 13 PPR 霍尔 AB，×4 = 52 计数/电机转，减速比 1:20.409 → ≈1061.27 计数/轮转，48 mm 胎 = 0.1421 mm/计数）：**
 - 8 路信号 P33.0~P33.7 ↔ X2-28~35，GTM TIM0 八通道双边沿中断（CPU1），软件 ×4 正交。
 - E1~E4 与电机 A~D **1:1 对应**（motor id 兼作编码器索引）。
+
+**六轴 IMU（LSM6DSV16BX，`bsp/imu.c/.h`，设计真源 [35](35-imu-driver.md)、接线真源 `23 §10`）：**
+- QSPI1 主机：SCLK=P11.6 / MTSR=P11.9 / MRST=P11.3 / **CS=SLSO3 P11.10**（Shield2Go 2 号座共享此脚，用 IMU 时禁插板）；INT1=P15.4（SCU ERU REQ0，**可边沿中断**——与 P23.x/P33.x 不同）；INT2=P15.5 固件未配；VEXT 3.3 V 供电。
+- SPI **模式 3**（CPOL/CPHA=1）、MSB first、首字节 bit7=R/W；默认 ±4 g/±500 dps/240 Hz，1 kHz 环每 5 ms 读 0x20 起 14 B（温度+陀螺+加计）；时钟档位 1/2/5/10 MHz，默认 1 MHz（杜邦线直连）。
+- 中断优先级（21 §18 C2）：QSPI1 TX/RX/ER = **11/14/15**（低于编码器 16~23）、ERU DRDY = **24**（ISR 只计数）。
+- 失联 1 Hz 重探，接线下**免重启**自愈；台架行 `IMU=`（0.5 Hz，whoAmI/ax/ay/az/gx/gy/gz/tempC/drdy/err）。**硬件尚未接线**，判读按 35 §7。
 
 **板间 SPI：** QSPI3 主机 P33.11/12/13（SCLK/MTSR/MRST）+ P23.4 CS + P23.0 IRQ（电平轮询）↔ C6 SPI2 从机；杜邦线直连、无外部元件（`23 §9.3`）。
 

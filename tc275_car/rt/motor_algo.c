@@ -4,6 +4,7 @@
 #include "rt/servo.h"
 #include "bsp/stime.h"
 #include "bsp/adc.h"
+#include "bsp/imu.h"
 #include "bsp/wdg.h"
 #include "mw/xcore/xcore.h"
 
@@ -464,6 +465,7 @@ void MOTOR_ALGO_init(void)
 
     SERVO_init();
     ADC_init();                          /* battery telemetry, CPU1-owned     */
+    IMU_init();                          /* six-axis IMU on QSPI1, CPU1-owned */
     MOTOR_stopAll();
 }
 
@@ -477,6 +479,11 @@ void MOTOR_ALGO_task(void)
      * filtered and published to the xcore battery block from here. It must
      * run in every branch, so it sits before the e-stop return. */
     ADC_task();
+
+    /* IMU sample: a 14-byte QSPI1 burst every 5th tick (~120 us), converted
+     * and published to the xcore IMU block (doc 35). Like ADC_task it must
+     * run in every branch, so it sits before the e-stop return. */
+    IMU_task();
 
     /* Parameter/invert record from CPU0's DFlash load (cheap version peek). */
     MOTOR_ALGO_applyRecord();

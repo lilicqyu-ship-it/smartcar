@@ -64,6 +64,26 @@ boolean XCORE_estopIsActive(void);
 void   XCORE_battSetMv(uint16 mv);        /* CPU1 only                          */
 uint16 XCORE_battGetMv(void);             /* any core                           */
 
+/* Six-axis IMU sample (CPU1 bsp/imu -> CPU0/CPU2, doc 35): the last burst the
+ * 1 kHz task converted, in display-ready unit domains. seq bumps on every
+ * publish (XCORE_init zero state = "never published", so consumers watch seq
+ * instead of guessing from the data). drdyCount/errCount ride along for the
+ * bench lines; alive is WHO_AM_I ok AND reads succeeding. */
+typedef struct
+{
+    uint32  seq;                          /* bumped by XCORE_imuPublish       */
+    boolean alive;
+    uint8   whoAmI;                       /* last probe result (0x70 expected)*/
+    sint16  accMilliG[3];                 /* X/Y/Z, mg                        */
+    sint32  gyroMilliDps[3];              /* X/Y/Z, mdps                      */
+    sint16  tempCentiC;                   /* die temperature, 0.01 degC       */
+    uint32  drdyCount;                    /* INT1 rising edges since boot     */
+    uint32  errCount;                     /* failed SPI transactions          */
+} XcoreImu;
+
+void XCORE_imuPublish(const XcoreImu *imu);   /* CPU1 only                    */
+void XCORE_imuRead(XcoreImu *imu);            /* any core                     */
+
 /* Bench wheel-direction calibration request (doc 23 section 8.4): CPU0
  * latches it on PROTO 0x70, CPU1 consumes it once and runs the per-wheel
  * pulse test on the same core that owns the motors. */

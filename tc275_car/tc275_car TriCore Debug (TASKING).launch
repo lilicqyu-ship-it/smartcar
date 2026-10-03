@@ -5,11 +5,12 @@
     <booleanAttribute key="ENABLE_AGENTLOG" value="false"/>
     <booleanAttribute key="ENABLE_FLASHING" value="true"/>
     <booleanAttribute key="ENABLE_STOPPING" value="true"/>
-    <stringAttribute key="EXECUTABLE_PATH" value="${workspace_loc}/tc275_car/TriCore Debug (TASKING)/tc275_car.elf"/>
+    <stringAttribute key="EXECUTABLE_PATH" value="${project_loc}/TriCore Debug (TASKING)/tc275_car.elf"/>
     <stringAttribute key="PPU_ELF_PATH" value=""/>
     <stringAttribute key="STOP_FUNCTION" value="core0_main"/>
     <stringAttribute key="SVD" value="C:/infineon/AURIX-Studio-1.10.40/build_system/bundled-artefacts-repo/svd/tc27xdpd/1.2-3/device.svd"/>
     <stringAttribute key="org.eclipse.cdt.launch.PROJECT_ATTR" value="tc275_car"/>
+    <booleanAttribute key="org.eclipse.debug.core.ATTR_FORCE_SYSTEM_CONSOLE_ENCODING" value="false"/>
     <listAttribute key="org.eclipse.debug.core.MAPPED_RESOURCE_PATHS">
         <listEntry value="/tc275_car"/>
     </listAttribute>
@@ -19,12 +20,12 @@
     <stringAttribute key="org.eclipse.debug.ui.ATTR_LOCATION" value="/tc275_car/tc275_car TriCore Debug (TASKING).launch"/>
     <stringAttribute key="org.eclipse.debug.ui.ATTR_PROJECT_NAME" value="tc275_car"/>
     <booleanAttribute key="org.eclipse.debug.ui.ATTR_SHARED" value="true"/>
-    <stringAttribute key="org.eclipse.tcf.debug.MemoryMap" value=""/>
+    <stringAttribute key="org.eclipse.tcf.debug.MemoryMap" value="[{&quot;FileName&quot;:&quot;C:/Code/smartcar/tc275_car/TriCore Debug (TASKING)/tc275_car.elf&quot;,&quot;ID&quot;:&quot;/DAS JDS TriBoard TCXXX V3.5 TBBA6DEO/Core 2: CPU2 TriCore 1.6P&quot;,&quot;Flags&quot;:0,&quot;UUID&quot;:&quot;0318eb95-cd53-45d9-a805-68ad3a2f6ae8&quot;},{&quot;FileName&quot;:&quot;C:/Code/smartcar/tc275_car/TriCore Debug (TASKING)/tc275_car.elf&quot;,&quot;ID&quot;:&quot;/DAS JDS TriBoard TCXXX V3.5 TBBA6DEO/Core 2: CPU2 TriCore 1.6P&quot;,&quot;Flags&quot;:0,&quot;UUID&quot;:&quot;c7f52876-6239-4ffd-8c37-b1f47bf50310&quot;},{&quot;FileName&quot;:&quot;C:/Code/smartcar/tc275_car/TriCore Debug (TASKING)/tc275_car.elf&quot;,&quot;ID&quot;:&quot;/DAS JDS TriBoard TCXXX V3.5 TBBA6DEO/Core 2: CPU2 TriCore 1.6P&quot;,&quot;Flags&quot;:0,&quot;UUID&quot;:&quot;173b1949-3588-4602-8a35-6fa65a373aa1&quot;},{&quot;FileName&quot;:&quot;C:/Code/smartcar/tc275_car/TriCore Debug (TASKING)/tc275_car.elf&quot;,&quot;ID&quot;:&quot;/DAS JDS TriBoard TCXXX V3.5 TBBA6DEO/Core 0: CPU0 TriCore 1.6E&quot;,&quot;Flags&quot;:0,&quot;UUID&quot;:&quot;a06d36c7-ff2c-4e6f-964a-81f3c9a16480&quot;},{&quot;FileName&quot;:&quot;C:/Code/smartcar/tc275_car/TriCore Debug (TASKING)/tc275_car.elf&quot;,&quot;ID&quot;:&quot;/DAS JDS TriBoard TCXXX V3.5 TBBA6DEO/Core 2: CPU2 TriCore 1.6P&quot;,&quot;Flags&quot;:0,&quot;UUID&quot;:&quot;a596a68b-a5ba-43a1-950f-b7c187540501&quot;},{&quot;FileName&quot;:&quot;C:/Code/smartcar/tc275_car/TriCore Debug (TASKING)/tc275_car.elf&quot;,&quot;ID&quot;:&quot;/DAS JDS TriBoard TCXXX V3.5 TBBA6DEO/Core 0: CPU0 TriCore 1.6E&quot;,&quot;Flags&quot;:0,&quot;UUID&quot;:&quot;85988632-f12e-4397-9a71-e8b37f7e0ebb&quot;},{&quot;FileName&quot;:&quot;C:/Code/smartcar/tc275_car/TriCore Debug (TASKING)/tc275_car.elf&quot;,&quot;ID&quot;:&quot;/DAS JDS TriBoard TCXXX V3.5 TBBA6DEO/Core 2: CPU2 TriCore 1.6P&quot;,&quot;Flags&quot;:0,&quot;UUID&quot;:&quot;155a065c-0a86-4a20-b727-6d3adfe2609d&quot;},{&quot;FileName&quot;:&quot;C:/Code/smartcar/tc275_car/TriCore Debug (TASKING)/tc275_car.elf&quot;,&quot;ID&quot;:&quot;/DAS JDS TriBoard TCXXX V3.5 TBBA6DEO/Core 0: CPU0 TriCore 1.6E&quot;,&quot;Flags&quot;:0,&quot;UUID&quot;:&quot;2c2d3413-1cae-4681-8e4f-3cb3126863b2&quot;},{&quot;FileName&quot;:&quot;C:/Code/smartcar/tc275_car/TriCore Debug (TASKING)/tc275_car.elf&quot;,&quot;ID&quot;:&quot;/DAS JDS TriBoard TCXXX V3.5 TBBA6DEO/Core 1: CPU1 TriCore 1.6P&quot;,&quot;Flags&quot;:0,&quot;UUID&quot;:&quot;a015efaf-8bd8-4916-9f25-31eb97672991&quot;},{&quot;FileName&quot;:&quot;C:/Code/smartcar/tc275_car/TriCore Debug (TASKING)/tc275_car.elf&quot;,&quot;ID&quot;:&quot;/DAS JDS TriBoard TCXXX V3.5 TBBA6DEO/Core 2: CPU2 TriCore 1.6P&quot;,&quot;Flags&quot;:0,&quot;UUID&quot;:&quot;6dbef339-a91a-41e4-9f95-085f94053b3f&quot;},{&quot;FileName&quot;:&quot;C:/Code/smartcar/tc275_car/TriCore Debug (TASKING)/tc275_car.elf&quot;,&quot;ID&quot;:&quot;/DAS JDS TriBoard TCXXX V3.5 TBBA6DEO/Core 0: CPU0 TriCore 1.6E&quot;,&quot;Flags&quot;:0,&quot;UUID&quot;:&quot;d4ed6d2d-03d7-41e9-8a4f-acc48764cfcd&quot;},{&quot;FileName&quot;:&quot;C:/Code/smartcar/tc275_car/TriCore Debug (TASKING)/tc275_car.elf&quot;,&quot;ID&quot;:&quot;/DAS JDS TriBoard TCXXX V3.5 TBBA6DEO/Core 1: CPU1 TriCore 1.6P&quot;,&quot;Flags&quot;:0,&quot;UUID&quot;:&quot;70713332-1802-4508-8a89-1afbe95e38c7&quot;}]"/>
     <stringAttribute key="org.eclipse.tcf.debug.PeerID" value="TCP:127.0.0.1:1534"/>
     <stringAttribute key="org.eclipse.tcf.debug.ProjectName" value="tc275_car"/>
     <booleanAttribute key="org.eclipse.tcf.debug.RunLocalAgent" value="false"/>
     <booleanAttribute key="org.eclipse.tcf.debug.RunLocalServer" value="false"/>
     <booleanAttribute key="org.eclipse.tcf.debug.UseLocalAgent" value="false"/>
-    <stringAttribute key="org.eclipse.tcf.debug.executable_name" value="${workspace_loc}/tc275_car/TriCore Debug (TASKING)/tc275_car.elf"/>
-    <stringAttribute key="sessionID" value="d643e30d-c2d7-4cce-ae61-5eea596041a8"/>
+    <stringAttribute key="org.eclipse.tcf.debug.executable_name" value="${project_loc}/TriCore Debug (TASKING)/tc275_car.elf"/>
+    <stringAttribute key="sessionID" value="021de841-6d92-4f42-9526-6bc8da44d8ea"/>
 </launchConfiguration>

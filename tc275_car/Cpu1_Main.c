@@ -24,8 +24,9 @@
  * CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
  * IN THE SOFTWARE.
  *********************************************************************************************************************/
-/* CPU1 - bare-metal core: motor algorithm. Owns the GTM/TB6612 motor BSP
- * and runs a 1 kHz superloop (slew-rate ramps, e-stop brake, command-loss
+/* CPU1 - bare-metal core: motor algorithm. Owns the GTM/TB6612 motor BSP,
+ * the Hall encoders, the battery ADC and the LSM6DSV16BX IMU (QSPI1), and
+ * runs a 1 kHz superloop (slew-rate ramps, e-stop brake, command-loss
  * watchdog). No FreeRTOS API may be used here - the kernel runs on CPU0. */
 #include "Ifx_Types.h"
 #include "IfxCpu.h"
@@ -44,8 +45,9 @@ void core1_main(void)
 
     /* CPU1 (motor core) watchdog ON, fed from the 1 kHz loop inside
      * MOTOR_ALGO_run() (doc 21 SS7.2/SS18 C8). If the loop sticks, the
-     * watchdog resets the whole device within ~0.5 s; the boot path back
-     * leaves every TB6612 channel stopped (MOTOR_init duty 0 +
+     * watchdog expires in ~1.4 s and its NMI (hook in
+     * Configurations/Ifx_Cfg.h) software-resets the whole device; the boot
+     * path back leaves every TB6612 channel stopped (MOTOR_init duty 0 +
      * MOTOR_stopAll) with zero targets, i.e. the safe state. */
     WDG_enableCpu();
 

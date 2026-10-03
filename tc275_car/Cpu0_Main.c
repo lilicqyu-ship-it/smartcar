@@ -51,7 +51,7 @@ IfxCpu_syncEvent cpuSyncEvent = 0;
 #define LED1_PIN_INDEX 5  /* LED1 on KIT_AURIX_TC275_LITE, Port 0 Pin 5 */
 #define BLINKY_PERIOD  250U
 
-#if defined(__TASKING__)
+
 static void vBlinkyTask(void *pvParameters)
 {
     while (1)
@@ -95,7 +95,7 @@ static void vRobotControlTask(void *pvParameters)
 
         /* DPT result mailbox + deferred calibration saves (doc 34 SS8.3).
          * A save masks this core's interrupts for tens of ms; the 10 ms feed
-         * above and the one below bound the gap well inside the ~0.5 s CPU
+         * above and the one below bound the gap well inside the ~1.4 s CPU
          * watchdog window. */
         CALIB_tick();
         WDG_serviceCpu();
@@ -180,7 +180,7 @@ static void vRobotControlTask(void *pvParameters)
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
-#endif
+
 
 void core0_main(void)
 {
@@ -188,7 +188,10 @@ void core0_main(void)
 
     /* CPU0 watchdog ON (doc 21 SS18 C8): fed by the robot control task
      * every 10 ms. A hung scheduler or a starved robot task resets the
-     * device in ~0.5 s, and vApplicationStackOverflowHook relies on this
+     * device in ~1.4 s (expiry raises an NMI whose hook in
+     * Configurations/Ifx_Cfg.h triggers a software reset - the hardware
+     * alone would only raise NMI and wedge), and
+     * vApplicationStackOverflowHook relies on this
      * to turn a stack overflow into a reset instead of a silent spin.
      * After the reset the boot comes back with all motors stopped. */
     WDG_enableCpu();
@@ -253,9 +256,10 @@ void core0_main(void)
 #if defined(__TASKING__)
 /* FreeRTOS detected a task running past its stack (method 1, checked at
  * context switch). Report on the console, then stop feeding: the CPU0
- * watchdog enabled in core0_main bites in ~0.5 s and the reset lands the
- * system in the safe (motors stopped) boot state. Spinning here without
- * the watchdog armed - the old behavior - swallowed the fault. */
+ * watchdog enabled in core0_main expires in ~1.4 s, its NMI (hook in
+ * Configurations/Ifx_Cfg.h) triggers the software reset, and the reset
+ * lands the system in the safe (motors stopped) boot state. Spinning here
+ * without the watchdog armed - the old behavior - swallowed the fault. */
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 {
     (void)xTask;
@@ -271,7 +275,7 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
 
     while (1)
     {
-        __nop();                     /* un-fed watchdog resets in ~0.5 s */
+        __nop();                     /* un-fed watchdog expires in ~1.4 s, NMI hook resets */
     }
 }
 #endif

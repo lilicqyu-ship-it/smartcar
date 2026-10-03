@@ -4,7 +4,7 @@
 |---|---|
 | 文档编号 | 32 |
 | 域 | TC275（本仓库固件工程） |
-| 版本 | V1.9（2026-09-30：§8 排障表"手转一圈计数"一行按新刻度更正——实物编码器 13 PPR，×4×20.409 ≈ 1061 计数/轮转，半相退化判据 ≈265，随 23 V1.17 / 34 V1.4。V1.8（2026-09-27：**台架标定/DPT 落地随 34/21 V1.10 同步**——§1 单测命令 ① 的源列表加 `mw/calib/calib_record.c`（`.github/workflows/ci.yml` 同改，否则 CI 链接失败）、断言数 2873→**2948**；§8 排障表新增三行：开机 `CALIBREC` 一行怎么看、`0x71` jog 不动、DFlash 保存失败/`SAVED=2`；§5 补"写 DFlash 只允许 CPU0 且必须喂狗+关中断"。V1.7（2026-09-27）= **电池电压采集随 21 V1.9 同步**——§8 排障表新增 `batteryMv` 读数异常一行，验收动作=万用表量 X2-15 基准与电池电压（`23 §5.5`）。V1.6 = 2026-09-27：**CPU0/CPU1 硬件看门狗启用随 21 V1.8 同步**——§3 调试期约定从"看门狗已关"翻转为"现在是开的，跑着复位先查喂狗断流"，§8 排障表"跑一段时间后复位"改口径并新增"打印 `FATAL: stack overflow in task:` 后复位"一行；栈溢出钩子不再静默空转。V1.5 = 2026-09-27：**CPU1 速度闭环 + 判向自动化随 21 V1.7 同步**——§8 排障表新增 `SRV=`/`ENCCAL` 两行与"闭环不振荡"口径；判向首选 `0x70` 自动版。V1.4 = 2026-09-27：**链路泵简化随 `com/link.c` `ae10aac` 同步**——§1 单测断言数 2855→2873（`test_seq_relock`）并补 GitHub Actions 一句；§8 排障表"寄存器读回不稳"行改按单读快照新口径（`regUnstable` 计数器已随泵简化移除），新增"满载断连"历史故障行。V1.3 = 2026-09-26：**UART 板间链路弃用的构建口径**——§1 改为"两个 TASKING 配置都已定义 `USE_SPI_LINK`，构建只产出 SPI；GCC 配置无此符号"，§3 CPU2 行同步；§4 步骤 5 补 IRQ 无外部上拉、判活只看 `SF_ALIVE`（`23 §9.3`）。V1.2 = 目录重排同步：仓库已按 SDD §3.4 目标态布局组织（`app/ rt/ com/ mw/ bsp/`），include 为工程根限定路径；§1 主机单测命令、§3 任务地图、§5/§7/§8 路径同步；TC275 IDE 构建链接闭合已达成（Debug 0 错误）。V1.1 = SPI 链路契约回写（主机单测命令与排障表）） |
+| 版本 | V1.11（2026-10-03：**IMU 驱动落地随 35 号 V1.0 同步**——§1 单测命令加 ③ `test_imu`（55 断言）与 ④ `test_xcore`（1095→1109，含 IMU 信箱）；§3 CPU1 行补 `bsp/imu.c`（QSPI1 11/14/15 + ERU 24）；§4 步骤 5 补 **SCU ERU 例外**（P15.4/P15.5 可边沿中断，IMU INT1 即此路径）。V1.10（2026-10-03：**看门狗假死根治随 tc275_car v1.1.2 / 21 V1.13 同步**——§3 调试约定补"超时反应已闭合"（WDT 到期=NMI→软复位，`Ifx_Cfg.h` 钩子；旧固件到期即假死）、窗口数字全文更正 0.3~0.5 s→**~1.4 s**、§8 排障表新增"整车冻结假死"一行。V1.9（2026-09-30：§8 排障表"手转一圈计数"一行按新刻度更正——实物编码器 13 PPR，×4×20.409 ≈ 1061 计数/轮转，半相退化判据 ≈265，随 23 V1.17 / 34 V1.4。V1.8（2026-09-27：**台架标定/DPT 落地随 34/21 V1.10 同步**——§1 单测命令 ① 的源列表加 `mw/calib/calib_record.c`（`.github/workflows/ci.yml` 同改，否则 CI 链接失败）、断言数 2873→**2948**；§8 排障表新增三行：开机 `CALIBREC` 一行怎么看、`0x71` jog 不动、DFlash 保存失败/`SAVED=2`；§5 补"写 DFlash 只允许 CPU0 且必须喂狗+关中断"。V1.7（2026-09-27）= **电池电压采集随 21 V1.9 同步**——§8 排障表新增 `batteryMv` 读数异常一行，验收动作=万用表量 X2-15 基准与电池电压（`23 §5.5`）。V1.6 = 2026-09-27：**CPU0/CPU1 硬件看门狗启用随 21 V1.8 同步**——§3 调试期约定从"看门狗已关"翻转为"现在是开的，跑着复位先查喂狗断流"，§8 排障表"跑一段时间后复位"改口径并新增"打印 `FATAL: stack overflow in task:` 后复位"一行；栈溢出钩子不再静默空转。V1.5 = 2026-09-27：**CPU1 速度闭环 + 判向自动化随 21 V1.7 同步**——§8 排障表新增 `SRV=`/`ENCCAL` 两行与"闭环不振荡"口径；判向首选 `0x70` 自动版。V1.4 = 2026-09-27：**链路泵简化随 `com/link.c` `ae10aac` 同步**——§1 单测断言数 2855→2873（`test_seq_relock`）并补 GitHub Actions 一句；§8 排障表"寄存器读回不稳"行改按单读快照新口径（`regUnstable` 计数器已随泵简化移除），新增"满载断连"历史故障行。V1.3 = 2026-09-26：**UART 板间链路弃用的构建口径**——§1 改为"两个 TASKING 配置都已定义 `USE_SPI_LINK`，构建只产出 SPI；GCC 配置无此符号"，§3 CPU2 行同步；§4 步骤 5 补 IRQ 无外部上拉、判活只看 `SF_ALIVE`（`23 §9.3`）。V1.2 = 目录重排同步：仓库已按 SDD §3.4 目标态布局组织（`app/ rt/ com/ mw/ bsp/`），include 为工程根限定路径；§1 主机单测命令、§3 任务地图、§5/§7/§8 路径同步；TC275 IDE 构建链接闭合已达成（Debug 0 错误）。V1.1 = SPI 链路契约回写（主机单测命令与排障表）） |
 | 前置阅读 | `21 §18`（工程级实现约束，**动手前必读**）、`23`（接线真源） |
 | 与 31 的分工 | 31 描述"现在代码是什么样"，本文描述"要加东西该按什么步骤动、去哪验证" |
 
@@ -42,6 +42,16 @@ gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
     test/host/test_sf_telemetry.c mw/sf/sf_telemetry.c \
     mw/sf/sf_frame.c ../esp32c6_car/components/c6_proto/proto_frames.c \
     -o test/host/out/test_sf_telemetry.exe && ./test/host/out/test_sf_telemetry.exe
+
+# ③ IMU 换算链（55 断言；LSM6DSV16BX mg/mdps/温度换算 + SPI 命令字节，
+#    纯函数在 bsp/imu.h——改灵敏度/FS 码/舍入后必跑；驱动主体 bsp/imu.c 无单测）
+gcc -std=c99 -Wall -Wextra -Werror -O2 -I . -I test/host/stub \
+    test/host/test_imu.c -o test/host/out/test_imu.exe && ./test/host/out/test_imu.exe
+
+# ④ xcore 队列/日志/IMU 信箱纪律（1109 断言；stub 目录必须排 -I 首位）
+gcc -std=c99 -Wall -Wextra -Werror -O2 -I test/host/stub -I . \
+    test/host/test_xcore.c mw/xcore/xcore.c \
+    -o test/host/out/test_xcore.exe && ./test/host/out/test_xcore.exe
 ```
 
 ①的判据见 `22 §7.2` 首行；②是 `21 §18 C11/C12` 那条铁律的落地手段——**文档写"两侧一致"不算验证，编译对方源码才算**。②不带 `-DC6_CROSS_CHECK` 也能跑，但那只测自己，退化成同义反复。
@@ -57,14 +67,14 @@ gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
 | 存活指示 | LED1 = P00.5（blinky 250 ms 翻转） | 三核调度是否活着 |
 | C6 调试控制台口 | mikroBUS pin13(TX=P15.0)/pin14(RX=P15.1) ↔ DevKitC-1 J1-5/6 | **不是板间链路**（UART 已于 2026-09-26 弃用，`21 §18 C15`）；只出 C6 控制台日志，也是"删 `USE_SPI_LINK` 重编"时的应急返修口 |
 
-调试期约定（2026-09-27 起已变更）：**CPU0/CPU1 的 CPU 看门狗现在是开着的**（`bsp/wdg.h`，窗口 ≈0.3~0.5 s；喂狗点 = CPU1 的 1 kHz 环、CPU0 的 robot 任务 10 ms 循环）。SM(安全)与 CPU2 看门狗仍关闭。因此**任何"跑着跑着复位"的现象，第一嫌疑是这条核的喂狗点断了流**（任务被阻塞/优先级被饿死/死循环），而不是"忘了关看门狗"；新起的常驻循环必须自带 `WDG_serviceCpu()`。详见 `21 §7.2` 与 `21 §18 C8`。
+调试期约定（2026-09-27 起已变更；**2026-10-03 补超时反应**）：**CPU0/CPU1 的 CPU 看门狗现在是开着的**（`bsp/wdg.h`，窗口 ≈**1.4 s**——`REL=0xF800` 按官方锚点 0xE000≈1.3 s 线性外推，旧稿"0.3~0.5 s"算术有误；喂狗点 = CPU1 的 1 kHz 环、CPU0 的 robot 任务 10 ms 循环）。SM(安全)与 CPU2 看门狗仍关闭。**超时反应已闭合（tc275_car v1.1.2，`21 §7.2`）**：TC27x 的 CPU WDT 到期只发 NMI、不自行复位，`Configurations/Ifx_Cfg.h` 的 NMI 钩子直接软复位——没有它，看门狗到期 = 整车假死（2026-10-03 台架复现的故障形态）。因此**任何"跑着跑着复位"的现象，第一嫌疑是这条核的喂狗点断了流**（任务被阻塞/优先级被饿死/死循环），而不是"忘了关看门狗"；新起的常驻循环必须自带 `WDG_serviceCpu()`。详见 `21 §7.2` 与 `21 §18 C8`。
 
 ## 3. 任务地图（谁在哪核上）
 
 | 核 | 形态 | 代码 | 加东西时的落点 |
 |---|---|---|---|
-| CPU0 | FreeRTOS | `Cpu0_Main.c` + `app/robot.c` | 新任务 = 在 `Cpu0_Main.c` 建任务；控制类逻辑进 `robot.c` 的 10 ms 拍。**CPU0 看门狗已开**：常驻任务若会长期占住 CPU，需自行喂狗或提高 robot 任务优先级，否则 0.3~0.5 s 内整机复位 |
-| CPU1 | 裸机 1 kHz | `Cpu1_Main.c` + `rt/motor_algo.c` + `rt/servo.c` + `rt/encoder.c` | 算法进 `motor_algo.c`（斜坡/闭环/失联看门狗/判向 `0x70`/直驱 jog `0x71`）+ `servo.c`（速度 PI），**不许阻塞、不许打印**（打印走日志环，§6）；`rt/encoder.c` 的满量程/轮径是**运行时变量**（`g_fullScaleMmS`/`g_wheelDiaMm`，由 `mw/calib` 生效记录写入，公式不许动，`34 §8.2`）；编码器 ISR 属 `encoder.c`，优先级 16~23 见 `21 §18 C2`。**CPU1 看门狗已开**，喂狗点在 `MOTOR_ALGO_run()` 环内 |
+| CPU0 | FreeRTOS | `Cpu0_Main.c` + `app/robot.c` | 新任务 = 在 `Cpu0_Main.c` 建任务；控制类逻辑进 `robot.c` 的 10 ms 拍。**CPU0 看门狗已开**：常驻任务若会长期占住 CPU，需自行喂狗或提高 robot 任务优先级，否则 ~1.4 s 内 NMI→整机软复位 |
+| CPU1 | 裸机 1 kHz | `Cpu1_Main.c` + `rt/motor_algo.c` + `rt/servo.c` + `rt/encoder.c` + `bsp/imu.c` | 算法进 `motor_algo.c`（斜坡/闭环/失联看门狗/判向 `0x70`/直驱 jog `0x71`）+ `servo.c`（速度 PI），**不许阻塞、不许打印**（打印走日志环，§6）；`rt/encoder.c` 的满量程/轮径是**运行时变量**（`g_fullScaleMmS`/`g_wheelDiaMm`，由 `mw/calib` 生效记录写入，公式不许动，`34 §8.2`）；编码器 ISR 属 `encoder.c`，优先级 16~23 见 `21 §18 C2`；IMU 采样/重探属 `imu.c`（QSPI1 11/14/15 + ERU 24，同表）。**CPU1 看门狗已开**，喂狗点在 `MOTOR_ALGO_run()` 环内 |
 | CPU2 | 裸机超循环 | **构建只产出 SPI**：`Cpu2_Main.c` + `com/{link,spi_hal_pins}.c` + `mw/sf/`（`USE_SPI_LINK` 已在两个 TASKING 配置定义，§1）；UART 分支（`Cpu2_Main.c` + `com/wifi_at.c`）已弃用，删符号才编 | 链路层改动进 `com/`；SF 帧格式改动要同时改 `21 §6.1a`、`22 §5` 与 C6 侧 `c6_sf`（两处独立实现，靠文档对齐） |
 
 命名与风格（照现有代码，勿另立）：文件名小写下划线、模块前缀大写 `MODULE_`（`ROBOT_task` / `MOTOR_ALGO_run` / `PROTO_feedByte` / `XCORE_estopRequest` / `WIFI_sendRaw`）；头文件守卫 `MODULE_H`；**代码注释用英文，文档与 commit message 用中文**。
@@ -77,7 +87,7 @@ gcc -std=c99 -Wall -Wextra -O2 -DC6_CROSS_CHECK -I . \
 2. **查冲突**：与 `23` 的接线状态一览和各表对一遍（尤其 P33.0~7 编码器、P00.0 CAN、P00.5/P00.6 LED、P15.0/P15.1 WiFi、P2x 组 JTAG/Shield2Go）。
 3. **声明 ISR**：`IFX_INTERRUPT(myIsr, 0, prio)` —— **向量表参数固定写 0**，不论这个中断属于哪个核；目标核由 SRC 的 `typeOfService = IfxSrc_Tos_cpu0|cpu1|cpu2` 决定。原因见 `21 §18 C1`。
 4. **挑优先级**：按 `21 §18 C2` 的已占用表（CPU0 用了 1/2/4/8/12，CPU2 用了 5/7/13 + **6/9/10 = QSPI3 TX/RX/ER**）取空闲档，并在该表登记。
-5. **想给排针 GPIO 加边沿中断？TC275 上不行**：P23.x 这类 GPIO 既没有 ERU 通路也不在 IOM 监视输入内，配不出"电平跳变触发 ISR"（`21 §18 C9`）。握手/就绪类信号一律**输入+内部上拉 + 主循环采电平**（SPI 链路就是这么做的，`22 §2 E11`）。注意"内部上拉"在实物上是**唯一**的上拉：两板之间全是杜邦线直连、没有任何外部电阻，所以这条线驱动能力弱、边沿慢，采到的电平不能用来判从机在位（判活只看 `SF_ALIVE`），详见 `23 §9.3` 与 `21 §18 C14`。
+5. **想给排针 GPIO 加边沿中断？TC275 上分脚**：P23.x/P33.x 这类 GPIO 既没有 ERU 通路也不在 IOM 监视输入内，配不出"电平跳变触发 ISR"（`21 §18 C9`）。握手/就绪类信号一律**输入+内部上拉 + 主循环采电平**（SPI 链路就是这么做的，`22 §2 E11`）。注意"内部上拉"在实物上是**唯一**的上拉：两板之间全是杜邦线直连、没有任何外部电阻，所以这条线驱动能力弱、边沿慢，采到的电平不能用来判从机在位（判活只看 `SF_ALIVE`），详见 `23 §9.3` 与 `21 §18 C14`。**例外 = SCU ERU 通路内的脚**：P15.4/P15.5（`IfxScu_REQ0/REQ13`）**可以**做边沿中断——IMU INT1 就走这条路（P15.4 → 输入通道 0 → OGU0 → `MODULE_SRC.SCU.SCU.ERU[0]` = UM 名 `SRC_SCUERU0`，**ISR 必须清 `SCU_FMR` 的事件标志**否则请求线常挂=中断洪水，`bsp/imu.c`，35 §3）；选脚前先查 `Libraries/iLLD/TC27D/Tricore/_PinMap/IfxScu_PinMap.h`。
 6. **验证真的进表了**：构建后打开 `.map`，在 **Removed Sections** 里搜 `Isr`。出现你的 ISR 名 = 表号写错了，中断永远不会进、且编译链接全程无报错。
 7. 上板验证：在 ISR 里累加计数器，经日志环（§6）或状态字段出到控制台，不要靠"感觉它在跑"。
 
@@ -119,9 +129,10 @@ CPU1/CPU2 打印 = 整行拷进日志环（1 KB，满则整行丢弃），由 CP
 | 中断进了表但打到错的核 | SRC 的 `TOS` 位没设 / 优先级与别的核撞了 | 读对应 `SRC*` 寄存器；对照 `21 §18 C2` 占用表 |
 | AT 链路全超时、三核启动正常 | CPU2 的 ASCLIN1 中断从未触发 | 同第 1 行；再看日志环有没有 RX 计数 |
 | 控制台乱码、偶发卡死 | 跨核直接 printf | 全量搜非 CPU0 代码里的 `IfxAsclin`/`UART_` 调用 |
-| 跑一段时间后复位 | 该核喂狗断流（robot 任务/1 kHz 环被阻塞或饿死） | 先看复位前最后一条日志，再确认 `WDG_serviceCpu()` 所在循环是否还在跑（`21 §18 C8`） |
+| 跑一段时间后复位 | 该核喂狗断流（robot 任务/1 kHz 环被阻塞或饿死），~1.4 s 后 NMI→软复位（v1.1.2+） | 先看复位前最后一条日志，再确认 `WDG_serviceCpu()` 所在循环是否还在跑（`21 §18 C8`） |
 | 打印 `FATAL: stack overflow in task:<名字>` 后复位 | 该任务栈越界（`configCHECK_FOR_STACK_OVERFLOW=1`，上下文切换时检出），钩子已主动断喂自恢复 | 调大该任务 `xTaskCreate` 的栈字数，或把局部大数组移成静态/heap；不要改成忽略 |
-| 上电后 0.3~0.5 s 一到就复位、反复循环 | 该核启了看门狗却没有喂狗点（新加了 `WDG_enableCpu()` 却没在常驻循环里 `WDG_serviceCpu()`；或 `core*_main` 初始化里有超过窗口的长阻塞） | 数复位周期是否≈窗口值；查该核是否已有喂狗循环（`21 §18 C8`）。**不要用"再关掉看门狗"解决**，那是把底线撤了 |
+| 上电后 ~1.4 s 一到就复位、反复循环 | 该核启了看门狗却没有喂狗点（新加了 `WDG_enableCpu()` 却没在常驻循环里 `WDG_serviceCpu()`；或 `core*_main` 初始化里有超过窗口的长阻塞） | 数复位周期是否≈窗口值；查该核是否已有喂狗循环（`21 §18 C8`）。**不要用"再关掉看门狗"解决**，那是把底线撤了 |
+| 整车冻结、不复位也不响应（假死） | **tc275_car < v1.1.2 的固件**：CPU WDT 到期只发 NMI、iLLD 默认空钩子直接返回，复位链未闭合（`21 §7.2` V1.13） | 烧 v1.1.2+（`Configurations/Ifx_Cfg.h` NMI 钩子已接 `IfxCpu_triggerSwReset`）；复现手段 = 台架拔喂狗点/加死循环 |
 | C6 一加速就重启 | 5V 供电裕量不足（brownout） | `23 §5`；并加 ≥470 µF |
 | 电机一侧转向相反 | `motor.c` 的 `g_dirInvert` 表 vs 实际线序 | `23 §4`，**查表，不要交叉猜测** |
 | 遥测速度一直等于指令值（不显示实测） | 编码器 8 线未接/未动过 → `alive=FALSE`，CPU0 回退指令回显 | 手转轮子 ≥1 圈（alive 窗口 500 ms）；台架判向步骤见 `23 §8.4` |
