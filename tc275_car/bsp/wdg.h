@@ -4,15 +4,22 @@
 /* CPU watchdog helper for whichever core includes it (doc 21 SS18 C8).
  *
  * Timeout base: Infineon's official watchdog example for this board
- * (AURIX_code_examples / Watchdog_1_KIT_TC275_LK) states CPU-WDT
- * reload 0xE000 is ~1.3 s with the power-on watchdog clock. Counting is
- * linear in the reload, so WDG_CPU_REL = 0xF800 (half the countdown
- * steps) is ~0.3..0.5 s: far above the longest service interval of any
- * core here (CPU0: 10 ms robot task, CPU1: 1 kHz loop) and short enough
- * that a stuck core resets the vehicle within ~0.5 s instead of driving
- * on stale PWM. Exact value to be measured on the bench into the
- * verification log (SDD SS7.1 targets <=200 ms; that needs a smaller
- * REL, safe to tighten once measured).
+ * (AURIX_code_examples / Watchdog_1_KIT_TC275_LK) states CPU-WDT reload
+ * 0xE000 is ~1.3 s with the power-on watchdog clock. Counting is linear in
+ * the reload, so WDG_CPU_REL = 0xF800 (LARGER than 0xE000) is ~1.4 s.
+ * The earlier "~0.3..0.5 s" claim contradicted that arithmetic and is
+ * withdrawn: the real window is ~1.4 s. Tightening toward the SDD SS7.1
+ * <=200 ms target stays a bench task - the DFlash save path (doc 34 SS8.3)
+ * runs one whole erase window with interrupts masked and no feed, so the
+ * measured erase time is the floor for REL.
+ *
+ * EXPIRY REACTION (the half that was missing until 2026-10-03): a CPU WDT
+ * expiry raises an NMI to this core - TC27x hardware does NOT reset by
+ * itself. The reaction is wired in Configurations/Ifx_Cfg.h
+ * (IFX_CFG_CPU_TRAP_NMI_HOOK -> IfxCpu_triggerSwReset): without it the iLLD
+ * default empty NMI hook returns and an expired watchdog wedges the core
+ * forever with no reset - the "watchdog false death" field failure, where
+ * the car freezes instead of rebooting to the safe boot state.
  *
  * The service is an ENDINIT clear+set pair, not
  * IfxScuWdt_serviceCpuWatchdog(): ENDINIT is a saturating counter and a
@@ -20,7 +27,7 @@
  * within 16 services - after that no single clear can unlock ENDINIT
  * again and the flash/OTA paths (SDD SS9) would hang. The set step of
  * the pair performs the actual refresh/reload (same pattern iLLD uses
- * inside IfxScuCcu_init).
+ * inside IfxCpuCcu_init).
  *
  * Debugger note: while a debugger is attached, TriCore OCD suspends the
  * watchdog on core halt, so this does not break flash debugging; the
@@ -29,7 +36,7 @@
 
 #include "IfxScuWdt.h"
 
-/** \brief CPU-WDT reload value: ~0.3..0.5 s timeout (see header note) */
+/** \brief CPU-WDT reload value: ~1.4 s timeout (see header note) */
 #define WDG_CPU_REL 0xF800u
 
 /* Refresh this core's CPU watchdog. Must be called at least once per

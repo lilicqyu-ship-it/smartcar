@@ -57,4 +57,28 @@
 extern int vPortSyscallHandler( unsigned char id );
 #define IFX_CFG_CPU_TRAP_SYSCALL_CPU0_HOOK(t) vPortSyscallHandler(t.tId)
 
+/*********************************************************************************************************************/
+/*---------------------------------Configuration for Watchdog expiry reaction (doc 21 §7.2/§18 C8)----------------*/
+/*********************************************************************************************************************/
+/* TC27x hardware fact: a CPU watchdog expiry raises an NMI (trap class 7) to its core - it does NOT reset the
+ * device by itself. The iLLD default NMI hook (IfxCpu_Trap.c) is empty and returns, so with the stock setup an
+ * expired watchdog leaves the core wedged (NMI storm / dead WDT) with no reset ever: the car freezes forever
+ * instead of rebooting into the safe, motors-stopped boot state - the "watchdog false death" field failure
+ * (2026-10-03). Any NMI on this vehicle is an unhandleable fault, and the only safe reaction is a software
+ * reset, so the hook never returns.
+ *
+ * Context rules (NMI = highest priority, no ISR below it can run):
+ *   - no UART_println: blockingWrite waits on the TX ISR, which cannot run under NMI -> deadlock
+ *   - no xcore log/mutex: the interrupted context may hold the spinlock -> deadlock
+ *   - IfxCpu_triggerSwReset() is a single SCU_SWRSTCON.SWRSTREQ register write (no password, no ENDINIT)
+ *     followed by a spin - the one reset primitive that is safe here
+ * All three cores' trap tables share this handler; only CPU0/CPU1 have their WDT armed (Cpu2_Main.c keeps
+ * CPU2's deliberately disabled), so in practice this fires on a CPU0/CPU1 feed loss. */
+#define IFX_CFG_CPU_TRAP_NMI_HOOK(trapWatch)                            \
+    do                                                                  \
+    {                                                                   \
+        (void)(trapWatch);                                              \
+        IfxCpu_triggerSwReset();      /* never returns */               \
+    } while (0)
+
 #endif /* IFX_CFG_H */
