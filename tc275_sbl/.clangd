@@ -1,0 +1,10 @@
+# clangd 配置 —— 编译数据库由 scripts/gen-tc275-cdb.py 生成到 build/compile_commands.json
+# （宿主 clang + __HIGHTEC__ 路径解析；真实编译用 TASKING cctc，走 scons-sbl）
+
+Diagnostics:
+  Includes:
+    IgnoreHeader:
+      # IfxCpu_IntrinsicsGnuc.h 的 Ifx__* 内建包装函数体是 TriCore 专有 asm
+      # （寄存器名 d0/d12/d14/d15/a10/a11 宿主 clang 不识别）。报错可恢复，
+      # 声明/类型都在，只屏蔽这个头里的诊断。注意：clangd 此处按正则匹配绝对路径。
+      - ".*IfxCpu_IntrinsicsGnuc\\.h"

@@ -8,6 +8,12 @@
 ## [未发布]
 
 ### 变更
+- **五个工程 clangd 全量可解析**（编辑器跳转/补全/诊断）：三个 ESP-IDF 工程沿用各自
+  `build/compile_commands.json`（clangd 自动向上发现，无需配置）；TC275 两工程本机无
+  SCons + TASKING 工具链，新增 `scripts/gen-tc275-cdb.py`（`just clangd-db` 生成）——
+  与 site_scons 同源解析 `.cproject` 的 include/宏/源集，用宿主 clang + `__HIGHTEC__`
+  路径出 CDB，缺失的 HighTec 专有头（`machine/cint.h` 等）由 `scripts/clangd-shim/tc275/`
+  兜底，iLLD 内建包装头里的 TriCore 汇编诊断经各工程 `.clangd` 的 IgnoreHeader 屏蔽
 - **仓库架构 monorepo 化**：四个固件工程（esp32c6_car / smartcar_remote / tc275_car / tc275_sbl）
   以 subtree 保历史并入本仓（各仓原提交号全部保留可追溯），退役 submodule 总控架构——
   一次提交一次推送、跨工程改动原子化，`git status` 不再有 "(new commits)" 指针噪音；

@@ -90,6 +90,12 @@ scons-car *args:
 scons-sbl *args:
     cd tc275_sbl && {{py}} -m SCons {{args}}
 
+# 重新生成 TC275 工程的 clangd 编译数据库（<工程>/build/compile_commands.json）
+# 宿主 clang + __HIGHTEC__ 路径解析，编辑器跳转/补全/诊断用；真实编译仍走上面
+# 的 SCons/TASKING。改动 .cproject 的 include/宏/源集后重跑一次即可
+clangd-db:
+    @{{py}} scripts/gen-tc275-cdb.py
+
 # 检查本机开发环境（git/just/gh/bash 版本、换行与长路径配置）
 doctor:
     @bash scripts/doctor.sh
