@@ -245,6 +245,15 @@ def build(env, *, cfg_name, artifact, lsl, variant, opt='-O0'):
         raise Exception('未发现任何源文件（配置 %s）' % cfg_name)
 
     outdir = os.path.join('build', variant)
+
+    # cctc 内部两步法（compile -> ccXXXXa.src -> assemble）的临时响应文件
+    # （cc<pid>x，fopen "w+"）优先写 TMPDIR；未设时落在 cwd = 工程根，且进程
+    # 被中断（Ctrl+C、-j8 全量重编被杀）时不回收——工程根就攒下 ccXXXXXX
+    # 垃圾（v6.3r1 实测：kill 三次漏三个）。显式指进 build/<variant>/tmp，
+    # 泄漏物随 scons -c 一起清；目录必须先建好，缺目录 cctc F101 直接拒编。
+    tmpdir = os.path.abspath(os.path.join(outdir, 'tmp'))
+    os.makedirs(tmpdir, exist_ok=True)
+    env['ENV']['TMPDIR'] = tmpdir
     env.Replace(
         # 项目根本身也在 -I 列表里（Eclipse 传绝对路径；#include "mw/proto/x.h" 依赖它）
         CPPPATH=['.'] + cfg['includes'],
@@ -285,7 +294,7 @@ def build(env, *, cfg_name, artifact, lsl, variant, opt='-O0'):
     env.SideEffect(os.path.join(outdir, artifact + '.map'), elf)
     env.Clean(elf, [os.path.join(outdir, artifact + ext)
                     for ext in ('.hex', '.map', '.rsp')] +
-              [os.path.join(outdir, 'obj')])
+              [os.path.join(outdir, 'obj'), tmpdir])
 
     # .cproject / 构建脚本一变就全量重编（内容签名判断，不改不会触发）
     recipe = ['.cproject', 'SConstruct', __file__]
