@@ -3,11 +3,10 @@
 
 #include "Ifx_Types.h"
 
-/* Frame: AA 55 CMD LEN DATA... CRC */
-#define PROTO_HEADER1      0xAA
-#define PROTO_HEADER2      0x55
+/* Shared command table (requirement.md section 19). The codes travel inside SF
+ * frames on the SPI link (com/link.c) and are executed on CPU0 by
+ * PROTO_handleCommand; PROTO_MAX_PAYLOAD also sizes the link command queue. */
 #define PROTO_MAX_PAYLOAD  16
-#define PROTO_CRC_SEED     0x00
 
 /* Commands (requirement.md section 19) */
 #define PROTO_CMD_STOP            0x01
@@ -40,9 +39,9 @@
 #define PROTO_CMD_DPT_REC_CLEAR   0x74
 
 /* OTA commands (doc 24 SS5.3 / F7 command table; values match the C6 side,
- * esp32c6_car components/c6_proto/proto_frames.h). They travel as SF OTA frames,
- * not through this UART demo protocol - the constants complete the shared
- * command table; the SF layer forwards them in link.c. */
+ * esp32c6_car components/c6_proto/proto_frames.h). They travel as SF OTA frames
+ * and the SF layer forwards them in link.c - the constants complete the shared
+ * command table. */
 #define PROTO_CMD_OTA_BEGIN       0x60  /* {u32 total, u32 crc32}            */
 #define PROTO_CMD_OTA_CHUNK       0x61  /* {u16 idx, data<=240}              */
 #define PROTO_CMD_OTA_ACK         0x62  /* {u16 idx, u8 result}              */
@@ -57,9 +56,6 @@
 #define PROTO_CMD_DIAG            0x53
 #define PROTO_DIAG_SUB_VER_REQ    0x24
 
-/* Response: same CMD echoed back, DATA carries result */
-#define PROTO_CMD_STATUS_REPLY    0x40
-
 /* Robot states (requirement.md section 16) */
 #define ROBOT_STATE_INIT           0x00
 #define ROBOT_STATE_IDLE           0x01
@@ -73,7 +69,8 @@
 #define ROBOT_STATE_ROTATE_RIGHT   0x09
 #define ROBOT_STATE_FAULT          0x0A
 
-/* Status reply payload layout (sent to host via the ESP32-C6 WiFi link) */
+/* Status block published by CPU0 and carried to the host in the 20 ms SF
+ * telemetry frame */
 typedef struct
 {
     uint8  state;             /* ROBOT_STATE_* */
@@ -84,19 +81,7 @@ typedef struct
     uint8  emergencyStop;     /* 1 = e-stop active */
 } ProtocolStatus;
 
-/* Parser state machine outcome */
-typedef enum
-{
-    PROTO_RESULT_IDLE = 0,
-    PROTO_RESULT_FRAME,       /* a complete valid frame was dispatched */
-    PROTO_RESULT_ERROR
-} ProtoResult;
-
-void  PROTO_init(void);
-void  PROTO_feedByte(uint8 byte);                     /* CPU2: feed one byte from the WiFi UART */
-void  PROTO_handleCommand(uint8 cmd, const uint8 *data, uint8 len); /* CPU0: execute a validated command */
-ProtoResult PROTO_process(void);                      /* non-blocking pump, returns last dispatch result */
-void  PROTO_sendStatus(const ProtocolStatus *status); /* build status frame and send to the WiFi UART (CPU2) */
-boolean PROTO_sendBytes(const uint8 *data, uint32 len); /* raw write to the WiFi UART (CPU2, for host bridge) */
+/* CPU0: execute a command byte the link layer already validated */
+void  PROTO_handleCommand(uint8 cmd, const uint8 *data, uint8 len);
 
 #endif

@@ -16,7 +16,7 @@
 /* Vector table 0 on all three cores; the SRC TOS bit picks CPU2. Declaring any
  * other table number makes the Tasking lsl drop the entry silently (SDD C1). */
 #define SPIHAL_VECTAB          0
-/* Free slots next to ASCLIN1's 5/7/13 on CPU2 (SDD C2 occupancy table). */
+/* CPU2 slots that stay clear of the ASCLIN UART trio 5/7/13 (SDD C2 occupancy table). */
 #define SPIHAL_TX_PRIO         6
 #define SPIHAL_RX_PRIO         9
 #define SPIHAL_ER_PRIO         10

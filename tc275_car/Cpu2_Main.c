@@ -25,16 +25,8 @@
  * IN THE SOFTWARE.
  *********************************************************************************************************************/
 /* CPU2 - bare-metal core: the board link to the ESP32-C6.
- * Two builds share this file:
- *   USE_SPI_LINK : production path, SF frames over QSPI3 half duplex
- *                  transactions (doc/20-design/22-link-spi-design.md). Both
- *                  TASKING configurations define it, so this is the only path
- *                  a normal build produces.
- *   default      : demo path, AT firmware on ASCLIN1 (P15.0/P15.1) + the AA 55
- *                  byte protocol. The UART board link is deprecated (doc 21
- *                  SS5.6); this branch stays reachable only by deleting the
- *                  symbol, which is what a G1 failure or a factory rework does.
- * ASCLIN1 and its interrupts belong to this core; no FreeRTOS API may be used
+ * SF frames over QSPI3 half duplex transactions, doc/20-design/22-link-spi-design.md.
+ * QSPI3 and its pin muxing belong to this core; no FreeRTOS API may be used
  * here - the kernel runs on CPU0. */
 #include "Ifx_Types.h"
 #include "IfxCpu.h"
@@ -42,7 +34,6 @@
 #include "bsp/stime.h"
 #include "mw/proto/protocol.h"
 
-#ifdef USE_SPI_LINK
 #include "com/link.h"
 #include "com/ota_app.h"
 #include "mw/xcore/xcore.h"
@@ -234,19 +225,14 @@ static void link_speedPrint(void)
 
     XCORE_logi("SPD=", vals, 4u);
 }
-#else
-#include "com/wifi_at.h"
-#endif
 
 extern IfxCpu_syncEvent cpuSyncEvent;
 
 void core2_main(void)
 {
-#ifdef USE_SPI_LINK
     uint32 nextTelMs;
     uint32 nextDiagMs;
     uint32 nextSpdMs;
-#endif
 
     IfxCpu_enableInterrupts();
 
@@ -263,8 +249,6 @@ void core2_main(void)
     IfxCpu_waitEvent(&cpuSyncEvent, 1);
 
     STIME_init();
-
-#ifdef USE_SPI_LINK
 
     /* First rung of the clock ladder: gate G1 is a waveform compatibility test,
      * so it starts at 1 MHz and only climbs on measured error rates (22 SS8). */
@@ -298,20 +282,4 @@ void core2_main(void)
             link_speedPrint();             /* bench: wheel speeds + odometer     */
         }
     }
-
-#else
-
-    /* Initialize the binary protocol parser (byte stream comes from WiFi) */
-    PROTO_init();
-
-    /* Initialize the ESP32-C6 AT module on ASCLIN1 (P15.0 TX / P15.1 RX) */
-    WIFI_init();
-
-    WIFI_main();                           /* never returns */
-
-    while (1)
-    {
-    }
-
-#endif
 }

@@ -24,8 +24,8 @@
  * CMD(8)+ADDR(8)+DUMMY(8)+data inside one chip select.
  *
  * Interrupts: declared in vector table 0 and routed to CPU2 through the SRC TOS
- * bit (SDD SS18 C1/C2). Priorities 6/9/10 are the free slots next to ASCLIN1's
- * 5/7/13 on this core.
+ * bit (SDD SS18 C1/C2). Priorities 6/9/10 are the CPU2 slots that stay clear of
+ * the ASCLIN UART trio 5/7/13 in the SDD SS18 C2 occupancy table.
  */
 #ifndef SPI_HAL_PINS_H
 #define SPI_HAL_PINS_H

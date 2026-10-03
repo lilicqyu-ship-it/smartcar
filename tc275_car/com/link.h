@@ -6,9 +6,7 @@
  * Layers below: com/spi_hal_pins.c (one raw half duplex
  * transaction) and mw/sf/sf_frame.c (frame codec).
  *
- * This is the production LINK. The demo UART path (com/wifi_at.c) stays
- * the build default until gate G1 passes, so Cpu2_Main.c mounts one or the
- * other behind USE_SPI_LINK.
+ * This is the board link: Cpu2_Main.c runs LINK_main() as the CPU2 superloop.
  */
 #ifndef LINK_H
 #define LINK_H
