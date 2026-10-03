@@ -1,0 +1,43 @@
+name: Release (ios_remote)
+
+# Tag 驱动发版。push ios/vX.Y.Z 先跑 Swift 单测（复用 CI），再创建 GitHub
+# Release（自动生成 notes）。版本约定与固件工程一致: 0.x 预生产带 prerelease,
+# v1.0.0+ 正式发布。版本真源在 pbxproj 的 MARKETING_VERSION（just ios-version）。
+#
+# 刻意不附签名产物: 真机安装走 Xcode 自动签名，证书与开发机绑定，托管 runner
+# 无法产出可安装包——请从 tag 自行构建（just ios-install，见 firmware/README.md
+# 的 iOS 专节）。
+on:
+  push:
+    tags: ['ios/v*']
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Swift tests before publish
+    uses: ./.github/workflows/ios-remote.yml
+
+  release:
+    name: Publish GitHub Release
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: write
+    steps:
+      - name: Create or update the release for this tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          ARGS=(--verify-tag --title "$TAG")
+          case "$TAG" in
+            ios/v0.*) ARGS+=(--prerelease --latest=false) ;;
+            *)        ARGS+=(--latest) ;;
+          esac
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" "${ARGS[@]}"
+          else
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --generate-notes "${ARGS[@]}"
+          fi

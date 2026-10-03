@@ -1,8 +1,8 @@
 # smartcar 固件 monorepo 总控
 # 五个固件工程（esp32c6_car / s3-gateway / smartcar_remote / tc275_car / tc275_sbl）
 # 与 contracts/ 共享接口、firmware/fw.py 工具链同仓管理：一次提交一次推送，git status
-# 只会有真实文件差异；版本 tag 带工程前缀（c6/ gw-s3/ r-s3/ app/ sbl/，与 fw.py 工程
-# 别名一致）。
+# 只会有真实文件差异；版本 tag 带工程前缀（c6/ gw-s3/ r-s3/ app/ sbl/ ios/，与 fw.py
+# 工程别名一致；ios/ 为 iPhone 遥控器 App ios_remote/，不经 fw.py）。
 #
 # 跨平台：所有配方只调用 bash + scripts/*.sh，不用 shebang 配方。
 # Windows 上必须是 Git Bash —— 裸 "bash" 在 Windows 常解析到 WSL 的
@@ -75,6 +75,47 @@ fw-ota project *args:
 # 清空 firmware/dist/ 归档
 fw-clean:
     @{{py}} firmware/fw.py clean --yes
+
+# —— iOS 遥控器 App（ios_remote/，iPhone 上的 S3 遥控器）——
+# 不进 fw.py（无固件镜像/OTA 链路）：真机安装走 Xcode 自动签名（个人开发团队，
+# App 7 天有效期，到期重跑 ios-install）；模拟器跑测试免签名。设备 UDID 用
+# `xcrun devicectl list devices` 查（需手机 USB 连接并开启开发者模式）。
+ios-team := "WL65UECN2G"                    # Apple Development 团队 ID（可 just ios-team=XXXX 覆盖）
+ios-device := "00008030-000C59C60C43802E"   # 默认真机 UDID（可 just ios-device=YYYY 覆盖）
+ios-sim := "iPhone 17 Pro"                  # 测试用模拟器名
+
+# 编译 iOS 真机包（产物 DerivedData/.../Debug-iphoneos/S3Remote.app；余参透传 xcodebuild）
+ios-build *args:
+    xcodebuild -project ios_remote/S3Remote.xcodeproj -scheme S3Remote \
+        -destination 'platform=iOS,id={{ios-device}}' -allowProvisioningUpdates \
+        DEVELOPMENT_TEAM={{ios-team}} CODE_SIGN_STYLE=Automatic build {{args}}
+
+# 一条指令编译+下载到 iPhone（同 fw-flash 口径：默认先编译再装，不装旧包）
+#   just ios-install                        # 装默认设备
+#   just ios-install 00008101-XXXXXXXX      # 装指定 UDID
+#   首次需在手机 设置>通用>VPN与设备管理 信任开发者证书；App 首启允许"本地网络"
+ios-install device=ios-device *args:
+    xcodebuild -project ios_remote/S3Remote.xcodeproj -scheme S3Remote \
+        -destination 'platform=iOS,id={{device}}' -allowProvisioningUpdates \
+        DEVELOPMENT_TEAM={{ios-team}} CODE_SIGN_STYLE=Automatic build {{args}}
+    xcrun devicectl device install app --device {{device}} \
+        ~/Library/Developer/Xcode/DerivedData/S3Remote-*/Build/Products/Debug-iphoneos/S3Remote.app
+
+# iOS 主机单测（协议/控制语义/安全/电池防抖/信号分档；模拟器免签名）
+ios-test sim=ios-sim:
+    xcodebuild -project ios_remote/S3Remote.xcodeproj -scheme S3Remote \
+        -destination 'platform=iOS Simulator,name={{sim}}' test
+
+# 重新生成 App 图标（CoreGraphics 脚本 → 单尺寸 1024 资产；改设计后重跑 ios-build）
+ios-icon:
+    @swift ios_remote/tools/gen_icon.swift \
+        ios_remote/S3Remote/Assets.xcassets/AppIcon.appiconset/icon-1024.png
+
+# 升 iOS App 版本号（改 pbxproj 的 MARKETING_VERSION；版本真源唯一）
+#   just ios-version v1.2.0 → 同步更新 ios_remote/CHANGELOG.md，提交后发版: just tag ios v1.2.0
+ios-version ver:
+    @bash -c 'sed -i.bak -E "s/^([[:space:]]*MARKETING_VERSION = ).*;/\1{{ver}};/g" ios_remote/S3Remote.xcodeproj/project.pbxproj && rm -f ios_remote/S3Remote.xcodeproj/project.pbxproj.bak'
+    @grep -n "MARKETING_VERSION" ios_remote/S3Remote.xcodeproj/project.pbxproj
 
 # —— TASKING SCons 直编（tc275_car / tc275_sbl）——
 # 各工程根目录的 SConstruct 直接解析 .cproject（include/宏/源码排除），

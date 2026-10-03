@@ -115,6 +115,27 @@ include、宏、排除表直接解析 `.cproject`，编译/链接参数复刻 ID
 SBL 0x80000000 + App 0x80008000，合成工具校验地址不重叠）。`--flash` 直接
 用 AURIXFlasher 合成+烧录一步到位。
 
+## iOS 遥控器 App（ios_remote/，不经 fw.py）
+
+iPhone 上的 S3 遥控器（proto v2 客户端，与 smartcar_remote 同构，见
+`ios_remote/README.md`）。不在 fw.py 管辖内：无固件镜像/OTA 链路，产物是
+签名的 .app 包，走 Xcode 工具链（需 macOS + 完整 Xcode 26）。
+
+```bash
+just ios-build           # 编译真机包（Xcode 自动签名；个人团队签的 App 7 天有效期）
+just ios-install         # 编译 + USB 下载到 iPhone（同 fw-flash 口径：先编译再装，不装旧包）
+just ios-install <UDID>  # 指定设备；设备列表用 xcrun devicectl list devices 查
+just ios-test            # 主机单测（模拟器免签名：协议/控制语义/安全/电池防抖/信号分档）
+just ios-icon            # 重新生成 App 图标（ios_remote/tools/gen_icon.swift）
+```
+
+- 设备/团队/模拟器是 justfile 顶部的 `ios-device` / `ios-team` / `ios-sim`
+  变量，`just ios-device=00008101-XXXX ios-install` 可覆盖。
+- 首次安装要在手机上信任开发者证书（设置 > 通用 > VPN 与设备管理），App 首启
+  允许"本地网络"权限；个人团队签名 7 天过期，到期重跑 `just ios-install`。
+- 图标/页面截图等交付物在 `ios_remote/doc/`；App 版本与协议口径见
+  `ios_remote/README.md` 的功能对照表。
+
 ## 环境要求
 
 - **ESP 三工程**：EIM 安装的 ESP-IDF v6.1（Windows: `C:\Espressif`，

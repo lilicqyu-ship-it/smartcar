@@ -1,0 +1,50 @@
+name: CI (ios_remote)
+
+# iPhone 遥控器 App（proto v2 客户端，与 smartcar_remote 同构）。macOS runner
+# 跑 Swift 单测：proto v2 帧编解码（CRC16 黄金向量）、控制语义（STOP/急停锁存、
+# 限幅、心跳策略）、安全监视（失联去抖/电池回差）、电池显示防抖（C6 cee1189
+# 同策略）、信号分档、JSON 文本面解析。共享 scheme（xcshareddata）保证
+# CLI -scheme 行为确定；模拟器名在 runner 上动态挑选。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "ios_remote/**"
+      - ".github/workflows/ios-remote.yml"
+  pull_request:
+    paths:
+      - "ios_remote/**"
+      - ".github/workflows/ios-remote.yml"
+  workflow_dispatch:
+  workflow_call:   # 被 ios-remote-release.yml 复用，tag 无法带未测代码上线
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Swift tests (iPhone Simulator, macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pick an available iPhone simulator
+        id: sim
+        run: |
+          NAME=$(xcrun simctl list devices available | \
+                 awk -F' (' '/iPhone/ {sub(/^ +/,"",$1); print $1; exit}')
+          if [ -z "$NAME" ]; then
+            echo "no available iPhone simulator" >&2
+            xcrun simctl list devices available >&2
+            exit 1
+          fi
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "使用模拟器: $NAME"
+
+      - name: Run unit tests
+        run: |
+          set -o pipefail
+          xcodebuild -project ios_remote/S3Remote.xcodeproj -scheme S3Remote \
+            -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }}" \
+            test 2>&1 | tail -60
