@@ -288,10 +288,23 @@ def build(env, *, cfg_name, artifact, lsl, variant, opt='-O0'):
     # 这个告警号——只对该目录关，本工程自有代码的死变量检测照旧生效。
     objs = []
     for src in sources:
+        rel = src.replace(os.sep, '/')
         build_env = env
-        if src.replace(os.sep, '/').startswith('mw/crypto/'):
+        extra = []
+        if rel.startswith('mw/crypto/'):
+            extra.append('-Wc-w537')
+        # Libraries/ST/vl53l5cx/ 是 ST Ultra Lite Driver 的逐字拷贝（doc 36 第 2 节），
+        # 其中 vl53l5cx_api.h:366 的 union Block_header 用匿名 struct 做联合体成员——
+        # 那是 C11 写法，本工程编译标准锁在 --iso=99，ctc 因此报 W586 unnamed
+        # struct/union field。两条正路都不走：改上游文件=制造漂移；把全工程升到 C11
+        # =为一个外部头文件的声明动整个镜像的语言级别。该声明只被 api.c 使用，但
+        # bsp/tof.c 只要 include 它就会同样报号，所以关号范围是"含这个头的编译单元"，
+        # 本工程其余代码的匿名成员检测照旧生效。
+        if rel.startswith('Libraries/ST/') or rel == 'bsp/tof.c':
+            extra.append('-Wc-w586')
+        if extra:
             build_env = env.Clone()
-            build_env.Append(CCFLAGS=['-Wc-w537'])
+            build_env.Append(CCFLAGS=extra)
         objs.append(build_env.Object(
             os.path.join(outdir, 'obj', src[:-2] + '.o'), src))
 

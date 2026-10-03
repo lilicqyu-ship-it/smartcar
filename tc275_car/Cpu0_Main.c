@@ -25,13 +25,15 @@
  * IN THE SOFTWARE.
  *********************************************************************************************************************/
 /* CPU0 - FreeRTOS core: robot control task (safety checks + command
- * execution + status publishing), console UART, LED. The motor algorithm
- * runs on CPU1 and the ESP32-C6 WiFi link on CPU2 (see Cpu1/Cpu2_Main.c). */
+ * execution + status publishing), the VL53L5CX ToF service task (I2C0 owner),
+ * console UART, LED. The motor algorithm runs on CPU1 and the ESP32-C6 WiFi
+ * link on CPU2 (see Cpu1/Cpu2_Main.c). */
 #include "Ifx_Types.h"
 #include "IfxCpu.h"
 #include "IfxScuWdt.h"
 #include "IfxPort.h"
 #include "bsp/stime.h"
+#include "bsp/tof.h"
 #include "bsp/uart.h"
 #include "bsp/wdg.h"
 #include "mw/calib/calib_store.h"
@@ -41,10 +43,10 @@
 #include "mw/sf/sf_frame.h"
 #include "app/robot.h"
 
-#if defined(__TASKING__)
+
 #include "FreeRTOS.h"
 #include "task.h"
-#endif
+
 
 IfxCpu_syncEvent cpuSyncEvent = 0;
 
@@ -69,6 +71,30 @@ static void vUartEchoTask(void *pvParameters)
     while (1)
     {
         UART_echoTask();
+    }
+}
+
+/* VL53L5CX ToF service task (doc 30-tc275/36-tof-driver.md): owns I2C0
+ * (SCL=P13.1 / SDA=P13.2) and the sensor's bring-up ladder, then reads frames.
+ *
+ * It runs one priority BELOW the robot task deliberately. Bringing the sensor
+ * up costs a ~3 s, 84 KB firmware download over the bus, and the robot task is
+ * what feeds the CPU0 watchdog every 10 ms; at priority 2 it preempts this task
+ * whenever it is ready, so no transaction here can delay that feed.
+ *
+ * TOF_init() is called inside the task, not from core0_main: the driver's
+ * transaction timeouts are tick-based, and the tick does not advance before
+ * vTaskStartScheduler() runs. */
+static void vTofTask(void *pvParameters)
+{
+    (void)pvParameters;
+
+    TOF_init();
+
+    while (1)
+    {
+        TOF_task();
+        vTaskDelay(pdMS_TO_TICKS(TOF_TASK_PERIOD_MS));
     }
 }
 
@@ -220,7 +246,7 @@ void core0_main(void)
     IfxCpu_emitEvent(&cpuSyncEvent);
     IfxCpu_waitEvent(&cpuSyncEvent, 1);
 
-#if defined(__TASKING__)
+
     /* UART was brought up before CALIB_init above; say so now that the
      * scheduler-free init phase is done. */
     UART_println("UART initialized");
@@ -238,6 +264,13 @@ void core0_main(void)
     /* Create the loopback echo test task */
     xTaskCreate(vUartEchoTask, "echo", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
+    /* Create the ToF task (I2C0 owner). Priority 1, under the robot task: see
+     * vTofTask. Stack is four times minimal because the vendor driver's deepest
+     * function holds two 64-element grids (uint32_t signal_grid + int16_t
+     * range_grid, 384 bytes of locals, vl53l5cx_api.c:97-98) and its call chain
+     * runs several frames deep. */
+    xTaskCreate(vTofTask, "tof", configMINIMAL_STACK_SIZE * 4, NULL, 1, NULL);
+
     /* Initialize the robot state machine / motion controller */
     ROBOT_init();
 
@@ -246,14 +279,13 @@ void core0_main(void)
 
     /* Start the FreeRTOS scheduler */
     vTaskStartScheduler();
-#endif
 
     while(1)
     {
     }
 }
 
-#if defined(__TASKING__)
+
 /* FreeRTOS detected a task running past its stack (method 1, checked at
  * context switch). Report on the console, then stop feeding: the CPU0
  * watchdog enabled in core0_main expires in ~1.4 s, its NMI (hook in
@@ -278,4 +310,3 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char *pcTaskName)
         __nop();                     /* un-fed watchdog expires in ~1.4 s, NMI hook resets */
     }
 }
-#endif
