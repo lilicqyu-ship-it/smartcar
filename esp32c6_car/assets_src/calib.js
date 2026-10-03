@@ -15,8 +15,7 @@ const TELEMETRY_LEN = 38;
 const JOG_DUTY = 500;                            /* percent*10 = ±50%，与固件钳位一致 */
 const POS_NAMES = ["前左", "前右", "后左", "后右"];   /* doc/17 §8.4 pos 编码 */
 const SLOT_OF_POS = ["wh_fl", "wh_fr", "wh_rl", "wh_rr"];
-const WHEEL_CX = { wh_fl: 24, wh_fr: 146, wh_rl: 24, wh_rr: 146 };
-const WHEEL_CY = { wh_fl: 79, wh_fr: 79, wh_rl: 183, wh_rr: 183 };
+const SPATIAL_ORDER = [0, 1, 2, 3]; // Position code -> reading order: FL, FR, RL, RR.
 const MOTOR_NAMES = ["A", "B", "C", "D"];
 /* REC 默认位置映射（A前左/B后左/C后右/D前右）；生效值以 0x23 EVT 回传为准 */
 const POS_DEFAULT = [0, 2, 3, 1];
@@ -47,8 +46,8 @@ function i16le(v) { v = Math.max(-32768, Math.min(32767, v|0)); return u16le(v &
 const $ = (id) => document.getElementById(id);
 function setState(msg, tone) { $("state").textContent = msg; $("state").dataset.tone = tone; }
 const state = {
-  token: sessionStorage.getItem("sd_token") || new URLSearchParams(location.search).get("token") || "",
-  ws: null, wsOn: false, ctrl: false, tc: false,
+  token: localStorage.getItem("sd_token") || sessionStorage.getItem("sd_token") || new URLSearchParams(location.search).get("token") || "",
+  ws: null, wsOn: false, ctrl: false, tc: false, navigating: false,
   running: false, lastTrigger: 0, runTimer: 0,     /* 判向标定状态机 */
   calib: { done: false, status: -1, invert: null }, /* ② 最近一轮判向结果 */
   jog: { motor: -1, dir: 0, timer: 0 },            /* 逐电机点动（同一时刻至多一路） */
@@ -82,6 +81,20 @@ function refreshFlow() {
   setStep(2, state.calib.done ? "done" : (state.calib.status > 0 ? "bad" : (preOk() ? "act" : "")));
   setStep(3, state.jogged ? "done" : (jogFaultGated() ? "bad" : (state.calib.done ? "act" : "")));
   setStep(4, state.recOk === 1 ? "done" : (state.recOk === 2 ? "bad" : (state.calib.done ? "act" : "")));
+  const role = $("cal_role");
+  role.textContent = !state.wsOn ? "未连接" : state.ctrl ? "控制端" : "观察端";
+  role.className = "pill " + (state.wsOn && state.ctrl ? "ctrl" : "spec");
+  let hint, target, action;
+  if (miss.length) { hint = "先完成：" + miss.join("、") + "。"; target = "setup"; action = "检查准备"; }
+  else if (state.running) { hint = "正在逐轮判向，请等待设备回传结果。"; target = "direction"; action = "查看进度"; }
+  else if (state.calib.status > 0) { hint = "本次判向未完成，请查看结果后重试。"; target = "direction"; action = "查看结果"; }
+  else if (!state.calib.done) { hint = "准备就绪，可以开始自动判向。"; target = "direction"; action = "开始判向"; }
+  else if (jogFaultGated()) { hint = "设备报告故障，请排除故障后再点动。"; target = "carcard"; action = "查看车况"; }
+  else if (!state.jogged) { hint = "判向已结束，按住点动按钮观察实际车轮与转向。"; target = "carcard"; action = "逐轮点动"; }
+  else { hint = "已进行点动，请人工确认四轮位置及转向，再检查生效参数。"; target = "parameters"; action = "检查参数"; }
+  $("flow_hint").textContent = hint;
+  $("flow_link").href = "#" + target;
+  $("flow_link").textContent = action + " ↗";
   refreshCalibBtn(); refreshJogBtns(); refreshRecBtns();
 }
 
@@ -91,7 +104,10 @@ function wsUrl() {
   return p + location.host + "/ws" + (state.token ? ("?token=" + state.token) : "");
 }
 let wsBackoff = 1000;
+let reconnectTimer = null;
 function connect() {
+  clearTimeout(reconnectTimer);
+  if (state.navigating || (state.ws && state.ws.readyState < 2)) return;
   state.ws = new WebSocket(wsUrl());
   state.ws.binaryType = "arraybuffer";
   state.ws.onopen = () => {
@@ -103,10 +119,13 @@ function connect() {
   };
   state.ws.onclose = () => {
     $("dot_ws").className = "dot off"; state.ctrl = false; state.wsOn = false;
+    state.tc = false;
+    $("dot_tc").className = "dot off";
+    setState("链路断开，正在重连", "warn");
     jogStop();
     calibAbortOnDisconnect();
     refreshFlow();
-    setTimeout(connect, wsBackoff);
+    if (!state.navigating) reconnectTimer = setTimeout(connect, wsBackoff);
     wsBackoff = Math.min(wsBackoff * 2, 8000);
   };
   state.ws.onmessage = (ev) => {
@@ -119,7 +138,7 @@ function connect() {
 }
 
 function sendCmd(cmd, data) {
-  if (!state.ctrl || !state.ws || state.ws.readyState !== 1) return false;
+  if (state.navigating || !state.ctrl || !state.ws || state.ws.readyState !== 1) return false;
   state.ws.send(buildFrame(cmd, data));
   return true;
 }
@@ -136,12 +155,18 @@ function onCtl(m) {
     state.tc = !!m.on;
     $("dot_tc").className = "dot " + (m.on ? "on" : "off");
     if (state.ctrl) setState(state.tc ? "已连接 (控制端)" : "车端未连接", state.tc ? "ok" : "dim");
+    if (!state.tc) jogStop();
     refreshFlow();
   } else if (m.t === "cal") {
     onCalibResult(m);
   } else if (m.t === "rec") {
     onRec(m);
   } else if (m.t === "err") {
+    if (m.e === "auth") {
+      state.ctrl = false; jogStop(); refreshFlow();
+      setState("控制权失效，请重新配对", "bad");
+      return;
+    }
     setState("错误: " + m.e, "warn");
     clearTimeout(errT);
     errT = setTimeout(() => {
@@ -159,6 +184,7 @@ function onTelemetry(p) {
   const dl = (o) => (dv(o) << 16) >> 16;
   const tl = dl(11), tr = dl(13), ml = dl(15), mr = dl(17);
   state.tele = { ml, mr, tl, tr, fault: dv(9), ts: Date.now() };
+  if (state.tele.fault) jogStop();
   setBar("bar_lt", tl, 800); setBar("bar_lm", ml, 800);
   setBar("bar_rt", tr, 800); setBar("bar_rm", mr, 800);
   $("v_lm").textContent = ml; $("v_rm").textContent = mr;
@@ -187,7 +213,7 @@ function refreshCalibBtn() {
     state.running || state.jog.motor >= 0 || !preOk() ||
     (Date.now() - state.lastTrigger < RUN_WINDOW_MS);
 }
-$("ck_airborne").addEventListener("change", refreshFlow);
+$("ck_airborne").addEventListener("change", () => { if (!$("ck_airborne").checked) jogStop(); refreshFlow(); });
 
 /* 进度条：走条 1.4s（CSS transition），复位走瞬时 */
 function setProgress(run) {
@@ -286,12 +312,13 @@ function onCalibResult(m) {
  * 固件侧 300ms 无刷新自动停（双层保险）。与判向标定互斥。 */
 function jogSend(motor, duty) {
   sendCmd(CMD.MOTOR_JOG, new Uint8Array([motor, ...i16le(duty)]));
-  $("jd" + motor).textContent = duty;
+  $("jd" + motor).textContent = "指令 " + (duty / 10) + "%";
 }
 function jogStart(motor, dir) {
-  if (!state.ctrl || state.running || state.jog.motor >= 0) return;
+  if (!preOk() || jogFaultGated() || state.running || state.jog.motor >= 0) return;
   state.jog.motor = motor; state.jog.dir = dir;
   state.jogged = true;
+  $("jog_status").textContent = POS_NAMES[(state.rec ? state.rec.pos : POS_DEFAULT)[motor]] + " · 通道 " + MOTOR_NAMES[motor] + "：" + (dir > 0 ? "向前转" : "向后转") + "指令（松手停止）";
   jogSend(motor, dir * JOG_DUTY);
   state.jog.timer = setInterval(() => jogSend(state.jog.motor, state.jog.dir * JOG_DUTY), 33);
   refreshFlow();
@@ -301,6 +328,7 @@ function jogStop() {
   clearInterval(state.jog.timer);
   const m = state.jog.motor;
   state.jog.motor = -1; state.jog.dir = 0;
+  $("jog_status").textContent = "点动已停止";
   jogSend(m, 0);                                   /* 松手补发 0（断线时 sendCmd 自带守卫） */
   refreshFlow();
 }
@@ -308,9 +336,10 @@ function refreshJogBtns() {
   const gated = jogFaultGated();
   for (let m = 0; m < 4; m++) {
     const mine = state.jog.motor === m;
+    $("jl" + m).closest(".jogrow").classList.toggle("active", mine);
     $("jn" + m).classList.toggle("on", mine && state.jog.dir < 0);
     $("jp" + m).classList.toggle("on", mine && state.jog.dir > 0);
-    const dis = !state.ctrl || state.running || (state.jog.motor >= 0 && !mine) || gated;
+    const dis = !preOk() || state.running || (state.jog.motor >= 0 && !mine) || gated;
     $("jn" + m).disabled = dis;
     $("jp" + m).disabled = dis;
   }
@@ -321,8 +350,8 @@ function refreshJogBtns() {
   }
   const hint = $("car_hint");
   hint.textContent = gated
-    ? "⚠ 故障锁存中：车端会拒绝 jog（doc/17 §8.1），请先排除故障。轮上字母按 0x23 回传的位置动态标注。"
-    : "遥测超过 1s 未更新则置灰；红框为故障锁存。轮上字母按 0x23 回传的位置动态标注。";
+    ? "设备故障：请先排除故障再点动。"
+    : "车头朝上：↑ 向前转，↓ 向后转。按钮按设备的位置记录排布，字母是驱动通道；若实物不符，请修改下方位置映射。左右侧遥测不是单轮反馈。";
 }
 /* 故障门禁只看"新鲜遥测"：台架上没跑起来时 tele 为空，不该因此锁死按钮 */
 function jogFaultGated() {
@@ -335,6 +364,7 @@ for (let m = 0; m < 4; m++) {
 ["pointerup", "pointercancel"].forEach((e) =>
   window.addEventListener(e, () => jogStop()));
 document.addEventListener("visibilitychange", () => { if (document.hidden) jogStop(); });
+window.addEventListener("blur", jogStop);
 
 /* ================= ④ 参数与 DFlash 持久化（doc/17 §8.3） ================= */
 function requestRec() { sendCmd(CMD.REC_GET, new Uint8Array(0)); }
@@ -369,36 +399,45 @@ function onRec(m) {
     const w = $("w" + i);
     w.textContent = (m.invert[i] < 0) ? "-1 已翻转" : "+1 正常";
     w.className = (m.invert[i] < 0) ? "flip" : "okv";
-    $("jl" + i).textContent = MOTOR_NAMES[i] + " · " + $("q" + i).textContent;
+    $("jl" + i).textContent = $("q" + i).textContent + " · 通道 " + MOTOR_NAMES[i];
+    $("map" + i).value = String(m.pos[i]);
   }
   if (document.activeElement !== $("in_fs")) $("in_fs").value = m.fullScale;
   if (document.activeElement !== $("in_wd")) $("in_wd").value = m.wheelDia;
-  if (state.recPending) { $("rec_msg").textContent = state.recPending; state.recPending = ""; }
+  if (state.recPending) { $("rec_msg").textContent = m.crcOk ? "设备参数已回读，请核对上方生效值。" : "设备回读校验异常，请重新检查。"; state.recPending = ""; }
   renderCarLabels();
+  renderWheelControls();
   refreshFlow();
 }
 
 function refreshRecBtns() {
-  const dis = !state.ctrl || state.running || state.jog.motor >= 0 || !state.rec;
+  const dis = !state.wsOn || !state.tc || !state.ctrl || state.running || state.jog.motor >= 0 || !state.rec;
   $("btn_rec_set").disabled = dis;
   $("btn_rec_clear").disabled = dis;
+  for (let i = 0; i < 4; i++) $("map" + i).disabled = dis;
 }
 
 $("btn_rec_set").onclick = () => {
   if (!state.rec) return;
-  const fs = $("in_fs").value | 0, wd = $("in_wd").value | 0;
-  if (fs < 100 || fs > 5000) { $("rec_msg").textContent = "fullScale 需 100..5000 mm/s"; return; }
-  if (wd < 30 || wd > 200)   { $("rec_msg").textContent = "wheelDia 需 30..200 mm"; return; }
+  const fs = Number($("in_fs").value), wd = Number($("in_wd").value);
+  if (!Number.isInteger(fs) || !Number.isInteger(wd)) { $("rec_msg").textContent = "请输入整数参数"; return; }
+  if (fs < 100 || fs > 5000) { $("rec_msg").textContent = "满量程速度需为 100–5000 mm/s"; return; }
+  if (wd < 30 || wd > 200)   { $("rec_msg").textContent = "轮径需为 30–200 mm"; return; }
   /* 0x73 REC_SET {pos u8x4, invert i8x4, fullScale i16, wheelDia i16}（12B） */
+  const positions = MOTOR_NAMES.map((_, i) => Number($("map" + i).value));
+  if (new Set(positions).size !== 4 || positions.some((pos) => !Number.isInteger(pos) || pos < 0 || pos > 3)) {
+    $("rec_msg").textContent = "四个通道的位置必须各不相同，请检查映射"; return;
+  }
   const p = new Uint8Array(12);
-  for (let i = 0; i < 4; i++) { p[i] = state.rec.pos[i] & 3; p[4 + i] = state.rec.invert[i] & 0xFF; }
+  for (let i = 0; i < 4; i++) { p[i] = positions[i]; p[4 + i] = state.rec.invert[i] & 0xFF; }
   p.set(i16le(fs), 8); p.set(i16le(wd), 10);
   if (sendCmd(CMD.REC_SET, p)) {
-    state.recPending = "已发送 REC_SET，等待 EVT 0x23 回执…";
+    state.recPending = "保存请求已发送，等待设备回读确认…";
     $("rec_msg").textContent = state.recPending;
   }
 };
 $("btn_rec_clear").onclick = () => {
+  if (!confirm("恢复默认将擦除已保存的标定参数。确认恢复？")) return;
   if (sendCmd(CMD.REC_CLEAR, new Uint8Array(0))) {
     state.recPending = "已发送 REC_CLEAR，等待默认值回执…";
     $("rec_msg").textContent = state.recPending;
@@ -415,6 +454,17 @@ function renderCarLabels() {
     if (t) t.textContent = m >= 0 ? MOTOR_NAMES[m] : "?";
   }
 }
+function renderWheelControls() {
+  const positions = state.rec ? state.rec.pos : POS_DEFAULT;
+  for (let m = 0; m < 4; m++) {
+    const row = $("jl" + m).closest(".jogrow");
+    row.style.order = SPATIAL_ORDER[positions[m]];
+    if (state.jog.motor !== m) $("jd" + m).textContent = "指令 0%";
+    $("jl" + m).textContent = POS_NAMES[positions[m]] + " · 通道 " + MOTOR_NAMES[m];
+    $("jp" + m).setAttribute("aria-label", POS_NAMES[positions[m]] + "通道" + MOTOR_NAMES[m] + "向前转，按住运行");
+    $("jn" + m).setAttribute("aria-label", POS_NAMES[positions[m]] + "通道" + MOTOR_NAMES[m] + "向后转，按住运行");
+  }
+}
 const wheelAng = [0, 0, 0, 0];                     /* 按槽位累积，deg */
 let animLast = 0;
 function animTick(ts) {
@@ -426,13 +476,18 @@ function animTick(ts) {
   car.classList.toggle("estop", fresh && state.tele.fault !== 0);
   const gated = !!jogFaultGated();                 /* 遥测每帧来，门禁只在跃变时刷按钮 */
   if (gated !== state.jogGated) { state.jogGated = gated; refreshFlow(); }
-  const v = [state.tele.ml, state.tele.mr];        /* 侧级：[左, 右] */
+  const v = fresh ? [state.tele.ml, state.tele.mr] : [0, 0];        /* 侧级：[左, 右] */
   for (let s = 0; s < 4; s++) {
     const side = (s === 0 || s === 2) ? 0 : 1;     /* fl/rl 左，fr/rr 右 */
-    wheelAng[s] += v[side] * 0.5 * (dt / 1000) * 3.6;  /* 视觉增益，非真实轮径换算 */
     const id = SLOT_OF_POS[s];
-    $(id).setAttribute("transform",
-      `rotate(${wheelAng[s].toFixed(1)} ${WHEEL_CX[id]} ${WHEEL_CY[id]})`);
+    const motor = motorOfSlot(s);
+    // Animate tread travel along the vehicle axis. Never rotate the tyre body:
+    // rotation looked like steering and also moved the motor label out of place.
+    const speed = state.jog.motor >= 0
+      ? (state.jog.motor === motor ? state.jog.dir * 100 : 0) : v[side];
+    wheelAng[s] = (wheelAng[s] + speed * dt / 10000) % 10;
+    $(id).querySelector("line").style.strokeDashoffset = wheelAng[s].toFixed(1);
+
   }
   const body = (v[0] + v[1]) / 2;
   $("arrow").classList.toggle("rev", fresh && body < -30);
@@ -441,21 +496,45 @@ function animTick(ts) {
 }
 requestAnimationFrame(animTick);
 renderCarLabels();
+renderWheelControls();
 refreshFlow();                                     /* 首屏先把①前提清单与步骤条画出来 */
+
+/* Leaving the bench must release its control socket before opening the driver.
+ * Keep a native href so navigation works even if JavaScript cannot initialize. */
+function leaveCalibration() {
+  if (state.navigating) return;
+  jogStop();
+  sendDrive(0, 0, true);
+  state.navigating = true;
+  clearTimeout(reconnectTimer);
+  if (state.ws) state.ws.close();
+}
+$("back_drive").addEventListener("click", leaveCalibration);
+window.addEventListener("pagehide", leaveCalibration);
+window.addEventListener("pageshow", (event) => {
+  if (!event.persisted) return;
+  state.navigating = false;
+  connect();
+});
 
 /* ---- STOP / 配对 ---- */
 $("btn_stop").onclick = () => { jogStop(); sendDrive(0, 0, true); };
 
 $("btn_pair").onclick = async () => {
+  jogStop();
+  $("btn_pair").disabled = true;
+  try {
   const r = await fetch("/api/pair", { method: "POST" });
   const j = await r.json();
   if (j.ok && j.token) {
-    state.token = j.token; sessionStorage.setItem("sd_token", j.token);
+    state.token = j.token; localStorage.setItem("sd_token", j.token); sessionStorage.setItem("sd_token", j.token);
     setState("已配对，重连中…", "ok");
     if (state.ws) state.ws.close();
   } else {
     setState("配对失败: " + (j.hint || j.e || "先按车侧键3秒"), "warn");
   }
+  } catch (e) { setState("配对失败，请检查设备连接后重试", "warn"); }
+  finally { $("btn_pair").disabled = false; }
 };
 
 fetch("/api/health").then((r) => r.json()).then((j) => {

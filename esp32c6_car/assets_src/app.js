@@ -38,7 +38,7 @@ const state = {
    * spectator, which read as "everything green but nothing drives" (09-28) */
   token: localStorage.getItem("sd_token") || sessionStorage.getItem("sd_token")
          || new URLSearchParams(location.search).get("token") || "",
-  ws: null, ctrl: false, tc: false,
+  ws: null, ctrl: false, tc: false, uploading: false,
   driveTimer: null, joyV: 0, joyW: 0,
 };
 
@@ -46,6 +46,7 @@ function setRole(txt, tone) {
   const p = $("role_pill");
   $("role_txt").textContent = txt;
   p.className = "pill " + tone;
+  updateControlHint();
 }
 
 /* ---- WebSocket ---- */
@@ -55,26 +56,40 @@ function wsUrl() {
 }
 let wsBackoff = 1000;
 let wsLastRx = 0, wsLastPing = 0;
+let reconnectTimer = null;
 function connect() {
-  state.ws = new WebSocket(wsUrl());
+  clearTimeout(reconnectTimer);
+  if (state.ws && state.ws.readyState < 2) return;
+  const socket = new WebSocket(wsUrl());
+  state.ws = socket;
   state.ws.binaryType = "arraybuffer";
   state.ws.onopen = () => {
+    if (state.ws !== socket) return;
     wsBackoff = 1000;
     wsLastRx = Date.now();
     $("dot_ws").className = "dot on";
     sendDrive(0, 0);
+    updateControlHint();
   };
   state.ws.onclose = () => {
+    if (state.ws !== socket) return;
+    state.tc = false;
+    $("dot_tc").className = "dot off";
+    setState("链路断开，正在重连", "warn");
     $("dot_ws").className = "dot off"; state.ctrl = false;
     setRole("重连中", "bad");
     // fixed 1 s retries churn sockets on the device while it is struggling;
     // back off so recovery is not fought by the page itself
-    setTimeout(connect, wsBackoff);
+    reconnectTimer = setTimeout(connect, wsBackoff);
     wsBackoff = Math.min(wsBackoff * 2, 3000);
   };
   state.ws.onmessage = (ev) => {
+    if (state.ws !== socket) return;
     wsLastRx = Date.now();
-    if (typeof ev.data === "string") { onCtl(JSON.parse(ev.data)); return; }
+    if (typeof ev.data === "string") {
+      try { onCtl(JSON.parse(ev.data)); } catch (e) { setState("收到无效状态数据", "warn"); }
+      return;
+    }
     const d = new Uint8Array(ev.data);
     if (d.length >= 8 && d[0] === P_SYNC1 && d[1] === P_SYNC2 && d[3] === CMD.TELEMETRY) {
       onTelemetry(d.subarray(6, 6 + d[5]));
@@ -120,6 +135,8 @@ function onCtl(m) {
     state.tc = !!m.on;
     $("dot_tc").className = "dot " + (m.on ? "on" : "off");
     setState(m.on ? "待命" : "车端未连接", m.on ? "ok" : "dim");
+    if (!state.tc) joyEnd();
+    updateControlHint();
   } else if (m.t === "otastatus") {
     $("ota_progress").textContent = "OTA " + m.pct + "%";
     $("ota_bar").style.width = Math.max(0, Math.min(100, m.pct)) + "%";
@@ -241,35 +258,76 @@ function joyMove(ev) {
 }
 function joyEnd() {
   knob.style.transform = ""; state.joyV = 0; state.joyW = 0;
+  joy.classList.remove("active");
+  activePointer = null;
 }
-["pointerdown", "pointermove", "pointerup", "pointerleave"].forEach((e) => {
-  joy.addEventListener(e, (ev) => {
-    if (e === "pointerdown") { joy.setPointerCapture(ev.pointerId); joy.classList.add("active"); }
-    if (e === "pointerup" || e === "pointerleave") { joyEnd(); joy.classList.remove("active"); }
-    else joyMove(ev);
-  });
+let activePointer = null;
+function updateControlHint() {
+  const ready = !!(state.ws && state.ws.readyState === 1 && state.ctrl && state.tc && !state.uploading);
+  $("joy").setAttribute("aria-disabled", String(!ready));
+  $("control_hint").textContent = !state.ws || state.ws.readyState !== 1
+    ? "链路未连接，正在自动重连…" : !state.ctrl
+    ? "当前为观察模式。按车侧键 3 秒，再点击配对。" : !state.tc
+    ? "已取得控制权，等待车端上线。" : state.uploading
+    ? "固件上传中，请等待完成。" : "已就绪，按住摇杆即可驾驶。";
+  if (!ready) joyEnd();
+}
+joy.addEventListener("pointerdown", (ev) => {
+  if (activePointer !== null || state.uploading || !state.ctrl || !state.tc || !state.ws || state.ws.readyState !== 1 || ev.button !== 0) return;
+  activePointer = ev.pointerId;
+  joy.setPointerCapture(ev.pointerId);
+  joy.classList.add("active");
+  joyMove(ev);
+});
+joy.addEventListener("pointermove", (ev) => {
+  if (ev.pointerId === activePointer) joyMove(ev);
+});
+function releaseJoystick(ev) {
+  if (ev && ev.pointerId !== activePointer) return;
+  activePointer = null;
+  joyEnd();
+  sendDrive(0, 0);
+}
+["pointerup", "pointercancel", "lostpointercapture"].forEach((event) => joy.addEventListener(event, releaseJoystick));
+window.addEventListener("blur", () => releaseJoystick());
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) releaseJoystick();
 });
 setInterval(() => sendDrive(state.joyV, state.joyW), 33);   // 30 Hz, doubles as heartbeat
 
 /* ---- pairing ---- */
 $("btn_pair").onclick = async () => {
-  const r = await fetch("/api/pair", { method: "POST" });
-  const j = await r.json();
-  if (j.ok && j.token) {
-    state.token = j.token;
-    localStorage.setItem("sd_token", j.token);
-    sessionStorage.setItem("sd_token", j.token);
-    setState("已配对 (控制端)", "ok");
-    if (state.ws) state.ws.close();
-  } else {
-    setState("配对失败: " + (j.hint || j.e || "先按车侧键3秒"), "warn");
-  }
+  releaseJoystick();
+  $("btn_pair").disabled = true;
+  try {
+    const r = await fetch("/api/pair", { method: "POST" });
+    const j = await r.json();
+    if (j.ok && j.token) {
+      state.token = j.token;
+      localStorage.setItem("sd_token", j.token);
+      sessionStorage.setItem("sd_token", j.token);
+      setState("已配对 (控制端)", "ok");
+      if (state.ws) state.ws.close();
+    } else {
+      setState("配对失败: " + (j.hint || j.e || "先按车侧键3秒"), "warn");
+    }
+  } catch (e) { setState("配对未完成，请检查设备连接后重试", "warn"); }
+  finally { $("btn_pair").disabled = false; }
 };
 
 /* ---- OTA upload (control token required) ---- */
 async function upload(file, uri, btn) {
-  if (!file) return;
-  btn.disabled = true;
+  if (!file) { $("ota_progress").textContent = "请先选择固件文件"; return; }
+  if (state.uploading) return;
+  if (!state.ctrl) { $("ota_progress").textContent = "请先配对取得控制权"; return; }
+  releaseJoystick();
+  state.uploading = true;
+  ["btn_ota_c6", "btn_ota_tc", "file_c6", "file_tc", "btn_pair"].forEach((id) => { $(id).disabled = true; });
+  const originalLabel = btn.textContent;
+  btn.textContent = "上传中…";
+  $("ota_progress").textContent = "正在上传固件，请保持设备连接…";
+  $("ota_bar").style.width = "0%";
+  updateControlHint();
   try {
     const r = await fetch(uri + (state.token ? ("?token=" + state.token) : ""),
       { method: "POST", body: file });
@@ -277,7 +335,12 @@ async function upload(file, uri, btn) {
     $("ota_progress").textContent = j.ok ? "完成，设备将重启" : "失败 " + j.e;
     $("ota_bar").style.width = j.ok ? "100%" : "0%";
   } catch (e) { $("ota_progress").textContent = "上传中断"; $("ota_bar").style.width = "0%"; }
-  btn.disabled = false;
+  finally {
+    state.uploading = false;
+    ["btn_ota_c6", "btn_ota_tc", "file_c6", "file_tc", "btn_pair"].forEach((id) => { $(id).disabled = false; });
+    btn.textContent = originalLabel;
+    updateControlHint();
+  }
 }
 $("btn_ota_c6").onclick = () => upload($("file_c6").files[0], "/ota/c6", $("btn_ota_c6"));
 $("btn_ota_tc").onclick = () => upload($("file_tc").files[0], "/ota/tc275", $("btn_ota_tc"));
@@ -289,7 +352,7 @@ $("btn_ota_tc").onclick = () => upload($("file_tc").files[0], "/ota/tc275", $("b
 });
 
 /* ---- stop ---- */
-$("btn_stop").onclick = () => sendDrive(0, 0);
+$("btn_stop").onclick = () => { releaseJoystick(); setState("摇杆已归零", "warn"); };
 
 fetch("/api/health").then((r) => r.json()).then((j) => {
   $("ssid").textContent = "SmartDrive";

@@ -224,3 +224,259 @@ button:active { background: rgba(122, 184, 255, .16); transform: translateY(1px)
 @media (prefers-reduced-motion: reduce) {
   * { animation: none !important; transition: none !important; }
 }
+
+/* C6 driving workspace: local assets only, no font or network dependencies. */
+.drive-page {
+  --bg0: #f1f2e9; --fg: #20251f; --dim: #64705e;
+  --line: #d7dbce; --accent: #b9ed52; --accent2: #588938;
+  --ok: #3d7829; --bad: #c83d36; --warn: #a46509;
+  background: var(--bg0); height: auto; min-height: 100dvh;
+}
+.drive-page header { background: var(--bg0); padding: 20px max(24px, calc((100% - 1180px)/2)); padding-top: calc(20px + env(safe-area-inset-top)); gap: 12px; }
+.drive-page .logo { width: 38px; height: 38px; filter: none; background: #253024; border-radius: 12px; padding: 5px; }
+.drive-page .brand b { font-size: 18px; }
+.drive-page .pill { background: #e7eadd; padding: 7px 10px; }
+.drive-page .dot.on { box-shadow: none; animation: none; }
+.drive-page main { max-width: 1180px; overflow: visible; padding: 32px 24px calc(24px + env(safe-area-inset-bottom)); gap: 24px; }
+.page-heading { display: flex; align-items: center; justify-content: space-between; gap: 20px; }
+.eyebrow { font-size: 10px; font-weight: 700; letter-spacing: .16em; }
+.page-heading h1 { font-size: clamp(28px, 4vw, 44px); letter-spacing: -.05em; margin: 12px 0 10px; font-weight: 800; }
+.page-heading h1 span { color: #709c32; }
+.page-heading p, .control-heading p { font-size: 13px; color: var(--dim); margin: 0; line-height: 1.6; }
+.tool-link { color: var(--fg); border-bottom: 1px solid var(--fg); padding: 10px 0; font-size: 13px; white-space: nowrap; }
+.workspace { display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; }
+.drive-page .card { border-radius: 24px; background: #fafbf5; box-shadow: none; backdrop-filter: none; padding: 24px; }
+.section-heading { display: flex; justify-content: space-between; align-items: center; width: 100%; gap: 10px; }
+.live-caption { font-size: 11px; color: var(--dim); }
+.drive-page #panel { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; background: #222b23; color: #f5f7ed; --dim: #abb8a3; --line: #465041; --ok: #b9ed52; --warn: #ffd382; --bad: #ff958f; }
+#panel .section-heading { grid-column: 1/-1; }
+.drive-page #speedo { grid-column: 1/-1; grid-row: 2; min-height: 280px; justify-content: center; width: 280px; max-width: 100%; margin: 0 auto; border: 1px solid #57634c; border-radius: 50%; background: radial-gradient(circle, #303c29 0%, #222b23 72%); position: relative; }
+.drive-page #speedo::before { content: ''; position: absolute; inset: 10px; border: 3px solid #b9ed52; border-right-color: #3b4931; border-bottom-color: #3b4931; border-radius: 50%; transform: rotate(-35deg); pointer-events: none; }
+.speed-label { font-size: 12px; color: #abb8a3; margin-bottom: 12px; }
+.drive-page #speed_val { color: #eff9dc; font-size: 78px; letter-spacing: -.06em; font-weight: 600; text-shadow: none; }
+.drive-page #speed_val.stale { color: #abb8a3; }
+.drive-page #speed_unit { font-size: 11px; margin-top: 5px; }
+.drive-page #panel .gauge { max-width: none; min-width: 0; padding: 16px; background: #303a2e; border-radius: 14px; gap: 9px; }
+.drive-page .readout { text-align: left; font-size: 26px; }
+.drive-page .gauge-sub { text-align: left; }
+.drive-page .bar { height: 5px; box-shadow: none; }
+.drive-page .bar-t > div { background: #a6b99c; }
+.drive-page .bar-m > div { background: #b9ed52; }
+.control-heading { margin: 24px 0 8px; }
+.control-heading h2 { margin: 0 0 8px; font-size: 26px; letter-spacing: -.04em; }
+.drive-page #joy { width: 244px; height: 244px; background: repeating-radial-gradient(circle, transparent 0 39px, #dce1d0 40px 41px), #eef1e6; box-shadow: none; border: 1px solid #dce1d0; margin: 18px auto; }
+.drive-page #joy::before { background: #d2d9c6; }
+.drive-page #joy::after { background: #d2d9c6; }
+.drive-page #joy .guide { border-color: #bac6a7; }
+.drive-page .arr { color: #68795a; font-size: 10px; }
+.drive-page #knob { background: #b9ed52; border: 8px solid #fff; box-shadow: 0 5px 16px #25321f26; width: 72px; height: 72px; left: calc(50% - 36px); top: calc(50% - 36px); }
+.drive-page #knob::after { content: ''; position: absolute; inset: 21px; border-radius: 50%; background: #40562c; }
+.drive-page #joy.active #knob { box-shadow: 0 0 0 12px #b9ed5233, 0 5px 16px #25321f26; }
+.drive-page #joy[aria-disabled="true"] { opacity: .5; }
+.drive-page button { cursor: pointer; border-radius: 12px; min-height: 46px; background: #e9eddc; color: var(--fg); letter-spacing: 0; }
+.drive-page button:disabled { opacity: .45; cursor: not-allowed; }
+.drive-page #btn_stop { background: #c83d36; border-color: #c83d36; box-shadow: none; letter-spacing: .02em; }
+.drive-page #btn_pair { background: #b9ed52; border-color: #b9ed52; }
+.gesture-note { font-size: 11px; text-align: center; color: var(--dim); margin: 12px 0; }
+.drive-page .chip { background: none; border: none; padding: 4px 10px; }
+.drive-page #maint { padding: 8px 24px; border-radius: 16px; }
+.drive-page #maint summary { text-align: left; color: var(--fg); font-weight: 600; padding: 14px 0; }
+.drive-page a { color: #456b28; }
+.drive-page .file { background: #f0f3e7; border-color: #bdc9aa; min-height: 46px; }
+.drive-page .file input { display: block; position: absolute; width: 1px; height: 1px; opacity: 0; }
+.drive-page .file:focus-within, .drive-page :focus-visible { outline: 3px solid #729b38; outline-offset: 4px; }
+.drive-page .mrow.link { display: inline-flex; margin-right: 20px; padding: 8px 0; }
+@media (max-width: 700px) {
+  .drive-page header { padding: 12px 16px; padding-top: calc(12px + env(safe-area-inset-top)); flex-wrap: wrap; }
+  .drive-page .hstat { width: 100%; flex-wrap: wrap; gap: 6px; }
+  .drive-page .hstat .pill { flex: 1; justify-content: center; font-size: 11px; padding: 6px; }
+  .drive-page main { padding: 22px 14px calc(16px + env(safe-area-inset-bottom)); gap: 18px; }
+  .workspace { grid-template-columns: 1fr; gap: 14px; }
+  .page-heading { align-items: flex-start; }
+  .page-heading h1 { font-size: 27px; }
+  .tool-link { font-size: 11px; }
+  .drive-page .card { padding: 18px; border-radius: 20px; }
+  .drive-page #panel { gap: 14px; }
+  .drive-page #speedo { min-height: 210px; width: 210px; }
+  .drive-page #speed_val { font-size: 64px; }
+  .drive-page #panel .gauge { padding: 12px; }
+  .control-heading { margin: 16px 0 0; }
+  .control-heading h2 { font-size: 22px; }
+  .drive-page #joy { width: 220px; height: 220px; }
+  .drive-page .mrow { flex-wrap: wrap; }
+  .drive-page .file { flex-basis: 60%; }
+}
+@media (max-width: 360px) { .page-heading { flex-direction: column; gap: 8px; } .drive-page .hstat .pill { flex: auto; } }
+@media (max-width: 700px) {
+  /* Keep the joystick close to the first screen on handheld devices. */
+  .drive-page #panel { grid-template-columns: minmax(0, 1fr) 140px minmax(0, 1fr); gap: 10px; }
+  .drive-page #speedo { grid-column: 2; grid-row: 2; width: 140px; min-height: 140px; }
+  .drive-page #speedo::before { inset: 6px; border-width: 2px; }
+  .drive-page #speed_val { font-size: 46px; }
+  .drive-page #speed_unit { font-size: 9px; }
+  .drive-page .speed-label { font-size: 10px; margin-bottom: 5px; }
+  .drive-page #speed_dir { font-size: 10px; min-height: 12px; }
+  .drive-page #speedo .state { padding: 3px 7px; font-size: 10px; max-width: 125px; white-space: normal; text-align: center; }
+  .drive-page #panel .gauge { grid-row: 2; padding: 10px 6px; background: transparent; }
+  .drive-page #panel .gauge:last-child { grid-column: 3; }
+  .drive-page #panel .readout { font-size: 20px; }
+  .drive-page #panel .readout small { display: block; margin: 4px 0 0; font-size: 9px; }
+  .drive-page #panel .gauge-sub { font-size: 9px; }
+}
+@media (max-width: 360px) {
+  .drive-page #panel { grid-template-columns: minmax(0, 1fr) 120px minmax(0, 1fr); gap: 6px; }
+  .drive-page #speedo { width: 120px; min-height: 120px; }
+}
+
+/* Labels sit outside the dial so every status length clears the circular rim. */
+.drive-page #speedo {
+  width: 280px; min-height: 0; border: 0; border-radius: 0;
+  background: none; gap: 10px;
+}
+.drive-page #speedo::before { content: none; }
+.drive-page .speed-label { margin: 0; line-height: 1.4; }
+.drive-page .speed-dial {
+  position: relative; width: 100%; aspect-ratio: 1; flex: none;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2px; border: 1px solid #57634c; border-radius: 50%;
+  background: radial-gradient(circle, #303c29 0%, #222b23 72%);
+}
+.drive-page .speed-dial::before {
+  content: ''; position: absolute; inset: 10px;
+  border: 3px solid #b9ed52; border-right-color: #3b4931;
+  border-bottom-color: #3b4931; border-radius: 50%;
+  transform: rotate(-35deg); pointer-events: none;
+}
+.drive-page #speedo .state { margin-top: 0; white-space: normal; text-align: center; }
+@media (max-width: 700px) {
+  .drive-page #speedo { width: 140px; min-height: 0; gap: 8px; }
+  .drive-page .speed-dial::before { inset: 6px; border-width: 2px; }
+  .drive-page .speed-label { margin: 0; }
+}
+@media (max-width: 360px) {
+  .drive-page #speedo { width: 120px; min-height: 0; }
+}
+/* Compact cockpit for short phone screens, including iPhone SE2. */
+@media (max-width: 700px) and (max-height: 740px) {
+  .drive-page header { padding: 8px 12px; padding-top: calc(8px + env(safe-area-inset-top)); gap: 6px; }
+  .drive-page .logo { width: 30px; height: 30px; }
+  .drive-page .brand b { font-size: 15px; }
+  .drive-page .hstat .pill { padding: 4px 6px; }
+  .drive-page main { padding: 12px 12px calc(12px + env(safe-area-inset-bottom)); gap: 12px; }
+  .drive-page .page-heading { display: none; }
+  .drive-page .workspace { gap: 12px; }
+  .drive-page .card { padding: 12px; }
+  .drive-page #panel { grid-template-columns: minmax(0, 1fr) 110px minmax(0, 1fr); gap: 8px; }
+  .drive-page #speedo { width: 110px; gap: 6px; }
+  .drive-page #speed_val { font-size: 38px; }
+  .drive-page .control-heading { margin: 10px 0 0; }
+  .drive-page .control-heading h2 { font-size: 18px; margin-bottom: 4px; }
+  .drive-page .control-heading p { font-size: 12px; }
+  .drive-page #joy { width: 168px; height: 168px; margin: 10px auto; }
+  .drive-page .gesture-note { margin: 6px 0; }
+}
+
+/* Calibration lab: offline, SE2-first, shared driving-workspace palette. */
+.calib-page { height: auto; min-height: 100dvh; }
+.calib-page main { display: grid; grid-template-columns: 1fr 1fr; align-items: start; gap: 20px; }
+.calib-page .back-link { font-size: 12px; white-space: nowrap; }
+.cal-intro, .flow-banner, #steps, #safety { grid-column: 1/-1; }
+.cal-intro h1 { font-size: clamp(24px, 3vw, 38px); letter-spacing: -.04em; margin: 10px 0; }
+.cal-intro p { font-size: 13px; color: var(--dim); margin: 0; }
+#safety { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 8px; padding: 10px; background: #f1f2e9f5; border: 1px solid var(--line); border-radius: 16px; }
+#safety .state { flex: 1; min-width: 0; margin: 0; white-space: normal; font-size: 12px; border: 0; }
+#safety button { padding: 10px 16px; flex: none; }
+.flow-banner { display: flex; justify-content: space-between; align-items: center; gap: 14px; background: #ddecbd; border-radius: 16px; padding: 18px 20px; }
+.flow-banner p { margin: 7px 0 0; font-size: 14px; line-height: 1.6; }
+.flow-banner a { flex: none; font-size: 12px; font-weight: 600; }
+#steps { display: grid; grid-template-columns: repeat(4,1fr); gap: 8px; padding: 0; margin: 0; list-style: none; }
+.step { border-bottom: 3px solid #d7dbce; padding: 10px 4px; }
+.step a { display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: 13px; }
+.step b { display: grid; place-items: center; border-radius: 50%; width: 26px; height: 26px; background: #e4e8da; font-size: 11px; }
+.step.act { border-color: #709b36; }.step.act b { background: #b9ed52; color: #253024; }
+.step.done { border-color: var(--ok); }.step.done a { color: var(--ok); }
+.step.bad { border-color: var(--bad); }.step.bad a { color: var(--bad); }
+.calcard { min-width: 0; scroll-margin-top: 90px; }
+.calcard h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 20px; letter-spacing: -.03em; margin: 0 0 18px; }
+.calcard h3>b { font-size: 12px; border: 1px solid #bac8a6; border-radius: 50%; width: 28px; height: 28px; display: grid; place-items: center; }
+.calcard h3 small { width: 100%; font-size: 11px; font-weight: 400; color: var(--dim); letter-spacing: 0; }
+.warnban { padding: 12px; background: #fff1d4; color: #825408; font-size: 12px; line-height: 1.7; border-radius: 12px; }
+ul.pre { list-style: none; padding: 0; margin: 14px 0; }
+ul.pre li { display: flex; gap: 10px; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--line); color: var(--dim); font-size: 13px; }
+ul.pre i { font-style: normal; }.pre .ok i { color: var(--ok); }.pre .miss i { color: var(--warn); }
+.chk { display: flex; align-items: center; gap: 10px; padding: 14px 12px; background: #eaf0df; border-radius: 12px; font-size: 13px; color: var(--fg); cursor: pointer; }
+.chk input { width: 22px; height: 22px; accent-color: #709b36; flex: none; }
+.cnote { color: var(--dim); font-size: 12px; line-height: 1.7; margin: 10px 0; overflow-wrap: anywhere; }
+#btn_calib, #btn_rec_set { background: #b9ed52; border-color: #b9ed52; }
+#btn_calib { width: 100%; margin: 10px 0; }
+.ota-bar { background: #e1e8d5; height: 5px; }
+#caltbl_bar { background: #709b36; transition: width 1.4s linear; }
+#calib_msg:not(:empty), #rec_msg:not(:empty) { background: #eaf0df; padding: 12px; border-radius: 10px; }
+.caltbl { border-collapse: collapse; width: 100%; font-size: 12px; font-variant-numeric: tabular-nums; margin: 12px 0; }
+.caltbl th, .caltbl td { padding: 12px 5px; border-bottom: 1px solid var(--line); text-align: left; overflow-wrap: anywhere; }
+.caltbl th { color: var(--dim); font-size: 10px; font-weight: 500; }
+.bad { color: var(--bad); }.flip { color: #4c7735; }.okv { color: var(--ok); }.dim { color: var(--dim); }
+.monitor { background: #222b23; border-radius: 18px; padding: 18px; color: #f5f7ed; --dim: #abb8a3; --line: #465041; display: grid; grid-template-columns: 1fr 1fr; align-items: center; gap: 12px; }
+.monitor>.eyebrow { grid-column: 1/-1; font-size: 9px; }
+#car { width: 130px; max-width: 100%; justify-self: center; }
+#carbody { fill: #303c29; stroke: #667555; stroke-width: 2; }
+#car.estop #carbody { stroke: #ff958f; stroke-width: 3; }
+.wheel rect { fill: #44523a; stroke: #b9ed52; stroke-width: 1.5; }.wheel line { stroke: #d8edb8; stroke-width: 2; }
+.wheel text { fill: #d8edb8; font-size: 11px; font-weight: 700; }
+.wheel.jogging rect { fill: #b9ed52; stroke: #fff; stroke-width: 3; }
+#car.stale .wheel rect { fill: #374133; stroke: #78836b; }#car.stale .wheel line { stroke: #78836b; }
+#arrow { fill: #b9ed52; }#arrow.rev { fill: #ffd382; }
+#live { display: grid; gap: 18px; }#live .gauge { max-width: none; min-width: 0; gap: 6px; }
+.monitor .bar-t>div { background: #a6b99c; }.monitor .bar-m>div { background: #b9ed52; }
+.jogrow { display: grid; grid-template-columns: minmax(0,1fr) auto 36px auto; align-items: center; gap: 6px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.jlabel { font-size: 13px; font-weight: 600; }.jver { display: block; font-size: 10px; font-weight: 400; margin-top: 4px; }
+.jduty { font-size: 11px; color: var(--dim); text-align: center; font-variant-numeric: tabular-nums; }
+.jogbtn { padding: 10px 12px; font-size: 12px; touch-action: none; }.jogbtn.on { background: #b9ed52; border-color: #709b36; }
+.prow { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 18px 0; }
+.prow label { display: flex; flex-direction: column; gap: 8px; font-size: 12px; }
+.prow input { width: 100%; min-width: 0; background: #f0f3e7; border: 1px solid #bdc9aa; border-radius: 12px; padding: 12px; color: var(--fg); font-size: 16px; user-select: text; -webkit-user-select: text; }
+.row.side { flex-wrap: wrap; }.row.side button { flex: 1; font-size: 12px; padding: 12px 10px; }
+@media(max-width:700px) {
+ .calib-page main { grid-template-columns: 1fr; padding: 12px; gap: 14px; }
+ .calib-page header .hstat { width: auto; margin-left: auto; }.calib-page header { gap: 8px; }
+ .calib-page .back-link { margin-left: auto; }.calib-page header .hstat { width: 100%; }
+ .calib-page #safety { border-radius: 12px; padding: 6px; gap: 4px; }
+ #safety button { padding: 8px 12px; }#safety .state { font-size: 11px; padding: 4px; }
+ .cal-intro h1 { font-size: 23px; }.cal-intro p { font-size: 11px; }
+ .flow-banner { padding: 14px; }.flow-banner p { font-size: 12px; }.flow-banner a { font-size: 11px; }
+ #steps { gap: 4px; }.step a { font-size: 11px; gap: 6px; }
+ .calib-page .calcard { padding: 18px 14px; }.calcard h3 { font-size: 18px; margin-bottom: 12px; }
+ .jogrow { grid-template-columns: minmax(0,1fr) auto 28px auto; }.jogbtn { padding: 10px 8px; }
+ .monitor { padding: 14px; }#car { width: 110px; }
+ .caltbl th, .caltbl td { padding: 10px 3px; }.caltbl { font-size: 11px; }
+}
+/* Spatial wheel controls follow the device's position record, not A..D order. */
+.wheel-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.wheel-controls .jogrow { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; border: 1px solid var(--line); border-radius: 14px; padding: 12px; align-content: start; }
+.wheel-controls .jlabel { grid-column: 1/-1; min-height: 34px; }
+.wheel-controls .jduty { grid-column: 1/-1; grid-row: 2; text-align: left; }
+.wheel-controls .jogbtn { min-width: 0; font-size: 12px; padding: 10px 6px; }
+.wheel-controls .jogbtn[id^="jp"] { grid-column: 1; grid-row: 3; }
+.wheel-controls .jogbtn[id^="jn"] { grid-column: 2; grid-row: 3; }
+.jog-status { margin: 12px 0; padding: 10px 12px; border-radius: 10px; background: #eaf0df; color: #456b28; font-size: 12px; line-height: 1.6; }
+.wheel-controls .jogrow.active { border-color: #729b38; background: #edf4df; }
+.wheel line { stroke-dasharray: 5 5; }
+#parameters select { display: block; margin-top: 6px; width: 100%; min-height: 44px; background: #f0f3e7; border: 1px solid #bdc9aa; border-radius: 8px; padding: 6px; font-size: 16px; color: var(--fg); }
+#parameters select:disabled { opacity: .6; }
+@media(max-width: 700px) {
+ .wheel-controls { gap: 8px; }
+ .wheel-controls .jogrow { padding: 10px 8px; gap: 6px; }
+ .wheel-controls .jogbtn { grid-column: 1/-1 !important; grid-row: auto !important; font-size: 13px; }
+ .wheel-controls .jogbtn[id^="jp"] { grid-row: 3 !important; }
+ .wheel-controls .jogbtn[id^="jn"] { grid-row: 4 !important; }
+}
+
+/* The driving link remains a full touch target on small iPhone screens. */
+.calib-page .back-link {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 44px; min-width: 76px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 12px;
+  background: #e7eadd; position: relative; flex: none;
+  touch-action: manipulation;
+}
+.calib-page .back-link:active { background: #ddecbd; }
