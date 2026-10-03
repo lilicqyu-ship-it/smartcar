@@ -21,7 +21,7 @@
 /* VL53L5CX multizone ToF, CPU0 owner (doc 30-tc275/36-tof-driver.md).
  *
  * Wiring truth source: doc/20-design/23-wiring.md section 11 - I2C0
- * (SCL=P13.1=mikroBUS hole 12, SDA=P13.2=hole 11), INT=P10.7=hole 15, AVDD and
+ * (SCL=P02.5=X304-7, SDA=P02.4=X304-8), INT=P10.7=hole 15, AVDD and
  * IOVDD both from the kit VEXT 3.3 V rail, 2.2 k bus pull-ups plus the 47 k
  * pull-ups the datasheet demands on INT and LPn. Nothing here can work without
  * those resistors: IfxI2c_initSclSdaPin puts both pads in open-drain mode and
@@ -53,11 +53,18 @@
  * delay that feed - and no deadline in here assumes this task keeps the CPU. */
 
 #define TOF_I2C                 (&MODULE_I2C0)
+#define TOF_SCL_PORT            (&MODULE_P02)
+#define TOF_SDA_PORT            (&MODULE_P02)
+#define TOF_SCL_PIN             5u
+#define TOF_SDA_PIN             4u
+/* Temporary bench isolation: stop ranging and park both pads as weak pull-up inputs.
+ * Set back to 0 after the disconnected-SDA electrical check. */
+#define TOF_GPIO_ISOLATION      0
 
-/* 400 kHz is the design point and, for now, a ceiling: FM+ (1 MHz) requires
+/* 100 kHz for alternate-pin bring-up; 400 kHz is the design ceiling. FM+ requires
  * SCL/SDA tR <= 120 ns, which jumper wires behind 2.2 k pull-ups are not known
  * to meet until a scope has measured them (doc 23 section 11.3). */
-#define TOF_I2C_BAUDRATE        400000.0f
+#define TOF_I2C_BAUDRATE        100000.0f
 
 /* Ranging setup. 4x4 first, because doc 23 section 11.4 step 6 runs the first
  * bench pass at 4x4 with a 5 ms integration time, and because wiring that has
@@ -145,9 +152,10 @@ static boolean tof_expired(uint32 startMs)
 /* ---- bus layer, I2c/Std primitives only ---- */
 
 /* Preserve the first fault of each transaction before STOP/reset clears it.
- * phase/rw/reg/len/PIRQSS/ERRIRQSS/RIS/BS/FFS/SCL/SDA, printed only at TOFERR cadence. */
-static uint32 g_busDiag[11];
-static uint32 g_busContext[4];
+ * phase/rw/reg/len/PIRQSS/ERRIRQSS/RIS/BS/FFS/SCL/SDA/TPS/address,
+ * printed only at TOFERR cadence. */
+static uint32 g_busDiag[13];
+static uint32 g_busContext[6];
 static boolean g_busCaptured;
 static boolean g_busDiagValid;
 
@@ -157,6 +165,8 @@ static void tof_busBegin(boolean read, uint16 reg, uint16 len)
     g_busContext[1] = (read != FALSE) ? 1u : 0u;
     g_busContext[2] = (uint32)reg;
     g_busContext[3] = (uint32)len;
+    g_busContext[4] = 0u;
+    g_busContext[5] = 0u;
     g_busCaptured = FALSE;
 }
 
@@ -176,8 +186,10 @@ static void tof_captureBus(Ifx_I2C *i2c)
     g_busDiag[6] = i2c->RIS.U;
     g_busDiag[7] = (uint32)i2c->BUSSTAT.B.BS;
     g_busDiag[8] = (uint32)i2c->FFSSTAT.B.FFS;
-    g_busDiag[9] = (IfxPort_getPinState(&MODULE_P13, 1u) != FALSE) ? 1u : 0u;
-    g_busDiag[10] = (IfxPort_getPinState(&MODULE_P13, 2u) != FALSE) ? 1u : 0u;
+    g_busDiag[9] = (IfxPort_getPinState(TOF_SCL_PORT, TOF_SCL_PIN) != FALSE) ? 1u : 0u;
+    g_busDiag[10] = (IfxPort_getPinState(TOF_SDA_PORT, TOF_SDA_PIN) != FALSE) ? 1u : 0u;
+    g_busDiag[11] = g_busContext[4]; /* TX packet bytes, including slave address */
+    g_busDiag[12] = g_busContext[5]; /* slave address actually queued */
     g_busCaptured = TRUE;
     g_busDiagValid = TRUE;
 }
@@ -212,6 +224,12 @@ static TofStatus tof_waitProtocol(Ifx_I2C *i2c, IfxI2c_ProtocolInterruptSource s
         {
             return st;
         }
+        /* RX can arrive between the mode check and this loop body. Never
+         * acknowledge its request here before the receive FIFO is drained. */
+        if (source == IfxI2c_ProtocolInterruptSource_transmissionEnd)
+        {
+            tof_clearRequests(i2c);
+        }
         if (tof_expired(startMs) != FALSE)
         {
             tof_captureBus(i2c);
@@ -223,9 +241,9 @@ static TofStatus tof_waitProtocol(Ifx_I2C *i2c, IfxI2c_ProtocolInterruptSource s
     return TOF_OK;
 }
 
-/* Arbitration lost, a NACK and a FIFO error flag are three different bench
- * stories and must not collapse into one "bus error": arbitration lost says a
- * second master is on the net (there must not be one), NACK is the expected
+/* Arbitration lost, a NACK and a FIFO error flag are different bench stories:
+ * arbitration lost reports SDA feedback differing from the transmitted bit;
+ * it does not by itself prove a second master exists. NACK is the expected
  * answer while the module is absent or LPn is low, and a FIFO error flag says a
  * transaction outlived the FIFO that was feeding it. */
 static TofStatus tof_protocolStatus(Ifx_I2C *i2c)
@@ -285,8 +303,8 @@ static TofStatus tof_waitRequest(Ifx_I2C *i2c)
     }
 }
 
-/* Same per-word handshake as iLLD, but all waits are bounded and interruptible.
- * CPU0 is the sole owner; no interrupt handler accesses this FIFO. */
+/* Pack each FIFO-sized packet before a bounded register-only critical section.
+ * No wait or wire transfer runs with interrupts disabled. */
 static TofStatus tof_txFill(Ifx_I2C *i2c, const uint8 *buf, uint16 count)
 {
     union
@@ -296,33 +314,20 @@ static TofStatus tof_txFill(Ifx_I2C *i2c, const uint8 *buf, uint16 count)
     } txData;
     uint32 words;
     uint32 i;
+    uint32 packed[8];
+    uint32 startMs;
+    boolean interruptsEnabled;
 
     if ((count == 0u) || (count > TOF_TX_MAX))
     {
         return TOF_ERR_PARAM;
     }
+    g_busContext[4] = (uint32)count;
+    g_busContext[5] = (uint32)buf[0];
     words = ((uint32)count + 3u) / 4u;
-    IfxI2c_setTransmitPacketSize(i2c, (Ifx_SizeT)count);
-
     for (i = 0u; i < words; i++)
     {
         uint32 k;
-        TofStatus st;
-        uint32 startMs = tof_nowMs();
-        g_busContext[0] = 2u; /* TX FIFO space */
-        while (i2c->FFSSTAT.B.FFS == 8u)
-        {
-            st = tof_protocolStatus(i2c);
-            if (st != TOF_OK)
-            {
-                return st;
-            }
-            if (tof_expired(startMs) != FALSE)
-            {
-                tof_captureBus(i2c);
-                return TOF_ERR_TIMEOUT;
-            }
-        }
         txData.word = 0u;
         for (k = 0u; k < 4u; k++)
         {
@@ -332,39 +337,33 @@ static TofStatus tof_txFill(Ifx_I2C *i2c, const uint8 *buf, uint16 count)
                 txData.byte[k] = buf[index];
             }
         }
-        IfxI2c_writeFifo(i2c, txData.word);
-        g_busContext[0] = 3u; /* TX request */
-        st = tof_waitRequest(i2c);
+        packed[i] = txData.word;
+    }
+    /* TC27x I2C_TC.001: drain the previous packet before programming TPS. */
+    startMs = tof_nowMs();
+    g_busContext[0] = 2u;
+    while (i2c->FFSSTAT.B.FFS != 0u)
+    {
+        TofStatus st = tof_protocolStatus(i2c);
         if (st != TOF_OK)
         {
             return st;
         }
+        if (tof_expired(startMs) != FALSE)
+        {
+            tof_captureBus(i2c);
+            return TOF_ERR_TIMEOUT;
+        }
+    }
+    g_busContext[0] = 3u;
+    interruptsEnabled = IfxCpu_disableInterrupts();
+    IfxI2c_setTransmitPacketSize(i2c, (Ifx_SizeT)count);
+    for (i = 0u; i < words; i++)
+    {
+        IfxI2c_writeFifo(i2c, packed[i]);
         tof_clearRequests(i2c);
     }
-    return TOF_OK;
-}
-
-/* START + address + ACK, and nothing else. This is the same first packet
- * IfxI2c_I2c_write puts on the wire, and the same reason: with SOPE=0 the module
- * ends the packet in master restart state instead of releasing the bus, so the
- * address gets answered before any payload is committed. An absent module
- * therefore reports as TOF_ERR_NO_ACK rather than as a half-written register. */
-static TofStatus tof_probeAddress(Ifx_I2C *i2c, uint8 addrByte)
-{
-    TofStatus st;
-
-    g_txBuf[0] = addrByte;
-
-    st = tof_txFill(i2c, g_txBuf, 1u);
-    if (st != TOF_OK)
-    {
-        return st;
-    }
-    st = tof_waitProtocol(i2c, IfxI2c_ProtocolInterruptSource_transmissionEnd);
-    if (st != TOF_OK)
-    {
-        return st;
-    }
+    IfxCpu_restoreInterrupts(interruptsEnabled);
     return tof_protocolStatus(i2c);
 }
 
@@ -391,8 +390,8 @@ static TofStatus tof_endSession(Ifx_I2C *i2c)
     return tof_protocolStatus(i2c);
 }
 
-/* One register write: probe, then one repeated-start message of address + index
- * pair + payload, then STOP. At most one message, because a message is capped at
+/* One register write: address + index pair + payload, then STOP.
+ * At most one message, because a message is capped at
  * the FIFO size and the caller (WrMulti) does the chunking. */
 static TofStatus tof_writeReg(uint8 addr8, uint16 reg, const uint8 *data, uint16 len)
 {
@@ -421,20 +420,14 @@ static TofStatus tof_writeReg(uint8 addr8, uint16 reg, const uint8 *data, uint16
     IfxI2c_clearAllProtocolInterruptSources(i2c);
     IfxI2c_clearAllErrorInterruptSources(i2c);
 
-    st = tof_probeAddress(i2c, TOF_slaveAddrWrite(addr8));
-
-    if (st == TOF_OK)
+    g_txBuf[0] = TOF_slaveAddrWrite(addr8);
+    g_txBuf[1] = TOF_wireAddrHiWrite(reg);
+    g_txBuf[2] = TOF_wireAddrLo(reg);
+    for (i = 0u; i < len; i++)
     {
-        g_txBuf[0] = TOF_slaveAddrWrite(addr8);
-        g_txBuf[1] = TOF_wireAddrHiWrite(reg);
-        g_txBuf[2] = TOF_wireAddrLo(reg);
-        for (i = 0u; i < len; i++)
-        {
-            g_txBuf[3u + i] = data[i];
-        }
-
-        st = tof_txFill(i2c, g_txBuf, msgLen);
+        g_txBuf[3u + i] = data[i];
     }
+    st = tof_txFill(i2c, g_txBuf, msgLen);
     if (st == TOF_OK)
     {
         st = tof_waitProtocol(i2c, IfxI2c_ProtocolInterruptSource_transmissionEnd);
@@ -484,15 +477,10 @@ static TofStatus tof_readReg(uint8 addr8, uint16 reg, uint8 *buf, uint16 len)
     IfxI2c_clearAllErrorInterruptSources(i2c);
 
     /* 1. point the device at the index: address + 2-byte index, no payload */
-    st = tof_probeAddress(i2c, TOF_slaveAddrWrite(addr8));
-    if (st == TOF_OK)
-    {
-        g_txBuf[0] = TOF_slaveAddrWrite(addr8);
-        g_txBuf[1] = TOF_wireAddrHiWrite(reg);
-        g_txBuf[2] = TOF_wireAddrLo(reg);
-
-        st = tof_txFill(i2c, g_txBuf, TOF_txMessageBytes(0u));
-    }
+    g_txBuf[0] = TOF_slaveAddrWrite(addr8);
+    g_txBuf[1] = TOF_wireAddrHiWrite(reg);
+    g_txBuf[2] = TOF_wireAddrLo(reg);
+    st = tof_txFill(i2c, g_txBuf, TOF_txMessageBytes(0u));
     if (st == TOF_OK)
     {
         st = tof_waitProtocol(i2c, IfxI2c_ProtocolInterruptSource_transmissionEnd);
@@ -567,9 +555,8 @@ static TofStatus tof_readReg(uint8 addr8, uint16 reg, uint8 *buf, uint16 len)
     return st;
 }
 
-/* Module + pads, from a known state. Split out because a stalled transaction can
- * only be freed by resetting the module - the same conclusion the QSPI path
- * reached: no service request, no recovery (imu.c:279-282). */
+/* Module + pads, from a known state. Recovery also clocks a stuck slave:
+ * resetting I2C0 alone does not release an externally held SDA. */
 static void tof_busSetup(void)
 {
     Ifx_I2C *i2c = TOF_I2C;
@@ -589,7 +576,7 @@ static void tof_busSetup(void)
      * doc 23 section 11.1 makes the 2.2 k pull-ups a requirement instead of a
      * suggestion. Speed1 keeps the edges slow on jumper wires, the same pad
      * driver discipline as the IMU's CS. */
-    IfxI2c_initSclSdaPin(&IfxI2c0_SCL_P13_1_INOUT, &IfxI2c0_SDA_P13_2_INOUT,
+    IfxI2c_initSclSdaPin(&IfxI2c0_SCL_P02_5_INOUT, &IfxI2c0_SDA_P02_4_INOUT,
                          IfxPort_PadDriver_cmosAutomotiveSpeed1);
 
     IfxI2c_run(i2c);
@@ -601,9 +588,222 @@ static void tof_busSetup(void)
     g_actualHz = IfxI2c_getBaudrate(i2c);
 }
 
+/* UM10204 bus clear: GPIO open-drain only, never drive a line high.
+ * A peripheral reset cannot free a slave holding SDA after an aborted read.
+ * result: 0 already idle, 1 cleared, 2 SCL held low, 3 SDA still held low. */
+static uint32 g_busClear[4]; /* result / pulse count / final SCL / final SDA */
+
+static uint32 tof_clearBusPins(void)
+{
+    uint32 pulse;
+    uint32 result = 0u;
+    g_busClear[1] = 0u;
+
+    IfxPort_setPinHigh(TOF_SCL_PORT, TOF_SCL_PIN);
+    IfxPort_setPinHigh(TOF_SDA_PORT, TOF_SDA_PIN);
+    IfxPort_setPinModeOutput(TOF_SCL_PORT, TOF_SCL_PIN, IfxPort_OutputMode_openDrain, IfxPort_OutputIdx_general);
+    IfxPort_setPinModeOutput(TOF_SDA_PORT, TOF_SDA_PIN, IfxPort_OutputMode_openDrain, IfxPort_OutputIdx_general);
+    vTaskDelay(pdMS_TO_TICKS(1u));
+
+    if (IfxPort_getPinState(TOF_SCL_PORT, TOF_SCL_PIN) == FALSE)
+    {
+        result = 2u;
+    }
+    else if (IfxPort_getPinState(TOF_SDA_PORT, TOF_SDA_PIN) == FALSE)
+    {
+        for (pulse = 0u; pulse < 9u; pulse++)
+        {
+            IfxPort_setPinLow(TOF_SCL_PORT, TOF_SCL_PIN);
+            vTaskDelay(pdMS_TO_TICKS(1u));
+            IfxPort_setPinHigh(TOF_SCL_PORT, TOF_SCL_PIN);
+            vTaskDelay(pdMS_TO_TICKS(1u));
+            g_busClear[1]++;
+            if (IfxPort_getPinState(TOF_SCL_PORT, TOF_SCL_PIN) == FALSE)
+            {
+                result = 2u;
+                break;
+            }
+            if (IfxPort_getPinState(TOF_SDA_PORT, TOF_SDA_PIN) != FALSE)
+            {
+                break;
+            }
+        }
+        if (result != 2u)
+        {
+            /* STOP: establish SDA low with SCL low, then release SCL/SDA. */
+            IfxPort_setPinLow(TOF_SCL_PORT, TOF_SCL_PIN);
+            IfxPort_setPinLow(TOF_SDA_PORT, TOF_SDA_PIN);
+            vTaskDelay(pdMS_TO_TICKS(1u));
+            IfxPort_setPinHigh(TOF_SCL_PORT, TOF_SCL_PIN);
+            vTaskDelay(pdMS_TO_TICKS(1u));
+            if (IfxPort_getPinState(TOF_SCL_PORT, TOF_SCL_PIN) == FALSE)
+            {
+                result = 2u;
+            }
+            IfxPort_setPinHigh(TOF_SDA_PORT, TOF_SDA_PIN);
+            vTaskDelay(pdMS_TO_TICKS(1u));
+            if (result != 2u)
+            {
+                result = (IfxPort_getPinState(TOF_SDA_PORT, TOF_SDA_PIN) != FALSE) ? 1u : 3u;
+            }
+        }
+    }
+    IfxPort_setPinHigh(TOF_SCL_PORT, TOF_SCL_PIN);
+    IfxPort_setPinHigh(TOF_SDA_PORT, TOF_SDA_PIN);
+    g_busClear[0] = result;
+    g_busClear[2] = (IfxPort_getPinState(TOF_SCL_PORT, TOF_SCL_PIN) != FALSE) ? 1u : 0u;
+    g_busClear[3] = (IfxPort_getPinState(TOF_SDA_PORT, TOF_SDA_PIN) != FALSE) ? 1u : 0u;
+    return result;
+}
+
+/* One boot-only GPIO address probe, independent of the I2C0 kernel.
+ * Sends address/W only, reads its ACK, then STOP; no register or data writes.
+ * status / sampled address bits / ACK bit / first differing bit (1..8).
+ * status: 0 ACK, 1 NACK, 2 SCL held, 3 SDA held, 4 address contention. */
+static void tof_gpioProbe(void)
+{
+    uint32 vals[4] = {0u, 0u, 1u, 0u};
+    uint32 clear;
+    uint32 bit;
+    IfxI2c_stop(TOF_I2C);
+    clear = tof_clearBusPins();
+    if ((clear == 2u) || (clear == 3u))
+    {
+        vals[0] = clear;
+    }
+    else
+    {
+        IfxPort_setPinLow(TOF_SDA_PORT, TOF_SDA_PIN); /* START, SCL already released */
+        vTaskDelay(pdMS_TO_TICKS(1u));
+        for (bit = 0u; bit < 8u; bit++)
+        {
+            uint32 sent = ((uint32)TOF_I2C_ADDRESS >> (7u - bit)) & 1u;
+            uint32 seen;
+            IfxPort_setPinLow(TOF_SCL_PORT, TOF_SCL_PIN);
+            /* Let the physical open-drain SCL fall before changing SDA.
+             * Back-to-back port writes can otherwise look like a START/STOP
+             * to the slave when the two jumper-wire edges settle differently. */
+            vTaskDelay(pdMS_TO_TICKS(1u));
+            if (sent != 0u)
+            {
+                IfxPort_setPinHigh(TOF_SDA_PORT, TOF_SDA_PIN);
+            }
+            else
+            {
+                IfxPort_setPinLow(TOF_SDA_PORT, TOF_SDA_PIN);
+            }
+            vTaskDelay(pdMS_TO_TICKS(1u));
+            IfxPort_setPinHigh(TOF_SCL_PORT, TOF_SCL_PIN);
+            vTaskDelay(pdMS_TO_TICKS(1u));
+            if (IfxPort_getPinState(TOF_SCL_PORT, TOF_SCL_PIN) == FALSE)
+            {
+                vals[0] = 2u;
+                break;
+            }
+            seen = (IfxPort_getPinState(TOF_SDA_PORT, TOF_SDA_PIN) != FALSE) ? 1u : 0u;
+            vals[1] = (vals[1] << 1u) | seen;
+            if ((sent != seen) && (vals[3] == 0u))
+            {
+                vals[0] = 4u;
+                vals[3] = bit + 1u;
+                break; /* release a contended bus instead of continuing */
+            }
+        }
+        if (vals[0] == 0u)
+        {
+            IfxPort_setPinLow(TOF_SCL_PORT, TOF_SCL_PIN);
+            vTaskDelay(pdMS_TO_TICKS(1u));
+            IfxPort_setPinHigh(TOF_SDA_PORT, TOF_SDA_PIN); /* release for slave ACK */
+            vTaskDelay(pdMS_TO_TICKS(1u));
+            IfxPort_setPinHigh(TOF_SCL_PORT, TOF_SCL_PIN);
+            vTaskDelay(pdMS_TO_TICKS(1u));
+            if (IfxPort_getPinState(TOF_SCL_PORT, TOF_SCL_PIN) == FALSE)
+            {
+                vals[0] = 2u;
+            }
+            else
+            {
+                vals[2] = (IfxPort_getPinState(TOF_SDA_PORT, TOF_SDA_PIN) != FALSE) ? 1u : 0u;
+                vals[0] = vals[2];
+            }
+        }
+        IfxPort_setPinLow(TOF_SCL_PORT, TOF_SCL_PIN);
+        vTaskDelay(pdMS_TO_TICKS(1u));
+        IfxPort_setPinLow(TOF_SDA_PORT, TOF_SDA_PIN);
+        vTaskDelay(pdMS_TO_TICKS(1u));
+        IfxPort_setPinHigh(TOF_SCL_PORT, TOF_SCL_PIN);
+        vTaskDelay(pdMS_TO_TICKS(1u));
+        IfxPort_setPinHigh(TOF_SDA_PORT, TOF_SDA_PIN); /* STOP if clock released */
+        vTaskDelay(pdMS_TO_TICKS(1u));
+    }
+    XCORE_logu("TOFGPIO status/bits/ack/diff=", vals, 4u);
+    tof_busSetup(); /* restore peripheral pin selection and clock */
+}
+
+#if (TOF_GPIO_ISOLATION != 0)
+static void tof_gpioIsolation(void)
+{
+    static const uint8 states[5][2] = {{1u,1u},{1u,0u},{1u,1u},{0u,1u},{1u,1u}};
+    uint32 step;
+    IfxI2c_stop(TOF_I2C);
+    IfxPort_setPinHigh(TOF_SCL_PORT, TOF_SCL_PIN);
+    IfxPort_setPinHigh(TOF_SDA_PORT, TOF_SDA_PIN);
+    IfxPort_setPinModeOutput(TOF_SCL_PORT, TOF_SCL_PIN, IfxPort_OutputMode_openDrain, IfxPort_OutputIdx_general);
+    IfxPort_setPinModeOutput(TOF_SDA_PORT, TOF_SDA_PIN, IfxPort_OutputMode_openDrain, IfxPort_OutputIdx_general);
+    for (step = 0u; step < 5u; step++)
+    {
+        uint32 vals[10];
+        IfxPort_setPinState(TOF_SCL_PORT, TOF_SCL_PIN, states[step][0] ? IfxPort_State_high : IfxPort_State_low);
+        vTaskDelay(pdMS_TO_TICKS(1u));
+        IfxPort_setPinState(TOF_SDA_PORT, TOF_SDA_PIN, states[step][1] ? IfxPort_State_high : IfxPort_State_low);
+        vTaskDelay(pdMS_TO_TICKS(1000u));
+        vals[0] = step;
+        vals[1] = states[step][0];
+        vals[2] = states[step][1];
+        vals[3] = IfxPort_getPinState(TOF_SCL_PORT, TOF_SCL_PIN) ? 1u : 0u;
+        vals[4] = IfxPort_getPinState(TOF_SDA_PORT, TOF_SDA_PIN) ? 1u : 0u;
+        vals[5] = TOF_SDA_PORT->IN.U;
+        vals[6] = TOF_SDA_PORT->OUT.U;
+        vals[7] = TOF_SDA_PORT->IOCR4.U;
+        vals[8] = TOF_I2C->GPCTL.U;
+        vals[9] = TOF_I2C->RUNCTRL.U;
+        XCORE_logu("TOFISO step/reqScl/reqSda/scl/sda/in/out/iocr4/gpctl/run=", vals, 10u);
+    }
+    /* Compare the external bias with a known internal weak pull-up after
+     * discharging SDA. Keep SCL low so these are not START/STOP edges. */
+    IfxPort_setPinLow(TOF_SCL_PORT, TOF_SCL_PIN);
+    vTaskDelay(pdMS_TO_TICKS(1u));
+    for (step = 0u; step < 2u; step++)
+    {
+        uint32 vals[5];
+        IfxPort_setPinLow(TOF_SDA_PORT, TOF_SDA_PIN);
+        IfxPort_setPinModeOutput(TOF_SDA_PORT, TOF_SDA_PIN, IfxPort_OutputMode_openDrain, IfxPort_OutputIdx_general);
+        vTaskDelay(pdMS_TO_TICKS(100u));
+        IfxPort_setPinHigh(TOF_SDA_PORT, TOF_SDA_PIN);
+        IfxPort_setPinModeInput(TOF_SDA_PORT, TOF_SDA_PIN, step ? IfxPort_InputMode_pullUp : IfxPort_InputMode_noPullDevice);
+        vTaskDelay(pdMS_TO_TICKS(1000u));
+        vals[0] = step;
+        vals[1] = IfxPort_getPinState(TOF_SCL_PORT, TOF_SCL_PIN) ? 1u : 0u;
+        vals[2] = IfxPort_getPinState(TOF_SDA_PORT, TOF_SDA_PIN) ? 1u : 0u;
+        vals[3] = TOF_SDA_PORT->IN.U;
+        vals[4] = TOF_SDA_PORT->IOCR4.U;
+        XCORE_logu("TOFBIAS pullUp/scl/sda/in/iocr4=", vals, 5u);
+    }
+    IfxPort_setPinHigh(TOF_SDA_PORT, TOF_SDA_PIN);
+    IfxPort_setPinModeInput(TOF_SDA_PORT, TOF_SDA_PIN, IfxPort_InputMode_pullUp);
+    vTaskDelay(pdMS_TO_TICKS(1u));
+    IfxPort_setPinHigh(TOF_SCL_PORT, TOF_SCL_PIN);
+    IfxPort_setPinModeInput(TOF_SCL_PORT, TOF_SCL_PIN, IfxPort_InputMode_pullUp);
+    g_state = TOF_ST_DEAD;
+    XCORE_logln("TOFISO parked: I2C0 stopped; P02.5/P02.4 weak pull-up inputs; ranging disabled");
+}
+#endif
+
 static void tof_recover(void)
 {
     IfxI2c_resetModule(TOF_I2C);
+    IfxI2c_stop(TOF_I2C);
+    (void)tof_clearBusPins();
     tof_busSetup();
 }
 
@@ -766,7 +966,8 @@ static void tof_logFailure(void)
     XCORE_logi("TOFERR berr/st/step/err=", vals, 4u);
     if (g_busDiagValid != FALSE)
     {
-        XCORE_logu("TOFBUS phase/rw/reg/len/pirq/err/ris/bs/ffs/scl/sda=", g_busDiag, 11u);
+        XCORE_logu("TOFBUS phase/rw/reg/len/pirq/err/ris/bs/ffs/scl/sda/tps/addr=", g_busDiag, 13u);
+        XCORE_logu("TOFCLEAR result/pulses/scl/sda=", g_busClear, 4u);
     }
 }
 
@@ -986,6 +1187,12 @@ void TOF_init(void)
     g_initMs     = 0u;
 
     tof_busSetup();
+#if (TOF_GPIO_ISOLATION != 0)
+    tof_gpioIsolation();
+#else
+    tof_gpioProbe();
+#endif
+    XCORE_logln("ToF I2C0 SCL=P02.5(X304-7) SDA=P02.4(X304-8) 100kHz");
 
     /* Ordinary input, no internal pull device: the module drives INT open-drain
      * and the 47 k pull-up to IOVDD is the datasheet's own requirement (doc 23
@@ -1003,6 +1210,22 @@ void TOF_init(void)
 void TOF_task(void)
 {
     uint32 nowMs = tof_nowMs();
+
+#if (TOF_GPIO_ISOLATION != 0)
+    if ((uint32)(nowMs - g_logMs) >= TOF_LOG_PERIOD_MS)
+    {
+        uint32 vals[6];
+        g_logMs = nowMs;
+        vals[0] = IfxPort_getPinState(TOF_SCL_PORT, TOF_SCL_PIN) ? 1u : 0u;
+        vals[1] = IfxPort_getPinState(TOF_SDA_PORT, TOF_SDA_PIN) ? 1u : 0u;
+        vals[2] = TOF_SDA_PORT->IN.U;
+        vals[3] = TOF_SDA_PORT->OUT.U;
+        vals[4] = TOF_SDA_PORT->IOCR4.U;
+        vals[5] = TOF_I2C->RUNCTRL.U;
+        XCORE_logu("TOFHOLD scl/sda/in/out/iocr4/run=", vals, 6u);
+    }
+    return;
+#endif
 
     switch (g_state)
     {

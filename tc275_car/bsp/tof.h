@@ -6,8 +6,8 @@
 /* VL53L5CX 8x8 multizone ToF, CPU0 (doc 30-tc275/36-tof-driver.md, wiring
  * truth source doc/20-design/23-wiring.md section 11).
  *
- * Bus: I2C0 hardware master, SCL=P13.1 / SDA=P13.2 (mikroBUS holes 12/11),
- * 400 kHz, 8-bit slave address 0x52. Register addressing is 16-bit: the first
+ * Bus: I2C0 hardware master, SCL=P02.5 / SDA=P02.4 (X304 holes 7/8),
+ * 100 kHz during alternate-pin bring-up, 8-bit slave address 0x52. Register addressing is 16-bit: the first
  * byte after the slave address carries the unmodified high index byte, the
  * second the low byte, then the payload (DS13754, and the same convention the
  * ST Ultra Lite Driver's platform contract assumes).
@@ -56,8 +56,9 @@
  * 32-byte case iLLD documents as safe to complete inside the FIFO
  * (IfxI2c_I2c.h:48-49) - above it the vendor driver disables global
  * interrupts for the whole burst, which a FreeRTOS service task must never do.
- * Every FIFO word is serviced with a bounded request handshake, with
- * interrupts enabled so higher-priority tasks can preempt the transfer. */
+ * TX packets are packed first, then queued in a bounded register-only critical
+ * section (at most eight words); RX requests are serviced per word. All
+ * protocol/space/request waits and the wire transfer keep interrupts enabled. */
 #define TOF_TX_MAX              32u     /* write message bytes, address included */
 #define TOF_WRITE_CHUNK         24u
 #define TOF_READ_CHUNK          32u

@@ -35,16 +35,43 @@ typedef struct {
  struct { struct { unsigned SETEND; } B; } ENDDCTRL;
 } Ifx_I2C;
 static Ifx_I2C module;
-static unsigned MODULE_P13;
-static boolean IfxPort_getPinState(unsigned *p, unsigned pin) { (void)p; (void)pin; return TRUE; }
+static unsigned MODULE_P02;
+#define TOF_SCL_PORT (&MODULE_P02)
+#define TOF_SDA_PORT (&MODULE_P02)
+#define TOF_SCL_PIN 5u
+#define TOF_SDA_PIN 4u
+static unsigned gpio[6]={0,1,1,1,1,1}, stuck_sda, stuck_scl, release_after, edges, delays;
+#define IfxPort_OutputMode_openDrain 1u
+#define IfxPort_OutputIdx_general 2u
+#define pdMS_TO_TICKS(x) (x)
+static void vTaskDelay(unsigned n) { assert(n==1); ++delays; }
+static boolean IfxPort_getPinState(unsigned *p, unsigned pin) {
+ (void)p; return gpio[pin] && !(pin==TOF_SCL_PIN?stuck_scl:stuck_sda);
+}
+static void IfxPort_setPinHigh(unsigned *p, unsigned pin) {
+ (void)p;
+ if (pin==TOF_SCL_PIN && !gpio[TOF_SCL_PIN] && !stuck_scl) {
+  ++edges;
+  if (release_after && edges>=release_after) stuck_sda=0;
+ }
+ gpio[pin]=1;
+}
+static void IfxPort_setPinLow(unsigned *p, unsigned pin) { (void)p; gpio[pin]=0; }
+static void IfxPort_setPinModeOutput(unsigned *p, unsigned pin, unsigned mode, unsigned idx) {
+ (void)p; (void)pin; assert(mode==IfxPort_OutputMode_openDrain && idx==IfxPort_OutputIdx_general);
+}
 #define TOF_I2C (&module)
 static uint8 g_txBuf[TOF_TX_MAX];
 static unsigned tick, protocol, tps, remaining, mrps, received, acknowledgements;
-static unsigned fault, stall, rx, tx_request;
+static unsigned fault, stall, rx, tx_request, irq_off, preempt_tx, rxmode_delay;
+static boolean IfxCpu_disableInterrupts(void) { assert(!irq_off); irq_off=1; return TRUE; }
+static void IfxCpu_restoreInterrupts(boolean enabled) { assert(enabled && irq_off); irq_off=0; }
 static uint8 wire[128];
 static unsigned wire_len;
 #define portTICK_PERIOD_MS 1u
 static unsigned xTaskGetTickCount(void) {
+ assert(!irq_off);
+ if (preempt_tx && wire_len && remaining && !rx) module.ERRIRQSS.U |= 4u;
  ++tick;
  if (module.ENDDCTRL.B.SETEND) {
   protocol |= 1u<<5; module.BUSSTAT.B.BS=0;
@@ -59,6 +86,13 @@ static unsigned xTaskGetTickCount(void) {
  return tick;
 }
 static boolean IfxI2c_getProtocolInterruptSourceStatus(Ifx_I2C *p, IfxI2c_ProtocolInterruptSource s) {
+ if (s==IfxI2c_ProtocolInterruptSource_receiveMode && rxmode_delay && (protocol & (1u<<6))) {
+  assert(mrps==4);
+  if (!received) { received=4; p->RXD.U=0xa3a2a1a0u; p->RIS.U=1; }
+  assert(received==4 && p->RIS.U);
+  rxmode_delay=0;
+  return FALSE; /* Data arrives just after the mode status was sampled. */
+ }
  p->PIRQSS.U=protocol; return (protocol & (1u<<s)) != 0;
 }
 static void IfxI2c_clearProtocolInterruptSource(Ifx_I2C *p, IfxI2c_ProtocolInterruptSource s) {
@@ -100,21 +134,27 @@ static void IfxI2c_clearBurstRequestInterruptSource(Ifx_I2C *p) { clear_request(
 CASES = r'''
 static void reset(void) {
  memset(&module,0,sizeof module); tick=protocol=tps=remaining=mrps=received=0;
- acknowledgements=fault=stall=rx=tx_request=wire_len=0;
+ acknowledgements=fault=stall=rx=tx_request=wire_len=irq_off=preempt_tx=rxmode_delay=0;
 }
 int main(void) {
  uint8 payload[TOF_WRITE_CHUNK], data[TOF_READ_CHUNK];
  memset(payload,0x55,sizeof payload);
  reset(); assert(tof_writeReg(0x52,0x7fff,payload,1)==TOF_OK);
- assert(wire_len==5 && !memcmp(wire,"\x52\x52\x7f\xff\x55",5));
- assert(acknowledgements==2 && module.BUSSTAT.B.BS==0);
+ assert(wire_len==4 && !memcmp(wire,"\x52\x7f\xff\x55",4));
+ assert(acknowledgements==1 && module.BUSSTAT.B.BS==0);
  reset(); assert(tof_writeReg(0x52,0x1234,payload,sizeof payload)==TOF_OK);
- assert(acknowledgements==8 && wire_len==28);
+ assert(acknowledgements==7 && wire_len==27);
+ reset(); preempt_tx=1;
+ assert(tof_writeReg(0x52,0x1234,payload,sizeof payload)==TOF_OK);
+ assert(!irq_off && wire_len==27);
+ reset(); rxmode_delay=1;
+ assert(tof_readReg(0x52,0x2c00,data,4)==TOF_OK);
+ assert(data[0]==0xa0 && data[3]==0xa3);
  for (unsigned n=1;n<=TOF_READ_CHUNK;++n) {
   reset(); memset(data,0,sizeof data);
   assert(tof_readReg(0x52,0x7fff,data,n)==TOF_OK);
-  assert(wire_len==5 && !memcmp(wire,"\x52\x52\x7f\xff\x53",5));
-  assert(acknowledgements==3+(n+3)/4 && module.BUSSTAT.B.BS==0);
+  assert(wire_len==4 && !memcmp(wire,"\x52\x7f\xff\x53",4));
+  assert(acknowledgements==2+(n+3)/4 && module.BUSSTAT.B.BS==0);
   for (unsigned k=0;k<n;++k) assert(data[k]==0xa0u+k);
  }
  for (unsigned f=1;f<=3;++f) {
@@ -123,6 +163,7 @@ int main(void) {
   assert(tick<TOF_XFER_TIMEOUT_MS);
   assert(g_busDiagValid && g_busDiag[0]==3 && g_busDiag[1]==1);
   assert(g_busDiag[9]==1 && g_busDiag[10]==1);
+  assert(g_busDiag[11]==3 && g_busDiag[12]==0x52);
   if (f==1) assert(g_busDiag[4] & (1u<<4));
   if (f==2) assert(g_busDiag[4] & (1u<<3));
   if (f==3) assert(g_busDiag[5]==1);
@@ -130,7 +171,7 @@ int main(void) {
  }
  reset(); stall=1; assert(tof_writeReg(0x52,0,payload,1)==TOF_ERR_TIMEOUT);
  assert(tick>=TOF_XFER_TIMEOUT_MS && tick<3*TOF_XFER_TIMEOUT_MS);
- assert(g_busDiag[0]==3); /* STOP must not overwrite original fault. */
+ assert(g_busDiag[0]==4); /* STOP must not overwrite original fault. */
  reset(); module.FFSSTAT.B.FFS=8;
  assert(tof_writeReg(0x52,0,payload,1)==TOF_ERR_TIMEOUT);
  assert(g_busDiag[0]==2);
@@ -141,6 +182,14 @@ int main(void) {
  assert(wire_len==0);
  assert(TOF_wireAddrHiRead(0x7fff)==0x7f);
  assert(TOF_wireAddrHiRead(0x0000)==0);
+ assert(tof_clearBusPins()==0 && g_busClear[1]==0);
+ stuck_sda=1; release_after=9; edges=delays=0;
+ assert(tof_clearBusPins()==1 && g_busClear[1]==9 && g_busClear[3]==1);
+ stuck_sda=1; release_after=0; edges=delays=0;
+ assert(tof_clearBusPins()==3 && g_busClear[1]==9 && g_busClear[3]==0);
+ assert(delays<=23 && gpio[TOF_SCL_PIN] && gpio[TOF_SDA_PIN]);
+ stuck_scl=1;
+ assert(tof_clearBusPins()==2 && g_busClear[1]==0);
  puts("ToF bus: write/read 1..32 B, FIFO handshakes, NACK/AL/FIFO errors, deadlines, wire format PASS");
 }
 '''
@@ -156,7 +205,9 @@ def main():
     with tempfile.TemporaryDirectory(prefix='tof_bus_') as tmp:
         c = Path(tmp) / 'test.c'
         exe = Path(tmp) / 'test.exe'
-        c.write_text(MODEL + source[start:end] + CASES, encoding='utf-8')
+        clear_start = source.index('static uint32 g_busClear[4];')
+        clear_end = source.index('/* One boot-only GPIO address probe,', clear_start)
+        c.write_text(MODEL + source[start:end] + source[clear_start:clear_end] + CASES, encoding='utf-8')
         subprocess.run([cc, '-std=c99', '-Wall', '-Wextra', '-Werror',
                         '-I', str(ROOT / 'test/host/stub'), '-I', str(ROOT),
                         str(c), '-o', str(exe)], check=True)

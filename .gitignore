@@ -18,3 +18,4 @@ firmware/dist/**/*.mdf
 smartcar_remote/.cache
 # clangd/工具链本地缓存
 tc275_car/.cache/
+/firmware/dist
