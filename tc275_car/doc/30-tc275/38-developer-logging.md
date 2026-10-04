@@ -1,6 +1,6 @@
 # TC275 开发者日志字典
 
-版本 V1.1，2026-10-04，适用 APPFW **v1.2.1 起**（V1.1：落地链路改非阻塞字节泵，见下）。ASCLIN0/COM16，115200、8N1。本文是当前日志格式和频率的真源；35/36/37 号文档里的旧数字串保留为历史抓取。
+版本 V1.2，2026-10-04，适用 APPFW **v1.2.1 起**（V1.2：`[WHEELS]` 新增 `left/right_edge_age_ms` 两字段，编码器按侧健康判读，随 [51](../51-encoder-health-bugfix.md)；V1.1：落地链路改非阻塞字节泵，见下）。ASCLIN0/COM16，115200、8N1。本文是当前日志格式和频率的真源；35/36/37 号文档里的旧数字串保留为历史抓取。
 
 ## 输出策略
 
@@ -44,6 +44,7 @@
 | WHEELS `left_mm_s` / `right_mm_s` | 编码器左右侧实测速度，正向前、负向后 |
 | `session_odo_mm` | 当前上电会话累计里程，绝对路程而非带符号位移 |
 | `recent_encoder_edges` | 最近窗口是否见到编码器边沿；静止为 0 正常，不等同 encoder_fresh=0 |
+| `left_edge_age_ms` / `right_edge_age_ms` | 左/右侧距最近一次边沿的毫秒数，65535=自启动无边沿（饱和）；静止增长、运动回落到个位数，按侧健康判读用（V1.2，[51](../51-encoder-health-bugfix.md)） |
 | SERVO `target_*_pct_x10` / `measured_*_pct_x10` / `duty_*_pct_x10` | 每侧的速度目标、编码器归一化实测速度、实际 PWM 占空比；不是 mm/s |
 | ENCODER_CALIBRATION `invert_A/B/C/D` | 四电机编码器判向反转开关，1=反转 |
 | `delta_A/B/C/D_counts` | 判向标定运行期间的四路编码器累计变化量，带符号计数 |

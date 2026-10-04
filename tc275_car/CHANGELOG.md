@@ -7,6 +7,10 @@
 
 ## [未发布]
 
+### 编码器健康修复（1.3.1）
+- **P0（BUG-ENC-1）**：4 路霍尔编码器健康被合并成单一 `alive`（任一侧 500 ms 内动过即真），且融合把"1 ms 发布序号变化"当成"编码器有效"（xcore 每次发布无条件自增 seq、`FusionInput` 无 alive 字段）——单侧失效被对侧运动掩蔽：`FUSION_ENCODER_LOST` 前进硬停止对传感器本身失效是死代码，死侧以假 0 测量参与闭环（PI 积分 windup）与融合（车速锚减半、轮速/陀螺一致性被污染）。修复：`XcoreEncoder` 新增按侧 `edgeAgeMs[2]` 边沿龄原语（饱和 0xFFFF，`ENCODER_EDGE_FRESH_MS=100`）；融合 `FUSION_ENCODER_OK` 改为"发布新鲜 + 被驱侧 500 ms 起步宽限内持续出边沿"（松杆清零，静止永不误报），速度锚与轮速/陀螺一致性只用边沿新鲜的侧；`motor_algo` 的 measOk 按侧判定，死侧回退开环清积分；`[WHEELS]` 日志新增 `left/right_edge_age_ms`。`alive` 保留为"近期有运动"指示、seq 保留为发布活性。
+- `test_fusion` 新增 3 组按侧失效回归（500 ms 锁存、单侧锚点、起步宽限不误锁）；`test_xcore` +2 断言（edgeAgeMs 跨核透传）。TASKING Debug 构建通过（ROM 198243 B）。根因推导、已知边界与台架待办见 [51-encoder-health-bugfix.md](doc/51-encoder-health-bugfix.md)；单侧拔线注入等台架验证未做。
+
 ### 控制周期修复（1.3.1）
 - **P0**：CPU0 10 ms 控制任务内同步排 UART 日志，最坏 256 B@115200 ≈ 22 ms，天然超过控制周期。`XCORE_logService` 改为非阻塞字节泵：新增 `bsp/uart UART_printTry`（TIME_NULL 写 + 空闲水位检查，`\n`→CRLF 成对入队），控制任务只把日志环字节排进 ASCLIN0 驱动 256 B 软件 TX FIFO，TX ISR 按线速后台移出；FIFO 满即停、下周期续排，跨调用字节序与 CRLF 帧化不变。积压仍按线速清空、满环丢整行计数不变；不再阻塞控制任务/喂狗节奏。
 - `test_xcore` 契约同步改写（主机模拟 TX FIFO + 线流重组：1109→1386 断言）；`test_log_policy` 落地替身随行。TASKING Debug 构建通过（uart.o/xcore.o 重编 + 重链）。
