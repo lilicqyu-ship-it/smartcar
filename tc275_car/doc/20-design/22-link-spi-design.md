@@ -1,6 +1,6 @@
 # SmartDrive 板间链路换向：UART → SPI（SF 帧详细设计）
 
-> 2026-10-04 后续事务层设计见 [共享协议契约](../../../contracts/link/transaction-v1.md) 和 21 文末补充。新增分配仅属设计，未在固件实现；沿用本文件的 SF 帧与 SPI 寄存器模型，不将应用分片写入现有 SF FLAGS。传感器验收入口确定为 iOS Remote。
+> 2026-10-04 后续事务层设计见 [共享协议契约](../../../contracts/link/transaction-v1.md) 和 21 文末补充。TC275 v1.3.0 已实现新增分配，C6/iOS 接入尚待实现；沿用本文件的 SF 帧与 SPI 寄存器模型，不将应用分片写入现有 SF FLAGS。传感器验收入口确定为 iOS Remote。
 
 | 项 | 内容 |
 |---|---|

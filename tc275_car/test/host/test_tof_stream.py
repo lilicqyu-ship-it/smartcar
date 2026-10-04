@@ -22,6 +22,7 @@ static unsigned g_frameMs,g_reprobeMs,g_failRun,g_frameCount,now,readyValue,stat
 static FusionTof g_snapshot,wire;
 static struct {int16_t distance_mm[16];uint8_t target_status[16],nb_target_detected[16];} g_results;
 static unsigned tof_nowMs(void){return now;}
+static unsigned STIME_nowMs(void){return now+123u;}
 static void XCORE_logln(const char *p){(void)p;}
 static void XCORE_tofPublish(const FusionTof *p){wire=*p;published++;}
 static void tof_dataFailed(uint8_t st){assert(st);errors++;}
@@ -35,6 +36,7 @@ int main(void){
  g_alive=1;g_frameMs=now;readyValue=1;g_results.distance_mm[7]=123;
  g_results.target_status[7]=5;g_results.nb_target_detected[7]=1;
  now=1010;tof_rangingStep();assert(wire.seq==1 && wire.stampMs==1010 && wire.alive);
+ assert(wire.sampleStampMs==1133); /* independent STM acquisition clock */
  assert(wire.distanceMm[7]==123 && wire.targets[7]==1 && wire.status[7]==5);
  statusValue=1;tof_rangingStep();assert(errors==1 && published==2);
  statusValue=0;readyValue=0;g_frameMs=0xffffff00u;now=20;tof_rangingStep();assert(published==2);

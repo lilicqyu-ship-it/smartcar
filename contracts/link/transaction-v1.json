@@ -1,6 +1,6 @@
 {
   "name": "TC275-C6 diagnostic transactions",
-  "status": "design_not_implemented",
+  "status": "tc275_implemented_c6_ios_pending",
   "schema": 1,
   "date": "2026-10-04",
   "entrypoint": "ios_remote",
@@ -181,5 +181,33 @@
       "request_hex": "60011200785634120300e80332000a05",
       "sf_hex": "5a010102001100035360011200785634120300e80332000a05946200"
     }
-  ]
+  ],
+  "tc275_version": "1.3.0",
+  "tlv_tags": {
+    "capability_bits": 1,
+    "app_version": 2,
+    "sensor_mask": 3,
+    "max_duration_ms": 4,
+    "imu_rates_hz": 5,
+    "tof_config": 6,
+    "policy_versions": 7,
+    "granted_config": 8,
+    "task_state": 9,
+    "sensor_health_bits": 10,
+    "imu_records": 11,
+    "tof_records": 12,
+    "dropped_fragments": 13,
+    "elapsed_ms": 14,
+    "verdict": 15,
+    "policy_version": 16,
+    "target_request": 17,
+    "imu_source_seq": 18,
+    "tof_source_seq": 19,
+    "driver_errors": 20,
+    "completed_record_seq": 21,
+    "reference": 22,
+    "tof_statistics": 23,
+    "imu_face": 24,
+    "imu_info": 25
+  }
 }
