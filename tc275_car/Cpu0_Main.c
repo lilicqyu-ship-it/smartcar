@@ -203,15 +203,16 @@ static void vRobotControlTask(void *pvParameters)
                     static const char *const action[] = {"none", "limit_speed", "stop_obstacle",
                         "stop_tof_unavailable", "stop_tilt", "stop_encoder_unavailable"};
                     FusionOutput *out = &g_driveFusion.out;
-                    uint32 signature = ((uint32)out->flags & 0x6Fu) | ((uint32)out->reason << 8u);
+                    uint32 signature = ((uint32)out->flags & 0xEFu) | ((uint32)out->reason << 8u);
                     boolean urgent = (out->reason >= FUSION_OBSTACLE) ? TRUE : FALSE;
                     if (XCORE_logDue(&gate, g_fusionInput.nowMs, signature, 5000u, 1000u, urgent)) {
                         const char *permission = "allowed";
                         if (!g_fusionInput.wheelsCalibrated) permission = "blocked_wheel_calibration";
                         else if (!(out->flags & FUSION_ENCODER_OK)) permission = "blocked_encoder";
-                        else if (!(out->flags & FUSION_TOF_OK)) permission = "blocked_tof";
-                        else if (out->nearestMm <= g_driveFusion.cfg.marginMm) permission = "blocked_near_obstacle";
+                        else if (!(out->flags & (FUSION_TOF_OK | FUSION_TOF_LIMITED))) permission = "blocked_tof";
+                        else if (out->nearestMm && out->nearestMm <= g_driveFusion.cfg.marginMm) permission = "blocked_near_obstacle";
                         else if (out->flags & FUSION_NEUTRAL_REQUIRED) permission = "blocked_release_required";
+                        else if (out->flags & FUSION_TOF_LIMITED) permission = "limited_tof_coverage";
                         if (out->reason == FUSION_TILT) permission = "blocked_tilt";
                         XCORE_LOG_FIELDS("[FUSION]",
                             XL_U("uptime_ms", g_fusionInput.nowMs),

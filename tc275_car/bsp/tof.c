@@ -1387,6 +1387,20 @@ void TOF_task(void)
         XCORE_LOG_FIELDS("[TOF_CONFIG]", XL_U("uptime_ms", g_logMs), XL_U("init_ms", g_initMs),
             XL_U("i2c_hz", g_actualHz), XL_U("zones", TOF_ZONE_COUNT),
             XL_H("device_id", g_whoAmI[0]), XL_H("revision_id", g_whoAmI[1]));
+        /* Keep raw zones visible at the summary cadence: a close floor/body
+         * return and an invalid optical return need different remedies. Raw
+         * zone indices are sensor order, not calibrated vehicle directions. */
+        if (g_alive && g_frameCount != 0u)
+        {
+            uint8 zone;
+            for (zone = 0u; zone < TOF_ZONE_COUNT; zone++)
+            {
+                XCORE_LOG_FIELDS("[TOF_ZONE]", XL_U("frame", g_frameCount),
+                    XL_U("zone", zone), XL_I("distance_mm", g_results.distance_mm[zone]),
+                    XL_U("status_raw", g_results.target_status[zone]),
+                    XL_U("targets", g_results.nb_target_detected[zone]));
+            }
+        }
     }
 }
 

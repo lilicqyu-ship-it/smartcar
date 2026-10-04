@@ -190,12 +190,15 @@ void FUSION_step(Fusion *s, const FusionInput *in)
             if (!o->nearestMm || d < o->nearestMm)
                 o->nearestMm = (uint16_t)d;
         }
-        /* Sparse / invalid returns are unknown space, never an infinite range. */
+        /* Sparse returns remain unknown space. Manual mode permits only a
+         * bounded crawl while the physical sensor keeps publishing frames. */
         if (valid >= n / 2u && o->sectorMm[1])
             o->flags |= FUSION_TOF_OK;
+        else
+            o->flags |= FUSION_TOF_LIMITED;
     }
     o->validZones = (uint8_t)valid;
-    if (o->flags & FUSION_TOF_OK)
+    if (o->flags & (FUSION_TOF_OK | FUSION_TOF_LIMITED))
     {
         float clearance =
             o->nearestMm > s->cfg.marginMm ? (float)(o->nearestMm - s->cfg.marginMm) : 0;
@@ -204,6 +207,11 @@ void FUSION_step(Fusion *s, const FusionInput *in)
         cap = (int)(sqrtf(a * a * t * t + 2 * a * clearance) - a * t);
         if (cap > fs)
             cap = fs;
+        if (o->flags & FUSION_TOF_LIMITED)
+        {
+            if (!o->nearestMm || cap > (int)FUSION_SPARSE_MM_S)
+                cap = FUSION_SPARSE_MM_S;
+        }
     }
     o->capMmS = (uint16_t)cap;
     forward = l > 0 || r > 0;
@@ -211,7 +219,9 @@ void FUSION_step(Fusion *s, const FusionInput *in)
     if (in->tof.seq != s->tofSeq)
     {
         s->tofSeq = in->tof.seq;
-        if ((o->flags & FUSION_TOF_OK) && o->nearestMm >= s->cfg.marginMm + 100u)
+        if ((o->flags & (FUSION_TOF_OK | FUSION_TOF_LIMITED)) &&
+            ((!o->nearestMm && (o->flags & FUSION_TOF_LIMITED)) ||
+             o->nearestMm >= s->cfg.marginMm + 100u))
         {
             if (s->clearFrames < 3)
                 s->clearFrames++;
@@ -219,7 +229,7 @@ void FUSION_step(Fusion *s, const FusionInput *in)
         else
             s->clearFrames = 0;
     }
-    if (!(o->flags & FUSION_TOF_OK))
+    if (!(o->flags & (FUSION_TOF_OK | FUSION_TOF_LIMITED)))
         s->clearFrames = 0;
     if (!l && !r && s->clearFrames >= 3)
         s->latched = 0;
@@ -230,12 +240,12 @@ void FUSION_step(Fusion *s, const FusionInput *in)
             o->reason = FUSION_ENCODER_LOST;
             hard = 1;
         }
-        else if (!(o->flags & FUSION_TOF_OK))
+        else if (!(o->flags & (FUSION_TOF_OK | FUSION_TOF_LIMITED)))
         {
             o->reason = FUSION_BLIND;
             hard = 1;
         }
-        else if (o->nearestMm <= s->cfg.marginMm)
+        else if (o->nearestMm && o->nearestMm <= s->cfg.marginMm)
         {
             o->reason = FUSION_OBSTACLE;
             hard = 1;

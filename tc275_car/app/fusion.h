@@ -12,6 +12,8 @@
 #define FUSION_SLIP 16u
 #define FUSION_BIAS_READY 32u
 #define FUSION_NEUTRAL_REQUIRED 64u
+#define FUSION_TOF_LIMITED 128u /* fresh sparse frame: manual low-speed allowance */
+#define FUSION_SPARSE_MM_S 150u
 /* Reasons are independent of the existing robot emergency-stop fault. */
 enum
 {

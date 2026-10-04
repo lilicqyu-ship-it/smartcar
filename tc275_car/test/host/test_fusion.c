@@ -99,13 +99,31 @@ int main(void)
     for (i = 0; i < 16; i++)
         in.tof.status[i] = 0;
     tick(1);
-    assert(s.out.reason == FUSION_BLIND && s.out.brake);
+    assert(s.out.reason == FUSION_SLOW && !s.out.brake);
+    assert((s.out.flags & FUSION_TOF_LIMITED) && s.out.effective[0] == 150);
     setup(4000);
     in.request[0] = 500;
     for (i = 0; i < 16; i++)
         in.tof.targets[i] = 0;
     tick(1);
     assert(!(s.out.flags & FUSION_TOF_OK));
+    assert(s.out.capMmS == 150 && s.out.effective[0] == 150 && !s.out.brake);
+    /* One trusted close zone still stops, even with 15 unknown zones. */
+    in.tof.targets[7] = 1;
+    in.tof.distanceMm[7] = 100;
+    tick(1);
+    assert(s.out.reason == FUSION_OBSTACLE && s.out.brake);
+    in.tof.distanceMm[7] = 1280;
+    for (i = 0; i < 5; i++) tick(1);
+    assert(s.latched); /* obstacle clearance cannot restart held throttle */
+    in.request[0] = 0;
+    tick(1);
+    assert(!s.latched);
+    in.request[0] = 500;
+    tick(1);
+    assert(s.out.effective[0] == 150 && !s.out.brake);
+    for (i = 0; i < 26; i++) tick(0);
+    assert(s.out.reason == FUSION_BLIND && s.out.brake); /* frozen sparse frame */
     setup(4000);
     in.tof.zones = 65;
     in.request[0] = 500;

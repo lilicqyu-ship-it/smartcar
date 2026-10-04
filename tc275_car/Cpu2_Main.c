@@ -290,7 +290,7 @@ void core2_main(void)
                 }
                 /* Network traffic cannot make a frozen CPU0 snapshot fresh. */
                 if ((uint32)(nowMs - lastChangeMs) > 250u) {
-                    out.flags &= (uint16)~(FUSION_TOF_OK | FUSION_IMU_OK | FUSION_ENCODER_OK);
+                    out.flags &= (uint16)~(FUSION_TOF_OK | FUSION_TOF_LIMITED | FUSION_IMU_OK | FUSION_ENCODER_OK);
                     out.reason = FUSION_BLIND;
                     out.capMmS = 0u;
                     out.tofAgeMs = 65535u;
