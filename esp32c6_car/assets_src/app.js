@@ -125,9 +125,28 @@ document.addEventListener("visibilitychange", () => {
   }
 });
 
+let fusionTs = 0;
+function onFusion(m) {
+  fusionTs = Date.now();
+  const reasons = ["前向辅助就绪", "正在接近障碍，已限速", "前向保护停车", "前方测距不可用，前进受限", "倾斜保护停车，请扶正车辆", "车速反馈未就绪"];
+  $("assist_state").textContent = (m.flags & 1) ? (reasons[m.reason] || "保护中") : "前方测距不可用，前进受限";
+  if ((m.flags & 1) && !m.cap && !m.reason) $("assist_state").textContent = "前方距离不足，前进受限";
+  if ((m.flags & 64) && !m.reason) $("assist_state").textContent = "前向保护保持锁定";
+  if ((m.flags & 64) && m.reason !== 4) $("assist_state").textContent += " · 松开前进后再试";
+  $("assist_detail").textContent = (m.flags & 1) ? `前方 ${m.distance} mm · 前进上限 ${(m.cap / 1000).toFixed(2)} m/s · 倒车可退出` : "等待有效测距 · 前进受限 · 倒车限速退出";
+  $("assist_attitude").textContent = (m.flags & 8) ? ((m.flags & 2) ? `横滚 ${(m.roll / 100).toFixed(1)}° · 俯仰 ${(m.pitch / 100).toFixed(1)}°${(m.flags & 16) ? " · 检测到轮速与陀螺仪不一致" : ""}` : "IMU 数据已失效，直行辅助暂停") : "IMU 安装方向待标定 · 姿态和直行辅助未启用";
+}
+setInterval(() => {
+  if (fusionTs && (!state.tc || Date.now() - fusionTs > 1000)) {
+    $("assist_state").textContent = "驾驶辅助数据已过期";
+    $("assist_detail").textContent = "等待车端更新";
+    $("assist_attitude").textContent = "姿态数据不可用";
+  }
+}, 500);
 let errT = 0;                     /* pending "错误:" auto-clear timer */
 function onCtl(m) {
-  if (m.t === "hello") {    state.ctrl = (m.role === "ctrl");
+  if (m.t === "fusion") { onFusion(m);
+  } else if (m.t === "hello") {    state.ctrl = (m.role === "ctrl");
     $("ver").textContent = "fw " + m.ver;
     if (state.ctrl) setRole("控制器", "ctrl");
     else setRole("旁观者", "spec");

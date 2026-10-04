@@ -233,6 +233,7 @@ void core2_main(void)
     uint32 nextTelMs;
     uint32 nextDiagMs;
     uint32 nextSpdMs;
+    uint32 nextFusionMs;
 
     IfxCpu_enableInterrupts();
 
@@ -257,6 +258,7 @@ void core2_main(void)
     nextTelMs  = STIME_nowMs() + LINK_TELEMETRY_PERIOD_MS;
     nextDiagMs = STIME_nowMs() + LINK_DIAG_PERIOD_MS;
     nextSpdMs  = STIME_nowMs() + LINK_SPEED_PERIOD_MS;
+    nextFusionMs = STIME_nowMs() + 200u;
 
     while (1)
     {
@@ -268,6 +270,32 @@ void core2_main(void)
             nextTelMs += LINK_TELEMETRY_PERIOD_MS;
             link_sendTelemetry();          /* keeps WRDMA traffic flowing for G5 */
             link_sendPendingEvents();      /* DPT event frames queued by CPU0    */
+        }
+
+        if ((sint32)(STIME_nowMs() - nextFusionMs) >= 0)
+        {
+            nextFusionMs = STIME_nowMs() + 200u;
+            if (LINK_isUp()) {
+                static uint32 lastStampMs;
+                static uint32 lastChangeMs;
+                FusionOutput out;
+                uint8 wire[FUSION_WIRE_LEN];
+                uint32 nowMs = STIME_nowMs();
+                XCORE_fusionRead(&out);
+                if (out.stampMs != lastStampMs) {
+                    lastStampMs = out.stampMs;
+                    lastChangeMs = nowMs;
+                }
+                /* Network traffic cannot make a frozen CPU0 snapshot fresh. */
+                if ((uint32)(nowMs - lastChangeMs) > 250u) {
+                    out.flags &= (uint16)~(FUSION_TOF_OK | FUSION_IMU_OK | FUSION_ENCODER_OK);
+                    out.reason = FUSION_BLIND;
+                    out.capMmS = 0u;
+                    out.tofAgeMs = 65535u;
+                }
+                FUSION_encode(&out, wire);
+                (void)LINK_send(SF_TYPE_EVT, FUSION_EVT_CID, wire, FUSION_WIRE_LEN);
+            }
         }
 
         if ((sint32)(STIME_nowMs() - nextDiagMs) >= 0)

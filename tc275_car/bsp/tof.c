@@ -127,6 +127,8 @@ static TofStatus g_lastErr;       /* last bus-layer failure code            */
 static uint32    g_errCount;      /* failed I2C messages since boot         */
 static uint8     g_failRun;       /* consecutive failed ULD calls           */
 static uint32    g_frameCount;
+static uint32    g_frameMs;
+static FusionTof g_snapshot;
 static uint32    g_initMs;        /* measured vl53l5cx_init() cost          */
 static float32   g_actualHz;      /* post-divider bus clock, bench evidence */
 static uint32    g_reprobeMs;
@@ -1098,6 +1100,8 @@ static void tof_dataFailed(uint8_t st)
 
     g_failRun   = 0u;
     g_alive     = FALSE;
+    g_snapshot.alive = 0u;
+    XCORE_tofPublish(&g_snapshot);
     g_reprobeMs = tof_nowMs();
     /* Back to the identity check, which puts the firmware download back in the
      * ladder. That is the expensive part (~3 s of bus time) and it is the
@@ -1126,6 +1130,8 @@ static void tof_ladderFailed(void)
      * guessing which setting survived. */
     g_failRun   = 0u;
     g_alive     = FALSE;
+    g_snapshot.alive = 0u;
+    XCORE_tofPublish(&g_snapshot);
     g_state     = TOF_ST_PROBE;
     g_reprobeMs = tof_nowMs();
 }
@@ -1146,6 +1152,15 @@ static void tof_rangingStep(void)
     }
     if (ready == 0u)
     {
+        if ((uint32)(tof_nowMs() - g_frameMs) >= 1000u)
+        {
+            g_alive = FALSE;
+            g_snapshot.alive = 0u;
+            XCORE_tofPublish(&g_snapshot);
+            g_state = TOF_ST_PROBE;
+            g_reprobeMs = tof_nowMs();
+            XCORE_logln("ToF frame timeout, re-probing");
+        }
         return;                     /* frame not due yet */
     }
 
@@ -1158,6 +1173,21 @@ static void tof_rangingStep(void)
 
     g_failRun = 0u;
     g_frameCount++;
+    g_frameMs = tof_nowMs();
+    g_snapshot.seq = g_frameCount;
+    g_snapshot.stampMs = g_frameMs;
+    g_snapshot.alive = 1u;
+    g_snapshot.zones = TOF_ZONE_COUNT;
+    {
+        uint8 i;
+        for (i = 0u; i < TOF_ZONE_COUNT; i++)
+        {
+            g_snapshot.distanceMm[i] = g_results.distance_mm[i];
+            g_snapshot.status[i] = g_results.target_status[i];
+            g_snapshot.targets[i] = g_results.nb_target_detected[i];
+        }
+    }
+    XCORE_tofPublish(&g_snapshot);
 }
 
 void TOF_init(void)
@@ -1173,6 +1203,8 @@ void TOF_init(void)
     g_dev.platform.address = (uint16_t)TOF_I2C_ADDRESS;
 
     (void)memset(&g_results, 0, sizeof(g_results));
+    (void)memset(&g_snapshot, 0, sizeof(g_snapshot));
+    XCORE_tofPublish(&g_snapshot);
 
     g_state      = TOF_ST_PROBE;
     g_alive      = FALSE;
@@ -1311,6 +1343,7 @@ void TOF_task(void)
             if (st == TOF_OK)
             {
                 g_alive     = TRUE;
+                g_frameMs   = tof_nowMs();
                 g_failRun   = 0u;
                 g_cfgStep   = 0u;
                 g_stStatus  = 0u;

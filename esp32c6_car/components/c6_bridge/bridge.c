@@ -764,6 +764,22 @@ static void bridge_emit_jogcnt(const uint8_t *p, uint16_t n)
     http_broadcast_ctl(json);
 }
 
+/* Versioned 28-byte CPU0 fusion snapshot; legacy 38-byte telemetry unchanged. */
+static void bridge_emit_fusion(const uint8_t *p, uint16_t n)
+{
+    char json[256];
+    if (n != 28u || p[0] != 1u) return;
+    (void)snprintf(json, sizeof(json),
+        "{\"t\":\"fusion\",\"reason\":%u,\"flags\":%u,\"distance\":%u,"
+        "\"cap\":%u,\"speed\":%d,\"yawRate\":%d,\"heading\":%d,"
+        "\"roll\":%d,\"pitch\":%d,\"age\":%u,\"zones\":%u,\"brake\":%u}",
+        p[1], proto_get_u16(p+2), proto_get_u16(p+4), proto_get_u16(p+6),
+        (int16_t)proto_get_u16(p+8), (int16_t)proto_get_u16(p+10),
+        (int16_t)proto_get_u16(p+12), (int16_t)proto_get_u16(p+14),
+        (int16_t)proto_get_u16(p+16), proto_get_u16(p+18), p[26], p[27]);
+    http_broadcast_ctl(json);
+}
+
 static void pump_link_frame(const proto_frame_t *f)
 {
     switch (f->cmd)
@@ -806,6 +822,10 @@ static void pump_link_frame(const proto_frame_t *f)
                 else if (sub == DIAG_SUB_EVT_JOG_CNT)
                 {
                     bridge_emit_jogcnt(p, n);
+                }
+                else if (sub == 0x27u)
+                {
+                    bridge_emit_fusion(p, n);
                 }
                 else
                 {

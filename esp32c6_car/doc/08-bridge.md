@@ -123,3 +123,10 @@ void      ota_relay_abort(int sd);
 | B-6 | 手机断开立即 ABORT | 🟩 | 本轮修复（sink.abort 经 http close/recv 错误触发） |
 | B-7 | state/faultCode 首屏缓存进 HELLO | 🔴 | 缓存已维护（car_state/fault_code），HELLO 未携带——页面靠 20 ms 遥测首帧兜底 |
 | B-8 | 中继进度写遥测扩展字段 | ⚪ | LLDD 提及"写入遥测扩展字段"；0x41 帧无扩展位，进度走 WS 文本面（页眉进度条） |
+
+
+## 前向驾驶辅助状态（2026-10-04）
+
+`bridge_emit_fusion` 将 DIAG 隧道的 SF EVT `0x27`（版本 1，28 B）转为 WebSocket JSON：`t=fusion`，reason、flags、distance(mm)、cap(mm/s)、speed(mm/s)、yawRate/heading/roll/pitch(0.01°)、age(ms)、zones、brake。长度必须恰好 28 B；未知版本丢弃。字段真源：[TC275 37 号融合文档](../../tc275_car/doc/30-tc275/37-sensor-fusion.md)。不扩展既有 38 B 遥测。
+
+控制页新增独立驾驶辅助状态，显示限速/保护停车/松杆恢复、方向待标定或已标定姿态；超过 1 s 不更新或 TC 断开时显示过期，不沿用健康状态。IMU 轴向未标定时隐藏姿态值；停车后由车端决定解锁，网页不会自行发送重启驾驶命令。

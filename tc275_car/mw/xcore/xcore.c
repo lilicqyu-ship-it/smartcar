@@ -48,6 +48,10 @@ static MotorStatus g_motorStatus;
 /* CPU1 -> telemetry: measured side speeds from the Hall encoders, percent
  * domain for the demo status and physical units for the SF telemetry */
 static XcoreEncoder g_encoderStatus;
+static uint32 g_encoderSeq;
+static FusionTof g_tof;
+static FusionOutput g_fusion;
+static boolean g_lockIrq[3];
 
 /* CPU2 -> CPU1 fast e-stop bypass (cleared by CPU0 on fault clear/reset) */
 static volatile boolean g_estopReq;
@@ -96,6 +100,11 @@ static uint32   g_logRd;                 /* consumer: CPU0 */
 
 static void XCORE_lock(void)
 {
+    /* A higher-priority CPU0 task must not spin on its preempted owner.
+     * Preserve each core's interrupt state across the bounded RAM copy. */
+    boolean enabled = IfxCpu_disableInterrupts();
+    uint32 core = (uint32)IfxCpu_getCoreId();
+    g_lockIrq[core] = enabled;
     while (!IfxCpu_acquireMutex(&g_lock))
     {
     }
@@ -103,7 +112,9 @@ static void XCORE_lock(void)
 
 static void XCORE_unlock(void)
 {
+    boolean enabled = g_lockIrq[(uint32)IfxCpu_getCoreId()];
     IfxCpu_releaseMutex(&g_lock);
+    IfxCpu_restoreInterrupts(enabled);
 }
 
 void XCORE_init(void)
@@ -124,6 +135,9 @@ void XCORE_init(void)
     g_battMv   = 0u;
     memset((void *)&g_imu, 0, sizeof(g_imu));
     g_imuSeq   = 0u;
+    g_encoderSeq = 0u;
+    memset(&g_tof, 0, sizeof(g_tof));
+    memset(&g_fusion, 0, sizeof(g_fusion));
     g_logWr    = 0;
     g_logRd    = 0;
     g_jogSeq   = 0u;
@@ -182,6 +196,7 @@ void XCORE_encoderPublish(const XcoreEncoder *enc)
 
     XCORE_lock();
     g_encoderStatus = *enc;
+    g_encoderStatus.seq = ++g_encoderSeq;
     __dsync();
     XCORE_unlock();
 }
@@ -418,6 +433,27 @@ void XCORE_imuRead(XcoreImu *imu)
     XCORE_lock();
     *imu = g_imu;
     XCORE_unlock();
+}
+
+void XCORE_tofPublish(const FusionTof *tof)
+{
+    if (!tof) return;
+    XCORE_lock(); g_tof = *tof; __dsync(); XCORE_unlock();
+}
+void XCORE_tofRead(FusionTof *tof)
+{
+    if (!tof) return;
+    XCORE_lock(); *tof = g_tof; XCORE_unlock();
+}
+void XCORE_fusionPublish(const FusionOutput *out)
+{
+    if (!out) return;
+    XCORE_lock(); g_fusion = *out; __dsync(); XCORE_unlock();
+}
+void XCORE_fusionRead(FusionOutput *out)
+{
+    if (!out) return;
+    XCORE_lock(); *out = g_fusion; XCORE_unlock();
 }
 
 void XCORE_statusPublish(const ProtocolStatus *status)

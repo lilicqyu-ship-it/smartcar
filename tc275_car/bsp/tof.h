@@ -25,9 +25,9 @@
  * Data path: all register semantics come from ST's ULD (Libraries/ST/vl53l5cx),
  * which is shipped verbatim. Nothing here re-implements a register table -
  * the driver only owns the wire format, the transaction bounds, and the state
- * machine. Publishing the distance field to xcore/SF is deliberately NOT part
- * of this batch (doc 23 section 11.5); the getters below are for the bench log
- * and for that later batch. */
+ * machine. Each complete ranging frame is published as a coherent FusionTof
+ * snapshot through xcore, including target counts/statuses and a timestamp.
+ * CPU0 fusion uses freshness independently of the driver alive flag. */
 
 /* ---- device constants taken from the vendor contract, not hand-derived ----
  * 0x52 is VL53L5CX_DEFAULT_I2C_ADDRESS (vl53l5cx_api.h:35) in the 8-bit form

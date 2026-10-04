@@ -12,19 +12,28 @@
 #define HOST_IFXCPU_H
 
 #include <stdint.h>
+#include <assert.h>
 
 #include "Ifx_Types.h"
 
 typedef volatile uint32 IfxCpu_mutexLock;
+static boolean hostInterrupts = TRUE;
+static inline boolean IfxCpu_disableInterrupts(void) {
+    boolean previous=hostInterrupts; hostInterrupts=FALSE; return previous;
+}
+static inline void IfxCpu_restoreInterrupts(boolean enabled) { hostInterrupts=enabled; }
+static inline uint32 IfxCpu_getCoreId(void) { return 0; }
 
 static inline boolean IfxCpu_acquireMutex(IfxCpu_mutexLock *lock)
 {
+    assert(hostInterrupts == FALSE);
     (void)lock;
     return TRUE;
 }
 
 static inline void IfxCpu_releaseMutex(IfxCpu_mutexLock *lock)
 {
+    assert(hostInterrupts == FALSE);
     (void)lock;
 }
 

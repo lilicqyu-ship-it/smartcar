@@ -16,12 +16,14 @@ on:
       - "esp32c6_car/components/c6_proto/**"
       - "esp32c6_car/components/c6_sf/**"
       - "contracts/**"
+      - "esp32c6_car/components/c6_bridge/**"
   pull_request:
     paths:
       - "tc275_car/**"
       - "esp32c6_car/components/c6_proto/**"
       - "esp32c6_car/components/c6_sf/**"
       - "contracts/**"
+      - "esp32c6_car/components/c6_bridge/**"
   workflow_dispatch:
   workflow_call:   # 被 tc275-car-release.yml 复用，tag 无法带未测代码上线
 
@@ -55,6 +57,18 @@ jobs:
               mw/sf/sf_frame.c ../esp32c6_car/components/c6_proto/proto_frames.c \
               -o test/host/out/test_sf_telemetry
           test/host/out/test_sf_telemetry
+
+      - name: Sensor fusion and manual driving guard scenarios
+        run: |
+          gcc -std=c99 -Wall -Wextra -Werror -O2 -I . \
+              test/host/test_fusion.c app/fusion.c -lm -o test/host/out/test_fusion
+          test/host/out/test_fusion
+
+      - name: ToF I2C request ordering and recovery model
+        run: |
+          python3 test/host/test_tof_bus.py
+          python3 test/host/test_tof_stream.py
+          python3 test/host/test_fusion_bridge.py
 
       - name: ADC battery conversion tests
         run: |

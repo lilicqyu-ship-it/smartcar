@@ -42,6 +42,11 @@
 #include "mw/app_version.h"
 #include "mw/sf/sf_frame.h"
 #include "app/robot.h"
+#include "app/fusion.h"
+#include <string.h>
+
+static Fusion g_driveFusion;
+static FusionInput g_fusionInput;
 
 
 #include "FreeRTOS.h"
@@ -75,7 +80,7 @@ static void vUartEchoTask(void *pvParameters)
 }
 
 /* VL53L5CX ToF service task (doc 30-tc275/36-tof-driver.md): owns I2C0
- * (SCL=P13.1 / SDA=P13.2) and the sensor's bring-up ladder, then reads frames.
+ * (SCL=P02.5 / SDA=P02.4) and the sensor's bring-up ladder, then reads frames.
  *
  * It runs one priority BELOW the robot task deliberately. Bringing the sensor
  * up costs a ~3 s, 84 KB firmware download over the bus, and the robot task is
@@ -170,9 +175,47 @@ static void vRobotControlTask(void *pvParameters)
             ProtocolStatus status;
             RobotSpeeds    speeds = ROBOT_getSpeeds();
 
+            {
+                XcoreEncoder enc;
+                XcoreImu imu;
+                XcoreRecordLive live;
+                uint8 i;
+                XCORE_encoderRead(&enc); XCORE_imuRead(&imu);
+                XCORE_recordGet(&live); XCORE_tofRead(&g_fusionInput.tof);
+                g_fusionInput.nowMs = (uint32)xTaskGetTickCount() * portTICK_PERIOD_MS;
+                g_fusionInput.imuSeq = imu.seq; g_fusionInput.imuAlive = imu.alive;
+                g_fusionInput.encoderSeq = enc.seq;
+                g_fusionInput.wheelsCalibrated = live.rec.src != CALIB_SRC_DEFAULT;
+                g_fusionInput.fullScaleMmS = live.rec.fullScaleMmS;
+                g_fusionInput.wheelMmS[0] = enc.vMeasLeftMmS;
+                g_fusionInput.wheelMmS[1] = enc.vMeasRightMmS;
+                g_fusionInput.request[0] = (sint16)speeds.left * 10;
+                g_fusionInput.request[1] = (sint16)speeds.right * 10;
+                for (i=0u; i<3u; i++) {
+                    g_fusionInput.accMg[i] = imu.accMilliG[i];
+                    g_fusionInput.gyroMdps[i] = imu.gyroMilliDps[i];
+                }
+                for (i=0u; i<4u; i++) g_fusionInput.counts[i] = enc.raw[i];
+                FUSION_step(&g_driveFusion, &g_fusionInput);
+                XCORE_fusionPublish(&g_driveFusion.out);
+                {
+                    static uint32 logMs;
+                    if ((uint32)(g_fusionInput.nowMs-logMs)>=1000u) {
+                        sint32 v[10];
+                        logMs=g_fusionInput.nowMs;
+                        v[0]=g_driveFusion.out.flags; v[1]=g_driveFusion.out.reason;
+                        v[2]=g_driveFusion.out.nearestMm; v[3]=g_driveFusion.out.capMmS;
+                        v[4]=g_driveFusion.out.speedMmS; v[5]=g_driveFusion.out.tofAgeMs;
+                        v[6]=g_driveFusion.out.effective[0]; v[7]=g_driveFusion.out.effective[1];
+                        v[8]=g_driveFusion.out.validZones; v[9]=g_driveFusion.out.brake;
+                        XCORE_logi("FUSION flags/reason/mm/cap/v/age/L/R/z/brake=",v,10u);
+                    }
+                }
+            }
+
             status.state         = ROBOT_getState();
-            status.leftSpeed     = speeds.left;
-            status.rightSpeed    = speeds.right;
+            status.leftSpeed     = (sint8)(g_driveFusion.out.effective[0] / 10);
+            status.rightSpeed    = (sint8)(g_driveFusion.out.effective[1] / 10);
             status.heartbeatOk   = ROBOT_isHeartbeatOk() ? 1 : 0;
             status.faultCode     = ROBOT_getFaultCode();
             status.emergencyStop = ROBOT_isEmergencyStop() ? 1 : 0;
@@ -193,8 +236,8 @@ static void vRobotControlTask(void *pvParameters)
             XCORE_statusPublish(&status);
 
             /* map -100..+100 (protocol) to -1000..+1000 (motor algorithm) */
-            XCORE_motorSetTarget((sint16)speeds.left * 10, (sint16)speeds.right * 10,
-                                 ROBOT_isEmergencyStop());
+            XCORE_motorSetTarget(g_driveFusion.out.effective[0], g_driveFusion.out.effective[1],
+                                 ROBOT_isEmergencyStop() || g_driveFusion.out.brake);
             if (!ROBOT_isEmergencyStop() && ROBOT_getFaultCode() == 0)
             {
                 XCORE_estopClear();
@@ -273,6 +316,7 @@ void core0_main(void)
 
     /* Initialize the robot state machine / motion controller */
     ROBOT_init();
+    FUSION_init(&g_driveFusion);
 
     /* Create the robot control task (10 ms safety + status upload) */
     xTaskCreate(vRobotControlTask, "robot", configMINIMAL_STACK_SIZE * 2, NULL, 2, NULL);

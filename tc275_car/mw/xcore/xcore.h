@@ -4,6 +4,7 @@
 #include "Ifx_Types.h"
 #include "mw/proto/protocol.h"
 #include "mw/calib/calib_record.h"
+#include "app/fusion.h"
 
 /* Cross-core shared memory for the 3-core partition:
  *   CPU0 (FreeRTOS) : robot control task
@@ -37,6 +38,7 @@ void XCORE_motorStatusGet(sint16 *left, sint16 *right);
  * and CPU2 read. */
 typedef struct
 {
+    uint32 seq;              /* publication freshness, including stationary */
     sint16  pctLeft;          /* -1000..+1000, percent*10 telemetry domain  */
     sint16  pctRight;
     sint16  vMeasLeftMmS;     /* physical mm/s, SF telemetry vMeasL         */
@@ -83,6 +85,11 @@ typedef struct
 
 void XCORE_imuPublish(const XcoreImu *imu);   /* CPU1 only                    */
 void XCORE_imuRead(XcoreImu *imu);            /* any core                     */
+
+void XCORE_tofPublish(const FusionTof *tof);
+void XCORE_tofRead(FusionTof *tof);
+void XCORE_fusionPublish(const FusionOutput *out);
+void XCORE_fusionRead(FusionOutput *out);
 
 /* Bench wheel-direction calibration request (doc 23 section 8.4): CPU0
  * latches it on PROTO 0x70, CPU1 consumes it once and runs the per-wheel

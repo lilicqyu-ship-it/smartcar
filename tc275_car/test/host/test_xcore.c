@@ -333,6 +333,34 @@ static void test_imu_block(void)
     CHECK_EQ(out.seq, 2u);
 }
 
+static void test_sensor_snapshots(void)
+{
+    FusionTof tof, got;
+    FusionOutput out, read;
+    XcoreEncoder enc;
+    XCORE_init();
+    memset(&tof, 0, sizeof(tof)); memset(&out, 0, sizeof(out));
+    memset(&enc, 0, sizeof(enc));
+    XCORE_encoderPublish(&enc); XCORE_encoderRead(&enc);
+    CHECK_EQ(enc.seq, 1u);
+    XCORE_encoderPublish(&enc); XCORE_encoderRead(&enc);
+    CHECK_EQ(enc.seq, 2u);
+    tof.seq=9; tof.stampMs=123; tof.zones=64; tof.alive=1;
+    tof.distanceMm[63]=321; tof.status[63]=9; tof.targets[63]=1;
+    XCORE_tofPublish(&tof); XCORE_tofRead(&got);
+    CHECK_EQ(got.seq,9u); CHECK_EQ(got.stampMs,123u);
+    CHECK_EQ(got.distanceMm[63],321); CHECK_EQ(got.targets[63],1);
+    out.effective[0]=-250; out.flags=FUSION_IMU_OK; out.brake=1;
+    XCORE_fusionPublish(&out); XCORE_fusionRead(&read);
+    CHECK_EQ(read.effective[0],-250); CHECK_EQ(read.flags,FUSION_IMU_OK);
+    CHECK_EQ(read.brake,1);
+    XCORE_tofPublish(NULL_PTR); XCORE_fusionPublish(NULL_PTR);
+    XCORE_tofRead(NULL_PTR); XCORE_fusionRead(NULL_PTR);
+    XCORE_init(); XCORE_tofRead(&got); XCORE_fusionRead(&read);
+    XCORE_encoderRead(&enc);
+    CHECK_EQ(got.seq,0u); CHECK_EQ(read.flags,0); CHECK_EQ(enc.seq,0u);
+}
+
 /* ---- main ------------------------------------------------------------------- */
 
 int main(void)
@@ -346,6 +374,7 @@ int main(void)
     test_logservice_one_line_per_call();
     test_logu_line_format();
     test_imu_block();
+    test_sensor_snapshots();
 
     printf("%d checks, %d failures\n", g_checks, g_failed);
     return (g_failed == 0) ? 0 : 1;
