@@ -362,6 +362,7 @@ public final class AppState {
             log("INFO", up ? "Vehicle link up (TC275)" : "Vehicle link down (TC275)")
         }
         tcUp = up
+        if !up { fusion = nil }
     }
 
     func applyAuthRejected() {
