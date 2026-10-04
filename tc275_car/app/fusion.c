@@ -161,6 +161,7 @@ void FUSION_step(Fusion *s, const FusionInput *in)
     uint32_t elapsed = s->started ? (uint32_t)(in->nowMs - s->lastMs) : 10u;
     uint32_t age = (uint32_t)(in->nowMs - in->tof.stampMs);
     int l = clamp(in->request[0]), r = clamp(in->request[1]), peak, cap = 0, hard = 0, forward;
+    int overspeed, crawl;
     int fs = in->fullScaleMmS >= 100 && in->fullScaleMmS <= 5000 ? in->fullScaleMmS : 1000;
     float dt = (float)(elapsed > 50u ? 10u : elapsed) * 0.001f;
     memset(o, 0, sizeof(*o));
@@ -215,6 +216,18 @@ void FUSION_step(Fusion *s, const FusionInput *in)
     }
     o->capMmS = (uint16_t)cap;
     forward = l > 0 || r > 0;
+    overspeed = in->wheelMmS[0] > cap + 30 || in->wheelMmS[1] > cap + 30;
+    crawl = (o->flags & FUSION_TOF_LIMITED) && cap == (int)FUSION_SPARSE_MM_S;
+    /* Encoder quantisation and PI startup transients are not a new obstacle.
+     * Only the sparse, full crawl allowance tolerates a short excursion.
+     * A real distance envelope shrink and any close target still brake now. */
+    if (!forward || !crawl || !overspeed)
+        s->overspeedSeen = 0;
+    else if (!s->overspeedSeen)
+    {
+        s->overspeedSeen = 1;
+        s->overspeedMs = in->nowMs;
+    }
     /* New distinct, healthy frames only count toward rearm hysteresis. */
     if (in->tof.seq != s->tofSeq)
     {
@@ -250,7 +263,7 @@ void FUSION_step(Fusion *s, const FusionInput *in)
             o->reason = FUSION_OBSTACLE;
             hard = 1;
         }
-        else if (in->wheelMmS[0] > cap + 30 || in->wheelMmS[1] > cap + 30)
+        else if (overspeed && (!crawl || (uint32_t)(in->nowMs - s->overspeedMs) >= 100u))
         {
             /* CPU1 ordinary slew cannot enforce a shrinking safety envelope. */
             o->reason = FUSION_OBSTACLE;

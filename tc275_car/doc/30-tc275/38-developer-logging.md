@@ -26,7 +26,7 @@
 | 模块 / 字段 | 含义 |
 | --- | --- |
 | FUSION `action` | 本轮对驾驶请求的动作：`none` 无干预；`limit_speed` 限速；`stop_obstacle` 障碍停车；`stop_tof_unavailable` 前向距离不可用；`stop_tilt` 倾斜停车；`stop_encoder_unavailable` 编码器不可用 |
-| `forward` | 前进许可：`allowed` 或 `blocked_wheel_calibration`/`blocked_encoder`/`blocked_tof`/`blocked_near_obstacle`/`blocked_release_required`/`blocked_tilt`。它与 action 分开：静止时可以 action=none 但前方太近，前进仍被禁止 |
+| `forward` | 前进许可：`allowed`、`limited_tof_coverage`（仅低速）或 `blocked_wheel_calibration`/`blocked_encoder`/`blocked_tof`/`blocked_near_obstacle`/`blocked_release_required`/`blocked_tilt`。它与 action 分开：静止时可以 action=none 但前方太近，前进仍被禁止 |
 | `nearest_mm` | 融合有效区中的最近障碍距离；0=无有效距离，并非贴着障碍 |
 | `forward_cap_mm_s` | 当前安全包络允许的最大前进速度；0=前进不可用；不是用户请求速度 |
 | `speed_mm_s` | 融合后的纵向速度，正向前、负向后 |
@@ -34,7 +34,7 @@
 | `valid_zones` | 本帧通过距离与目标状态过滤的区域数；ToF 有效还要求至少半数区域有效（16 区≥8，64 区≥32）、中央区域有目标、帧龄≤250 ms |
 | FUSION_CONTROL `target_left_pct_x10` / `target_right_pct_x10` | 融合限速/停车后的左右侧有效速度目标 |
 | `brake` | 本轮融合要求制动，不等同整车急停故障码 |
-| `health_flags` | 位掩码：0x01 ToF 有效，0x02 IMU 新鲜，0x04 编码器新鲜，0x08 轴向已标定，0x10 轮速与陀螺不一致，0x20 陀螺零偏就绪，0x40 停车锁存需松杆 |
+| `health_flags` | 位掩码：0x01 ToF 覆盖充分，0x02 IMU 新鲜，0x04 编码器新鲜，0x08 轴向已标定，0x10 轮速与陀螺不一致，0x20 陀螺零偏就绪，0x40 停车锁存需松杆，0x80 ToF 持续更新但覆盖不足（低速降级） |
 | FUSION_HEALTH `tof_valid` / `imu_fresh` / `encoder_fresh` | 对应上述健康位，强调数据新鲜而非有无供电 |
 | `imu_axes` | `calibrated`/`uncalibrated`；未标定时不启用依赖车体轴向的航向/倾斜功能 |
 | `gyro_bias` | `learning`/`ready`；零偏就绪不能代替车体轴向标定 |
@@ -68,6 +68,7 @@
 | 模块 / 字段 | 含义 |
 | --- | --- |
 | TOF `state` | dead / probe / init / config / ranging 状态机阶段 |
+| TOF_ZONE `frame` / `zone` / `distance_mm` / `status_raw` / `targets` | 10 秒摘要中的各区域原始数据：累计帧号、传感器顺序索引、毫米距离、ULD 目标状态、目标数；状态 255 且 targets=0 的距离不能当作有效障碍 |
 | `alive` | ULD 探测/驱动可用状态；能否用于驾驶还要看 FUSION tof_valid |
 | `frames_total` / `errors_total` | 完整测距帧累计 / 驱动失败累计 |
 | `nearest_mm` | 驱动缓存最近有效目标距离，0=没有有效目标；旧缓存必须结合融合帧年龄判读 |

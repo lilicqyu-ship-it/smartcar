@@ -59,11 +59,11 @@ typedef struct
 {
     FusionConfig cfg;
     FusionOutput out;
-    uint32_t lastMs, imuSeq, imuMs, encSeq, encMs, tofSeq, stillMs;
+    uint32_t lastMs, imuSeq, imuMs, encSeq, encMs, tofSeq, stillMs, overspeedMs;
     int32_t counts[4];
     float bias[3], velocity, heading, roll, pitch, holdHeading, yawRate;
     uint16_t biasSamples;
-    uint8_t started, imuSeen, encSeen, countsSeen, latched, clearFrames, holding, slip;
+    uint8_t started, imuSeen, encSeen, countsSeen, latched, clearFrames, holding, slip, overspeedSeen;
 } Fusion;
 void FUSION_init(Fusion *s);
 /* CPU0 stopped-only caller. Reject non-right-handed axis maps / bad geometry. */

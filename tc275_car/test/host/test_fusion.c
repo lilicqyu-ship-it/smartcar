@@ -124,6 +124,42 @@ int main(void)
     assert(s.out.effective[0] == 150 && !s.out.brake);
     for (i = 0; i < 26; i++) tick(0);
     assert(s.out.reason == FUSION_BLIND && s.out.brake); /* frozen sparse frame */
+    setup(1280);
+    for (i = 0; i < 16; i++) in.tof.targets[i] = 0;
+    in.request[0] = in.request[1] = 500;
+    in.wheelMmS[0] = 210;
+    in.wheelMmS[1] = 150;
+    for (i = 0; i < 10; i++) {
+        tick(1);
+        assert(!s.out.brake && s.out.effective[0] == 150);
+    }
+    in.wheelMmS[0] = 150;
+    tick(1);
+    assert(!s.overspeedSeen);
+    in.wheelMmS[0] = 210;
+    for (i = 0; i < 11; i++) tick(1);
+    assert(s.out.brake && s.latched); /* sustained overspeed still stops */
+    setup(1280);
+    for (i = 0; i < 16; i++) in.tof.targets[i] = 0;
+    in.tof.targets[0] = 1;
+    in.tof.distanceMm[0] = 100;
+    in.request[0] = 500;
+    tick(1);
+    assert(s.out.brake); /* sparse near obstacle does not wait 100 ms */
+    setup(1280);
+    for (i = 0; i < 16; i++) in.tof.targets[i] = 0;
+    in.request[0] = 500;
+    in.tof.alive = 0;
+    tick(1);
+    assert(s.out.reason == FUSION_BLIND && !(s.out.flags & FUSION_TOF_LIMITED));
+    setup(1280);
+    for (i = 0; i < 16; i++) in.tof.targets[i] = 0;
+    in.request[0] = 500;
+    in.wheelMmS[0] = 210;
+    in.nowMs = 0xffffffa0u;
+    for (i = 0; i < 10; i++) { tick(1); assert(!s.out.brake); }
+    tick(1);
+    assert(s.out.brake); /* overspeed timer across clock wrap */
     setup(4000);
     in.tof.zones = 65;
     in.request[0] = 500;

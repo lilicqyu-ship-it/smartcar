@@ -39,14 +39,15 @@ int main(void){
  p[0]=1;bridge_emit_fusion(p,28);
  puts(got);assert(strstr(got,"\"speed\":-123") && strstr(got,"\"roll\":-2000"));
  assert(strstr(got,"\"flags\":71") && strstr(got,"\"brake\":1"));
- snapshot=o;snapshot.stampMs=10;snapshot.flags=7;snapshot.capMmS=700;
- now=200;produce();assert(proto_get_u16(sent+2)==7);
- now=400;produce();assert(proto_get_u16(sent+2)==7);
- now=600;produce();assert(!(proto_get_u16(sent+2)&7) && sent[1]==FUSION_BLIND && !proto_get_u16(sent+6));
- snapshot.stampMs=20;now=800;produce();assert(proto_get_u16(sent+2)==7);
+ snapshot=o;snapshot.stampMs=10;snapshot.flags=135;snapshot.capMmS=150;
+ now=200;produce();assert(proto_get_u16(sent+2)==135);
+ bridge_emit_fusion(sent,28);assert(strstr(got,"\"flags\":135") && strstr(got,"\"cap\":150"));
+ now=400;produce();assert(proto_get_u16(sent+2)==135);
+ now=600;produce();assert(!(proto_get_u16(sent+2)&135) && sent[1]==FUSION_BLIND && !proto_get_u16(sent+6));
+ snapshot.stampMs=20;now=800;produce();assert(proto_get_u16(sent+2)==135);
  up=0;produce();assert(sends==4);up=1;
- snapshot.stampMs=30;now=0xfffffff0u;produce();now=20;produce();assert(proto_get_u16(sent+2)==7);
- now=300;produce();assert(!(proto_get_u16(sent+2)&7));
+ snapshot.stampMs=30;now=0xfffffff0u;produce();now=20;produce();assert(proto_get_u16(sent+2)==135);
+ now=300;produce();assert(!(proto_get_u16(sent+2)&135));
  puts("CPU2 frozen publisher, reconnect, wrap freshness PASS");return 0;
 }
 """
