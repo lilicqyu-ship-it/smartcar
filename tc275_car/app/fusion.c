@@ -223,29 +223,89 @@ void FUSION_step(Fusion *s, const FusionInput *in)
     if (in->tof.alive && in->tof.seq && age <= 250u && (n == 16u || n == 64u))
     {
         unsigned width = n == 16u ? 4u : 8u;
+        unsigned noTarget = 0, unknown = 0;
+        /* Distinct new frames only: a frame re-read under the same seq must not
+         * advance the open-clear streak (it is one physical sample, not two). */
+        unsigned isNewFrame = (in->tof.seq != s->tofSeq);
         for (i = 0; i < n; i++)
         {
             int d = in->tof.distanceMm[i];
-            if (!in->tof.targets[i] || (in->tof.status[i] != 5 && in->tof.status[i] != 9) ||
-                d <= 0 || d > 4000)
-                continue;
-            valid++;
-            /* Status 9 has lower confidence: enlarge margin by 50 mm. */
-            if (in->tof.status[i] == 9)
-                d = d > 50 ? d - 50 : 1;
-            side = (i % width) < width / 4 ? 0 : ((i % width) >= width - width / 4 ? 2 : 1);
-            if (!o->sectorMm[side] || d < o->sectorMm[side])
-                o->sectorMm[side] = (uint16_t)d;
-            if (!o->nearestMm || d < o->nearestMm)
-                o->nearestMm = (uint16_t)d;
+            uint8_t st = in->tof.status[i];
+            if (in->tof.targets[i] && (st == 5 || st == 9) && d > 0 && d <= 4000)
+            {
+                valid++;
+                /* Status 9 has lower confidence: enlarge margin by 50 mm. */
+                if (st == 9)
+                    d = d > 50 ? d - 50 : 1;
+                side = (i % width) < width / 4 ? 0 : ((i % width) >= width - width / 4 ? 2 : 1);
+                if (!o->sectorMm[side] || d < o->sectorMm[side])
+                    o->sectorMm[side] = (uint16_t)d;
+                if (!o->nearestMm || d < o->nearestMm)
+                    o->nearestMm = (uint16_t)d;
+            }
+            else if (!in->tof.targets[i] && st == 255u)
+                noTarget++; /* vendor "no target in this zone": decisive empty */
+            else
+                unknown++; /* anomalous / unexplainable: never counted as clear */
         }
-        if (valid >= n / 2u && o->sectorMm[1])
-            o->flags |= FUSION_TOF_OK;
-        else
+        s->tofNoTarget = (uint8_t)noTarget;
+        s->tofUnknown = (uint8_t)unknown;
+        /* A frame whose statuses are mostly unexplainable is unreliable no
+         * matter what distance it claims to see: it may only crawl (DEGRADED). */
+        if (unknown * 100u > n * FUSION_OPEN_UNKNOWN_MAX_PCT)
+        {
             o->flags |= FUSION_TOF_LIMITED;
+            s->tofMode = FUSION_MODE_DEGRADED;
+            s->openClearFrames = 0;
+        }
+        else if (valid > 0u)
+        {
+            /* At least one trusted distance: the stopping-distance envelope
+             * alone sets the cap - a near obstacle binds (and the forward guard
+             * stops within the margin), a far view cruises. Coverage is no
+             * longer a proxy for uncertainty (fix-plan v1.0.9), so the stray
+             * far returns that once locked an open field to 150 release it. */
+            if (valid >= n / 2u && o->sectorMm[1])
+                o->flags |= FUSION_TOF_OK;
+            else
+                o->flags |= FUSION_TOF_LIMITED;
+            s->tofMode = FUSION_MODE_TRACKED;
+            s->openClearFrames = 0;
+        }
+        else if (noTarget * 100u >= n * FUSION_OPEN_CLEAR_RATIO_PCT)
+        {
+            /* Healthy sensor facing decisive empty space - no trusted target
+             * anywhere, most zones at status 255 "no target". Wire flag stays
+             * LIMITED so every "usable frame" consumer is unchanged; the cap,
+             * not the flag, lifts once several new frames agree. */
+            o->flags |= FUSION_TOF_LIMITED;
+            if (isNewFrame && s->openClearFrames < FUSION_OPEN_CLEAR_FRAMES)
+                s->openClearFrames++;
+            s->tofMode = s->openClearFrames >= FUSION_OPEN_CLEAR_FRAMES ? FUSION_MODE_OPEN
+                                                                        : FUSION_MODE_DEGRADED;
+        }
+        else
+        {
+            o->flags |= FUSION_TOF_LIMITED;
+            s->tofMode = FUSION_MODE_DEGRADED;
+            s->openClearFrames = 0; /* neither empty nor trusted: re-arm */
+        }
+    }
+    else
+    {
+        s->tofMode = FUSION_MODE_BLIND;
+        s->tofNoTarget = 0;
+        s->tofUnknown = 0;
+        s->openClearFrames = 0;
     }
     o->validZones = (uint8_t)valid;
-    if (o->flags & (FUSION_TOF_OK | FUSION_TOF_LIMITED))
+    if (s->tofMode == FUSION_MODE_OPEN)
+    {
+        /* Empty, healthy field: permit the open-space cruise cap instead of
+         * collapsing a working sensor facing nothing to the crawl. */
+        cap = fs < (int)FUSION_OPENSPACE_MM_S ? fs : (int)FUSION_OPENSPACE_MM_S;
+    }
+    else if (o->flags & (FUSION_TOF_OK | FUSION_TOF_LIMITED))
     {
         float clearance =
             o->nearestMm > s->cfg.marginMm ? (float)(o->nearestMm - s->cfg.marginMm) : 0;
@@ -254,19 +314,18 @@ void FUSION_step(Fusion *s, const FusionInput *in)
         cap = (int)(sqrtf(a * a * t * t + 2 * a * clearance) - a * t);
         if (cap > fs)
             cap = fs;
-        /* Sparse returns remain unknown space: manual mode permits only a
-         * bounded crawl while the physical sensor keeps publishing frames -
-         * but the collapse toward it must follow braking physics. A sparse
-         * frame is often just a zone-count dip (far zones flap between a
-         * target and no target) with an unchanged scene: pinching the cap
-         * from ~900 to 150 in one step put a moving robot above the envelope
-         * and the overspeed guard latched a full stop on every push (bench
-         * 2026-10). Decay instead from the last healthy cap at the configured
-         * decel: a transient dip only eases the envelope, a persistent sparse
-         * view still reaches the crawl within about a second of real braking,
-         * and a genuinely closer target keeps binding through its own
-         * distance envelope below. */
-        if (o->flags & FUSION_TOF_LIMITED)
+        /* Only a DEGRADED frame eases toward the crawl. TRACKED trusts its
+         * measured distance envelope outright, so a far view or far obstacle is
+         * capped by braking physics, not collapsed to 150 by a coverage
+         * deficit. A persistently sparse/uncertain view must still decay rather
+         * than pinch: a transient dip that dropped a few far returns had the
+         * cap collapse ~900 to 150 in one step, put a moving robot above the
+         * envelope, and the overspeed guard latched a full stop on every push
+         * (bench 2026-10). DEGRADED decays from the last healthy cap at the
+         * configured decel - a transient dip only eases the envelope, a
+         * persistently unreliable view reaches the crawl within ~1 s of real
+         * braking, and a genuinely closer target keeps binding below. */
+        if (s->tofMode == FUSION_MODE_DEGRADED)
         {
             uint32_t since = (uint32_t)(in->nowMs - s->capContMs);
             int contCap;
@@ -281,17 +340,31 @@ void FUSION_step(Fusion *s, const FusionInput *in)
         }
     }
     o->capMmS = (uint16_t)cap;
-    /* A healthy frame re-anchors the continuity envelope the sparse path
-     * decays from: the granted cap is the speed the guard vouches to stop
-     * from within the margin, so it is the right floor to hand time to. */
-    if (o->flags & FUSION_TOF_OK)
+    /* A confident (OK), distance-tracked (TRACKED) or confirmed-open (OPEN)
+     * frame re-anchors the continuity envelope the DEGRADED path decays from:
+     * each grants the speed the guard vouches to stop from within the margin,
+     * so it is the right floor to hand time to. */
+    if (s->tofMode == FUSION_MODE_OPEN || s->tofMode == FUSION_MODE_TRACKED ||
+        (o->flags & FUSION_TOF_OK))
     {
         s->capContMmS = (uint16_t)cap;
         s->capContMs = in->nowMs;
     }
     forward = l > 0 || r > 0;
-    overspeed = in->wheelMmS[0] > cap + (int)FUSION_OVERSPEED_HYST_MM_S ||
-                in->wheelMmS[1] > cap + (int)FUSION_OVERSPEED_HYST_MM_S;
+    /* Overspeed is only a hazard while the envelope is actually TIGHTER than
+     * the operator's ceiling. When the cap saturates at full scale (an open or
+     * far view - fix-plan v1.0.9 releases these to fs), the fusion grants the
+     * maximum it is willing to stop from and commands full; the motor's real
+     * free-run speed then measures a little ABOVE the conservative
+     * fullScaleMmS mapping (bench 2026-10: full throttle in empty space hit
+     * ~1100 mm/s against a 1000 cap + 100 hysteresis, arming this guard and
+     * latching a phantom stop_obstacle at nearest>1200 mm). That excursion is
+     * a calibration artifact of "asked for full and got slightly more", not a
+     * new obstacle - so it must not latch. Any cap below fs means a closer
+     * view or a shrinking margin IS binding, and the guard stays armed there.
+     */
+    overspeed = cap < fs && (in->wheelMmS[0] > cap + (int)FUSION_OVERSPEED_HYST_MM_S ||
+                              in->wheelMmS[1] > cap + (int)FUSION_OVERSPEED_HYST_MM_S);
     /* Encoder quantisation and PI startup transients are not a new obstacle:
      * the per-side window mean ripples tens of mm/s and a sparse-frame flap
      * can pinch the envelope far below the current speed with an unchanged

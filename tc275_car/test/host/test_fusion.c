@@ -95,6 +95,30 @@ int main(void)
     assert(!s.out.brake); /* 90 ms */
     tick(1);
     assert(s.out.brake && s.latched); /* 100 ms: sustained excursion stops */
+    /* But when the envelope is NOT tighter than full scale - a far/open view
+     * that pegs the cap at fs - the guard must not fire: the motor's real
+     * free-run speed measures above the conservative fullScaleMmS mapping, so
+     * wheel > cap + hysteresis is calibration, not a new obstacle (bench
+     * 2026-10: full throttle in empty space latched a phantom stop_obstacle at
+     * nearest>1200 mm). cap==fs disables the overspeed latch. */
+    setup(4000);
+    in.request[0] = in.request[1] = 1000;
+    tick(1);
+    assert(s.out.capMmS == 1000 && !s.out.brake);
+    in.wheelMmS[0] = in.wheelMmS[1] = 1150; /* > cap + hysteresis, cap==fs */
+    for (i = 0; i < 15; i++)
+        tick(1); /* well past the 100 ms hold window */
+    assert(!s.latched && !s.out.brake && s.out.effective[0] > 0);
+    /* The exemption is only the full-scale grant: tighten the view and the same
+     * sustained excursion latches again. */
+    for (i = 0; i < 16; i++)
+        in.tof.distanceMm[i] = 500; /* cap drops below fs */
+    tick(1);
+    assert(s.out.capMmS < 1000);
+    in.wheelMmS[0] = in.wheelMmS[1] = (int16_t)(s.out.capMmS + 200);
+    for (i = 0; i < 12; i++)
+        tick(1);
+    assert(s.out.brake && s.latched);
     setup(4000);
     in.request[0] = in.request[1] = 500;
     tick(1);
@@ -375,6 +399,54 @@ int main(void)
     s.out.speedMmS = -123;
     FUSION_encode(&s.out, wire);
     assert(wire[0] == 1 && wire[8] == 0x85 && wire[9] == 0xff && wire[27] == s.out.brake);
+    /* OPEN_CLEAR (fix-plan v1.0.9): a healthy ToF facing empty space must
+     * cruise, not crawl. A fresh frame with no trusted target anywhere, most
+     * zones at range status 255 "no target" and few unknowns opens the cap to
+     * FUSION_OPENSPACE_MM_S only after several consecutive new frames; the
+     * wire flag stays LIMITED so every not-blind consumer is unchanged, and a
+     * single trusted close zone still stops the car that same frame. */
+    setup(0);
+    for (i = 0; i < 16; i++)
+    {
+        in.tof.status[i] = 255;
+        in.tof.targets[i] = 0;
+        in.tof.distanceMm[i] = 0;
+    }
+    in.request[0] = in.request[1] = 1000;
+    tick(1); /* streak 1: still the crawl envelope, no single frame reopens */
+    assert((s.out.flags & FUSION_TOF_LIMITED) && !(s.out.flags & FUSION_TOF_OK));
+    assert(s.out.capMmS == FUSION_SPARSE_MM_S && s.out.effective[0] == 150 && !s.out.brake);
+    tick(1); /* streak 2 */
+    assert(s.out.capMmS == FUSION_SPARSE_MM_S);
+    tick(1); /* streak 3 -> OPEN_CLEAR */
+    assert((s.out.flags & FUSION_TOF_LIMITED) && !(s.out.flags & FUSION_TOF_OK));
+    assert(s.out.capMmS == FUSION_OPENSPACE_MM_S && s.out.effective[0] == 600 && !s.out.brake);
+    /* Anomalous empties (targets 0 but status != 255) are unknown, never read
+     * as clear: a fresh anchor holds the crawl and the open streak never
+     * builds, however many such frames arrive in a row. */
+    setup(0);
+    for (i = 0; i < 16; i++)
+    {
+        in.tof.status[i] = 5;
+        in.tof.targets[i] = 0;
+        in.tof.distanceMm[i] = 0;
+    }
+    in.request[0] = in.request[1] = 1000;
+    for (i = 0; i < 6; i++)
+        tick(1);
+    assert(s.out.capMmS == FUSION_SPARSE_MM_S && s.out.effective[0] == 150 && !s.out.brake);
+    assert(s.tofMode == FUSION_MODE_DEGRADED && s.openClearFrames == 0);
+    /* One trusted close zone among the empties stops it that same frame. */
+    in.tof.status[7] = 5;
+    in.tof.targets[7] = 1;
+    in.tof.distanceMm[7] = 100;
+    tick(1);
+    assert(s.out.brake && s.out.reason == FUSION_OBSTACLE && s.out.effective[0] == 0);
+    /* Replaying the same stale seq must not re-anchor OPEN after a blind. */
+    in.tof.alive = 0;
+    in.request[0] = in.request[1] = 1000;
+    tick(1);
+    assert(s.out.reason == FUSION_BLIND && s.out.brake);
     /* Replay all valid grid sizes, distances and commands: bounded outputs. */
     for (i = 1; i < 4000; i += 37)
     {

@@ -206,8 +206,14 @@ static void vRobotControlTask(void *pvParameters)
                     static XcoreLogGate gate;
                     static const char *const action[] = {"none", "limit_speed", "stop_obstacle",
                         "stop_tof_unavailable", "stop_tilt", "stop_encoder_unavailable"};
+                    static const char *const tofMode[] = {"blind", "tracked",
+                        "degraded", "open_clear"};
                     FusionOutput *out = &g_driveFusion.out;
-                    uint32 signature = ((uint32)out->flags & 0xEFu) | ((uint32)out->reason << 8u);
+                    /* Fold tofMode into the signature: OPEN_CLEAR and DEGRADED
+                     * share the LIMITED wire bit, so a scene reclassification
+                     * that changes the cap must still re-log. */
+                    uint32 signature = ((uint32)out->flags & 0xEFu) | ((uint32)out->reason << 8u)
+                        | ((uint32)g_driveFusion.tofMode << 16u);
                     boolean urgent = (out->reason >= FUSION_OBSTACLE) ? TRUE : FALSE;
                     if (XCORE_logDue(&gate, g_fusionInput.nowMs, signature, 5000u, 1000u, urgent)) {
                         const char *permission = "allowed";
@@ -216,14 +222,20 @@ static void vRobotControlTask(void *pvParameters)
                         else if (!(out->flags & (FUSION_TOF_OK | FUSION_TOF_LIMITED))) permission = "blocked_tof";
                         else if (out->nearestMm && out->nearestMm <= g_driveFusion.cfg.marginMm) permission = "blocked_near_obstacle";
                         else if (out->flags & FUSION_NEUTRAL_REQUIRED) permission = "blocked_release_required";
+                        else if (g_driveFusion.tofMode == FUSION_MODE_OPEN) permission = "open_space";
                         else if (out->flags & FUSION_TOF_LIMITED) permission = "limited_tof_coverage";
                         if (out->reason == FUSION_TILT) permission = "blocked_tilt";
                         XCORE_LOG_FIELDS("[FUSION]",
                             XL_U("uptime_ms", g_fusionInput.nowMs),
                             XL_S("action", out->reason < 6u ? action[out->reason] : "unknown"),
-                            XL_S("forward", permission), XL_U("nearest_mm", out->nearestMm),
+                            XL_S("forward", permission), XL_S("tof_mode",
+                                g_driveFusion.tofMode < 4u ? tofMode[g_driveFusion.tofMode] : "unknown"),
+                            XL_U("nearest_mm", out->nearestMm),
                             XL_U("forward_cap_mm_s", out->capMmS), XL_I("speed_mm_s", out->speedMmS),
-                            XL_U("tof_age_ms", out->tofAgeMs), XL_U("valid_zones", out->validZones));
+                            XL_U("tof_age_ms", out->tofAgeMs), XL_U("trusted_zones", out->validZones),
+                            XL_U("no_target_zones", g_driveFusion.tofNoTarget),
+                            XL_U("unknown_zones", g_driveFusion.tofUnknown),
+                            XL_U("open_clear_frames", g_driveFusion.openClearFrames));
                         XCORE_LOG_FIELDS("[FUSION_CONTROL]", XL_U("uptime_ms", g_fusionInput.nowMs),
                             XL_I("target_left_pct_x10", out->effective[0]),
                             XL_I("target_right_pct_x10", out->effective[1]),

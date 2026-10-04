@@ -12,8 +12,22 @@
 #define FUSION_SLIP 16u
 #define FUSION_BIAS_READY 32u
 #define FUSION_NEUTRAL_REQUIRED 64u
-#define FUSION_TOF_LIMITED 128u /* fresh sparse frame: manual low-speed allowance */
+#define FUSION_TOF_LIMITED 128u /* fresh frame: manual low-speed allowance */
 #define FUSION_SPARSE_MM_S 150u
+/* Open-space allowance (fix-plan v1.0.9). A fresh, alive frame whose field is
+ * decisively empty - no trusted target, most zones report range status 255
+ * "no target", few unknown - is an OPEN scene, not degraded coverage. The
+ * crawl cap must not lock a healthy sensor facing empty space to
+ * FUSION_SPARSE_MM_S ("the emptier the view, the slower the car"). It takes
+ * several consecutive new frames so a single anomalous frame cannot instantly
+ * widen the envelope. This is an internal classification only: the wire flags
+ * reuse FUSION_TOF_LIMITED so every "usable frame" consumer (Cpu0/Cpu2) and
+ * the iOS freshness test (flags & 129) stay correct with no protocol change.
+ * 600 mm/s is the same physical anchor link.c uses for full-stick forward. */
+#define FUSION_OPENSPACE_MM_S 600u
+#define FUSION_OPEN_CLEAR_FRAMES 3u
+#define FUSION_OPEN_CLEAR_RATIO_PCT 70u
+#define FUSION_OPEN_UNKNOWN_MAX_PCT 30u
 /* Per-side encoder health (doc 51). A side's edge age at or under the fresh
  * threshold is live feedback; a side asked to drive may stay silent for the
  * grace window (wheel spin-up from standstill) before it counts as dead. */
@@ -37,6 +51,17 @@ enum
     FUSION_BLIND = 3,
     FUSION_TILT = 4,
     FUSION_ENCODER_LOST = 5
+};
+/* ToF scene classification for diagnostics (Fusion.tofMode); not on the wire.
+ * TRACKED: trusted targets present -> distance envelope. OPEN_CLEAR: healthy
+ * but empty -> open-space cap. DEGRADED: fresh frame, uncertain scene -> crawl.
+ * BLIND: no usable frame -> stop. */
+enum
+{
+    FUSION_MODE_BLIND = 0,
+    FUSION_MODE_TRACKED = 1,
+    FUSION_MODE_DEGRADED = 2,
+    FUSION_MODE_OPEN = 3
 };
 typedef struct
 {
@@ -87,6 +112,9 @@ typedef struct
     float bias[3], velocity, heading, roll, pitch, holdHeading, yawRate;
     uint16_t biasSamples;
     uint8_t started, imuSeen, encSeen, countsSeen, latched, clearFrames, holding, slip, overspeedSeen;
+    uint8_t openClearFrames; /* consecutive new frames the field read as empty */
+    uint8_t tofMode;         /* last FUSION_MODE_* scene, for diagnostics only */
+    uint8_t tofNoTarget, tofUnknown; /* last frame zone counts, for logging */
 } Fusion;
 void FUSION_init(Fusion *s);
 /* CPU0 stopped-only caller. Reject non-right-handed axis maps / bad geometry. */
