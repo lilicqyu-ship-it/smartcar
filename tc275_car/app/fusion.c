@@ -71,14 +71,17 @@ static void motion(Fusion *s, const FusionInput *in, float dt, uint32_t elapsedM
      * reached fusion at all and could not see a dead side behind a moving
      * opposite side, doc 51). Releasing the stick resets the window, so an
      * idle robot never latches. A latched protective stop has zeroed the
-     * command itself: wheels at rest are then the expected consequence, not
-     * a sensor fault, so the hold must not accrue toward ENCODER_LOST and
-     * relabel the stop reason after 500 ms - the guard re-arms from zero
-     * when the stop lifts. */
+     * command itself: wheels at rest are then the expected consequence, so
+     * the hold neither accrues toward ENCODER_LOST nor forgives a side that
+     * was already edge-dead at latch time - health evaluation simply pauses,
+     * and the stop keeps its original reason instead of relabelling after
+     * 500 ms. */
     for (i = 0; i < 2; i++)
     {
-        if (in->request[i] == 0 || s->latched)
+        if (in->request[i] == 0)
             s->encAbsentMs[i] = 0;
+        else if (s->latched)
+            continue;
         else if (freshEnc && in->encEdgeAgeMs[i] <= FUSION_ENC_EDGE_FRESH_MS)
             s->encAbsentMs[i] = 0;
         else

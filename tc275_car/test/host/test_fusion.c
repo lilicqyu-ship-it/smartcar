@@ -89,10 +89,12 @@ int main(void)
     for (i = 0; i < 9; i++)
     {
         tick(1);
-        assert(!s.out.brake); /* 90 ms: still inside the hold window */
+        assert(!s.out.brake); /* 0..80 ms: inside the hold window */
     }
     tick(1);
-    assert(s.out.brake && s.latched); /* sustained genuine excursion stops */
+    assert(!s.out.brake); /* 90 ms */
+    tick(1);
+    assert(s.out.brake && s.latched); /* 100 ms: sustained excursion stops */
     setup(4000);
     in.request[0] = in.request[1] = 500;
     tick(1);
@@ -141,7 +143,7 @@ int main(void)
     setup(1280);
     for (i = 0; i < 16; i++) in.tof.targets[i] = 0;
     in.request[0] = in.request[1] = 500;
-    in.wheelMmS[0] = 210;
+    in.wheelMmS[0] = 300;
     in.wheelMmS[1] = 150;
     for (i = 0; i < 10; i++) {
         tick(1);
@@ -150,9 +152,46 @@ int main(void)
     in.wheelMmS[0] = 150;
     tick(1);
     assert(!s.overspeedSeen);
-    in.wheelMmS[0] = 210;
+    in.wheelMmS[0] = 300;
     for (i = 0; i < 11; i++) tick(1);
     assert(s.out.brake && s.latched); /* sustained overspeed still stops */
+    /* A transient sparse frame must not slam the envelope shut on a moving
+     * robot: the cap decays from the last healthy value at the configured
+     * decel instead of pinching to the crawl in one step (bench 2026-10:
+     * valid_zones dipped 10 -> 7 for ~150 ms at ~370 mm/s and every push
+     * latched a full stop). */
+    setup(4000);
+    in.request[0] = in.request[1] = 1000;
+    in.wheelMmS[0] = in.wheelMmS[1] = 500;
+    tick(1);
+    assert((s.out.flags & FUSION_TOF_OK) && s.out.capMmS == 1000 && !s.out.brake);
+    for (i = 0; i < 10; i++) /* ten far zones drop their returns */
+        in.tof.targets[i] = 0;
+    for (i = 0; i < 30; i++)
+        tick(1);
+    assert((s.out.flags & FUSION_TOF_LIMITED) && !s.out.brake && !s.latched);
+    assert(s.out.capMmS > 700); /* 300 ms of decay, not an 850 mm/s pinch */
+    for (i = 0; i < 10; i++)
+        in.tof.targets[i] = 1;
+    tick(1);
+    assert((s.out.flags & FUSION_TOF_OK) && s.out.capMmS == 1000);
+    /* A sparse view that persists still collapses to the crawl - by braking
+     * down the decay, not by a step. */
+    for (i = 0; i < 10; i++)
+        in.tof.targets[i] = 0;
+    for (i = 0; i < 130; i++)
+    {
+        in.wheelMmS[0] = in.wheelMmS[1] = (i < 70) ? 500 : 150;
+        tick(1);
+        assert(!s.out.brake);
+    }
+    assert(s.out.capMmS == FUSION_SPARSE_MM_S && !s.latched);
+    /* A robot that fails to slow while the sparse view persists still gets
+     * latched - against the decayed cap, once the hold window elapses. */
+    in.wheelMmS[0] = in.wheelMmS[1] = 500;
+    for (i = 0; i < 12; i++)
+        tick(1);
+    assert(s.out.brake && s.latched);
     setup(1280);
     for (i = 0; i < 16; i++) in.tof.targets[i] = 0;
     in.tof.targets[0] = 1;
@@ -169,7 +208,7 @@ int main(void)
     setup(1280);
     for (i = 0; i < 16; i++) in.tof.targets[i] = 0;
     in.request[0] = 500;
-    in.wheelMmS[0] = 210;
+    in.wheelMmS[0] = 300;
     in.nowMs = 0xffffffa0u;
     for (i = 0; i < 10; i++) { tick(1); assert(!s.out.brake); }
     tick(1);
@@ -250,6 +289,30 @@ int main(void)
     for (i = 0; i < 60; i++)
         tick(1);
     assert(!s.out.brake && (s.out.flags & FUSION_ENCODER_OK));
+    /* A protective hold must not relabel itself ENCODER_LOST after 500 ms:
+     * holding the throttle keeps request > 0 while the stopped wheels go
+     * edge-silent - the expected consequence of the stop, not a sensor
+     * fault. The reason stays the original one and the guard re-arms from
+     * zero, so the next push still gets the full spin-up grace window. */
+    setup(4000);
+    in.request[0] = in.request[1] = 1000;
+    tick(1);
+    in.tof.distanceMm[7] = 100;
+    tick(1);
+    assert(s.out.reason == FUSION_OBSTACLE && s.out.brake && s.latched);
+    in.tof.distanceMm[7] = 4000;
+    in.wheelMmS[0] = in.wheelMmS[1] = 0;
+    in.encEdgeAgeMs[0] = in.encEdgeAgeMs[1] = 65535;
+    for (i = 0; i < 60; i++)
+        tick(1);
+    assert(s.out.reason == FUSION_OBSTACLE && (s.out.flags & FUSION_ENCODER_OK));
+    in.request[0] = in.request[1] = 0;
+    tick(1);
+    assert(!s.latched);
+    in.encEdgeAgeMs[0] = in.encEdgeAgeMs[1] = 0;
+    in.request[0] = in.request[1] = 1000;
+    tick(1);
+    assert(!s.out.brake && s.out.effective[0] == 1000);
     /* Delay and distance must monotonically reduce the velocity envelope. */
     setup(800);
     tick(1);
