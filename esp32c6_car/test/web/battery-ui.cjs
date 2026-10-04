@@ -43,17 +43,23 @@ const pathModule=require('path');
      feed(8000,150);
      const lowered=Number.parseFloat(document.getElementById('batt_v').textContent);
      if(lowered>8.03||lowered<8)throw Error('sustained decline not followed');
+     feed(8500,2);feed(8000,50);
+     if(Number.parseFloat(document.getElementById('batt_v').textContent)!==lowered)throw Error('short charge blip raises displayed voltage');
      feed(8500,150);
-     if(Number.parseFloat(document.getElementById('batt_v').textContent)!==lowered)throw Error('rebound increases displayed voltage');
+     const charged=Number.parseFloat(document.getElementById('batt_v').textContent);
+     if(charged<lowered+0.05)throw Error('sustained charge voltage not followed');
      feed(0,100);
-     if(Number.parseFloat(document.getElementById('batt_v').textContent)!==lowered)throw Error('missing sample changes voltage');
-     now+=10000;feed(9000,100);
-     if(Number.parseFloat(document.getElementById('batt_v').textContent)!==lowered)throw Error('telemetry gap resets monotonic latch');
+     if(Number.parseFloat(document.getElementById('batt_v').textContent)!==charged)throw Error('missing sample changes voltage');
+     now+=10000;feed(8500,5);
+     if(Number.parseFloat(document.getElementById('batt_v').textContent)!==charged)throw Error('telemetry gap alone changes display');
      feed(7500,150,5,0x80);
      if(!document.getElementById('batt_pct').textContent.includes('5%'))throw Error('sustained low battery percent not shown');
      if(document.getElementById('state').dataset.tone!=='bad')throw Error('fault presentation changed');
      if(Number.parseFloat(document.getElementById('batt_v').textContent)>7.53)throw Error('further decline not followed');
-     if(history.some((v,i)=>i>0&&v>history[i-1]))throw Error('displayed voltage increased');
+     for(let i=1;i<history.length;i++) {
+       const delta=history[i]-history[i-1];
+       if(delta>1e-6&&delta<0.05-1e-6)throw Error('displayed voltage rose below the 50 mV rise deadband');
+     }
      return {frames:history.length,first:history[0],last:history[history.length-1]};
    } finally {Date.now=realNow;}
  });
@@ -90,25 +96,63 @@ const pathModule=require('path');
      feed(49,50);
      if(shown()!=='49%')throw Error('sustained 1% decline ignored');
      feed(60,150);
-     if(shown()!=='49%')throw Error('percentage rebound displayed');
-     feed(48,25);now+=10000;feed(48);
-     if(shown()!=='49%')throw Error('missing telemetry counted as confirmation');
+     if(shown()!=='49%')throw Error('short rise blip displayed before confirmation');
      feed(49,100);feed(255,100);feed(0,100,0);
      if(shown()!=='49%')throw Error('invalid percentage or voltage changes display');
+     feed(50,300);
+     if(shown()!=='49%')throw Error('sub-hysteresis rise displayed');
+     feed(60,600);
+     if(shown()!=='60%')throw Error('sustained charge rise not confirmed');
+     feed(100,520);
+     if(shown()!=='100%')throw Error('charge recovery does not reach full');
+     feed(48,25);now+=10000;feed(48);
+     if(shown()!=='100%')throw Error('missing telemetry counted as confirmation');
      feed(5);
      if(document.getElementById('batt_pill').style.color!=='var(--bad)')throw Error('raw low-battery warning delayed');
-     if(shown()!=='49%')throw Error('single low percentage bypasses confirmation');
+     if(shown()!=='100%')throw Error('single low percentage bypasses confirmation');
      feed(0,200);
      if(shown()!=='0%')throw Error('valid empty battery rejected');
-     if(history.some((v,i)=>i>0&&v>history[i-1]))throw Error('displayed percentage increased');
+     for(let i=1;i<history.length;i++) {
+       const delta=history[i]-history[i-1];
+       if(delta>1e-6&&delta<2-1e-6)throw Error('displayed percentage rose below the 2% rise hysteresis');
+     }
      return {frames:history.length,first:history[0],last:history[history.length-1]};
    } finally { Date.now=realNow; }
  });
  await page.reload();
  await page.evaluate(()=>renderBatteryPercent(80,8500));
  if(await page.locator('#batt_pct').innerText()!=='80%')throw Error('new page did not initialize percentage');
+ await page.reload();
+ const rebootResults=await page.evaluate(()=>{
+   const realNow=Date.now;
+   let now=100000;
+   Date.now=()=>now;
+   const shown=()=>document.getElementById('batt_pct').textContent;
+   const volt=()=>document.getElementById('batt_v').textContent;
+   function feedUptime(u,pct,mv) {
+     now+=20;
+     const telemetry=new Uint8Array(38);
+     telemetry[4]=u&255;telemetry[5]=(u>>8)&255;telemetry[6]=(u>>16)&255;telemetry[7]=(u>>24)&255;
+     telemetry[19]=mv&255;telemetry[20]=mv>>8;telemetry[21]=pct;
+     onTelemetry(telemetry);
+   }
+   try {
+     // drained session: display latched low
+     feedUptime(100000,50,7500);
+     if(shown()!=='50%')throw Error('drained session not seeded');
+     // power-off -> charge -> power-on: uptime restarts from ~3 s
+     feedUptime(3000,100,8400);
+     if(shown()!=='100%')throw Error('reboot did not reset percent latch');
+     if(volt()!=='8.40V')throw Error('reboot did not reset voltage latch');
+     // follow-up frames behave normally (no repeated resets)
+     feedUptime(3200,100,8400);
+     if(shown()!=='100%'||volt()!=='8.40V')throw Error('post-reboot frames unstable');
+     return {pct:shown(),v:volt()};
+   } finally { Date.now=realNow; }
+ });
  if(errors.length)throw Error(errors.join('\n'));
- console.log('PASS: percentage boundary/spike debounce, 1.5s confirmation, no rebound, invalid samples, gap handling, raw warning color, zero/reload initialization; '+JSON.stringify(pctResults));
- console.log('PASS: voltage jitter/spike rejection, sustained decline, no rebound or gap increase, invalid zero handling, reload initialization, percent/fault presentation; '+JSON.stringify(results));
+ console.log('PASS: percentage boundary/spike debounce, 1.5s drop confirmation, blip/sub-hysteresis rise rejection, 10s charge-rise confirmation to 100%, invalid samples, gap handling, raw warning color, zero/reload initialization; '+JSON.stringify(pctResults));
+ console.log('PASS: voltage jitter/spike rejection, sustained decline, charge-blip rejection, sustained charge rise, gap stability, invalid zero handling, reload initialization, percent/fault presentation; '+JSON.stringify(results));
+ console.log('PASS: uptime regression (vehicle restart) resets both display planes and re-seeds; '+JSON.stringify(rebootResults));
  await browser.close();
 })().catch(error=>{console.error(error);process.exit(1);});

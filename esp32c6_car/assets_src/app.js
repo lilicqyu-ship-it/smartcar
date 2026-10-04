@@ -192,6 +192,7 @@ function onTelemetry(p) {
   const d32 = (o) => (p[o] | (p[o+1] << 8) | (p[o+2] << 16) | (p[o+3] << 24)) >>> 0;
   const tl = dl(11), tr = dl(13), ml = dl(15), mr = dl(17);
   const pct = p[21], fault = dv(9);
+  batteryUptimeGuard(d32(4)); // vehicle restart resets the battery display latches
   renderSpeed(ml, mr);
   setBar("bar_lt", tl, 800); setBar("bar_lm", ml, 800);
   setBar("bar_rt", tr, 800); setBar("bar_rm", mr, 800);
@@ -212,12 +213,17 @@ function setBar(id, v, full) {
 }
 
 /* Battery display only: smooth noise, limit DOM updates to 2 Hz and latch
- * downward changes. The latch lasts for this document, including WS reconnects;
- * loading a new page starts from its first valid measurement. Safety, including
- * the battery warning color, uses the original telemetry, never display values. */
+ * steps with hysteresis in BOTH directions. Downward keeps the original
+ * single-session discipline; upward recovery mirrors it for charging — a
+ * sustained higher median walks the display back up, so a charged pack no
+ * longer stays latched at its drained value. The latch lasts for this
+ * document, including WS reconnects; loading a new page starts from its first
+ * valid measurement. Safety, including the battery warning color, uses the
+ * original telemetry, never display values. */
 const BATT_DISPLAY_INTERVAL_MS = 500;
 const BATT_DISPLAY_TAU_MS = 500;
 const BATT_DISPLAY_DEADBAND_MV = 20;
+const BATT_DISPLAY_RISE_DEADBAND_MV = 50; // upward (charging recovery)
 const batteryDisplay = { samples: [], filteredMv: null, shownMv: null, sampleTs: 0, displayTs: 0 };
 function renderBatteryVoltage(mv) {
   if (mv <= 0) return; // Uninitialized/absent measurement must not latch 0 V.
@@ -237,22 +243,30 @@ function renderBatteryVoltage(mv) {
   if (batteryDisplay.shownMv !== null && now - batteryDisplay.displayTs < BATT_DISPLAY_INTERVAL_MS) return;
   batteryDisplay.displayTs = now;
   const roundedMv = Math.round(batteryDisplay.filteredMv / 10) * 10;
-  if (batteryDisplay.shownMv === null || roundedMv <= batteryDisplay.shownMv - BATT_DISPLAY_DEADBAND_MV) {
+  if (batteryDisplay.shownMv === null ||
+      roundedMv <= batteryDisplay.shownMv - BATT_DISPLAY_DEADBAND_MV ||
+      roundedMv >= batteryDisplay.shownMv + BATT_DISPLAY_RISE_DEADBAND_MV) {
     batteryDisplay.shownMv = roundedMv;
     $("batt_v").textContent = (roundedMv / 1000).toFixed(2) + "V";
   }
 }
 
 /* Percent steps are coarse: require a sustained lower median for 1.5 s,
- * rather than latching a single noisy 1% dip for the rest of the session. */
+ * rather than latching a single noisy 1% dip for the rest of the session.
+ * Charging recovery mirrors this: a sustained median >= shown + 2 % for 10 s
+ * latches up stepwise (charging is minutes-slow; sag-rebound blips are not). */
 const BATT_PERCENT_CONFIRM_MS = 1500;
-const batteryPercentDisplay = { samples: [], shown: null, candidate: null, since: 0, sampleTs: 0 };
+const BATT_PERCENT_RISE_HYSTERESIS = 2;
+const BATT_PERCENT_RISE_CONFIRM_MS = 10000;
+const batteryPercentDisplay = { samples: [], shown: null, candidate: null, since: 0,
+  riseCandidate: null, riseSince: 0, sampleTs: 0 };
 function renderBatteryPercent(pct, mv) {
   if (mv <= 0 || pct < 0 || pct > 100) return; // 0% is valid when voltage exists.
   const now = Date.now();
   if (batteryPercentDisplay.sampleTs && now - batteryPercentDisplay.sampleTs > 1000) {
     batteryPercentDisplay.samples = [];
     batteryPercentDisplay.candidate = null;
+    batteryPercentDisplay.riseCandidate = null;
   }
   batteryPercentDisplay.sampleTs = now;
   batteryPercentDisplay.samples.push(pct);
@@ -264,23 +278,67 @@ function renderBatteryPercent(pct, mv) {
     $("batt_pct").textContent = median + "%";
     return;
   }
-  if (median >= batteryPercentDisplay.shown) {
-    batteryPercentDisplay.candidate = null;
-    return;
-  }
-  if (batteryPercentDisplay.candidate === null) {
-    batteryPercentDisplay.candidate = median;
-    batteryPercentDisplay.since = now;
-  } else {
+  if (median < batteryPercentDisplay.shown) {
     // Use the highest lower estimate in the window, so a short deep dip cannot
     // set a falsely low permanent display while the readings fluctuate below it.
-    batteryPercentDisplay.candidate = Math.max(batteryPercentDisplay.candidate, median);
+    batteryPercentDisplay.riseCandidate = null;
+    if (batteryPercentDisplay.candidate === null) {
+      batteryPercentDisplay.candidate = median;
+      batteryPercentDisplay.since = now;
+    } else {
+      batteryPercentDisplay.candidate = Math.max(batteryPercentDisplay.candidate, median);
+    }
+    if (now - batteryPercentDisplay.since >= BATT_PERCENT_CONFIRM_MS) {
+      batteryPercentDisplay.shown = batteryPercentDisplay.candidate;
+      batteryPercentDisplay.candidate = null;
+      $("batt_pct").textContent = batteryPercentDisplay.shown + "%";
+    }
+    return;
   }
-  if (now - batteryPercentDisplay.since >= BATT_PERCENT_CONFIRM_MS) {
-    batteryPercentDisplay.shown = batteryPercentDisplay.candidate;
+  if (median >= batteryPercentDisplay.shown + BATT_PERCENT_RISE_HYSTERESIS) {
+    // Use the lowest rising estimate in the window, so a short blip cannot
+    // set a falsely high permanent display while the readings fluctuate.
     batteryPercentDisplay.candidate = null;
-    $("batt_pct").textContent = batteryPercentDisplay.shown + "%";
+    if (batteryPercentDisplay.riseCandidate === null) {
+      batteryPercentDisplay.riseCandidate = median;
+      batteryPercentDisplay.riseSince = now;
+    } else {
+      batteryPercentDisplay.riseCandidate = Math.min(batteryPercentDisplay.riseCandidate, median);
+    }
+    if (now - batteryPercentDisplay.riseSince >= BATT_PERCENT_RISE_CONFIRM_MS) {
+      batteryPercentDisplay.shown = batteryPercentDisplay.riseCandidate;
+      batteryPercentDisplay.riseCandidate = null;
+      $("batt_pct").textContent = batteryPercentDisplay.shown + "%";
+    }
+    return;
   }
+  // inside the hysteresis band: nothing pending survives
+  batteryPercentDisplay.candidate = null;
+  batteryPercentDisplay.riseCandidate = null;
+}
+
+/* A uptime regression means the vehicle restarted — the typical power-off ->
+ * charge -> power-on cycle. Reset both display planes so the next frame
+ * re-seeds them: the display snaps to the truth instead of staying latched
+ * below it forever. Tolerance filters jitter; u32 uptime wrap (~49.7 d) also
+ * lands here and a spurious re-seed is harmless. */
+const BATT_REBOOT_TOLERANCE_MS = 2000;
+let batteryLastUptimeMs = null;
+function batteryUptimeGuard(uptimeMs) {
+  if (batteryLastUptimeMs !== null && uptimeMs > 0 &&
+      uptimeMs + BATT_REBOOT_TOLERANCE_MS < batteryLastUptimeMs) {
+    batteryDisplay.samples = [];
+    batteryDisplay.filteredMv = null;
+    batteryDisplay.shownMv = null;
+    batteryDisplay.sampleTs = 0;
+    batteryDisplay.displayTs = 0;
+    batteryPercentDisplay.samples = [];
+    batteryPercentDisplay.shown = null;
+    batteryPercentDisplay.candidate = null;
+    batteryPercentDisplay.riseCandidate = null;
+    batteryPercentDisplay.sampleTs = 0;
+  }
+  batteryLastUptimeMs = uptimeMs;
 }
 
 /* ---- speedometer: body speed = mean of measured wheel speeds (mm/s) ----

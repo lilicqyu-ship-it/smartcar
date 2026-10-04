@@ -50,8 +50,18 @@ node esp32c6_car/test/web/battery-ui.cjs
 ```
 
 It feeds the actual telemetry handler with virtual 50 Hz measurements. It checks
-small jitter, isolated low spikes, sustained declines, no increase after voltage
-recovery or a telemetry gap, zero measurements, fresh-page initialization, and
-unchanged fault presentation and raw low-battery warning colors. Percent checks
-cover 1% boundary jitter, isolated spikes, sustained decline confirmation,
-monotonic display, gaps, invalid measurements, valid 0%, and page reload.
+small jitter, isolated low spikes, sustained declines followed, short charge
+blips rejected, sustained charge recovery followed (voltage 50 mV rise
+deadband, percent +2 % for 10 s stepwise back to 100 %), a vehicle restart
+(uptime regression) resetting both display latches, zero measurements,
+fresh-page initialization, and unchanged fault presentation and raw
+low-battery warning colors. Percent checks cover 1% boundary jitter, isolated
+spikes, sustained decline confirmation, gaps, invalid measurements, valid 0%,
+and page reload.
+
+No Node/Playwright on the host? A macOS JavaScriptCore variant drives the same
+scenarios against the same app.js (no DOM, `$`/`Date.now` stubbed only):
+
+```sh
+osascript -l JavaScript esp32c6_car/test/web/battery-ui-jxa.js
+```
