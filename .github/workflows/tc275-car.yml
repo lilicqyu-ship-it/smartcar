@@ -70,6 +70,9 @@ jobs:
           python3 test/host/test_tof_stream.py
           python3 test/host/test_fusion_bridge.py
 
+      - name: Developer log rate and format policy model
+        run: python3 test/host/test_log_policy.py
+
       - name: ADC battery conversion tests
         run: |
           gcc -std=c99 -Wall -Wextra -Werror -O2 -I . -I test/host/stub \

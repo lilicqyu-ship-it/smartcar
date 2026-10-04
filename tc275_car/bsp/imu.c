@@ -57,7 +57,7 @@
 #define IMU_REPROBE_MS          1000u
 #define IMU_ALIVE_FAIL_LIMIT    20u
 /* bench telemetry line cadence (encoder-style IMU= row, 0.5 Hz) */
-#define IMU_LOG_PERIOD_MS       2000u
+#define IMU_LOG_PERIOD_MS       10000u
 
 /* INT1 = P15.4, push-pull driven by the module; pull-down defines the idle
  * level while the sensor is absent. If the IMU is ever configured open-drain
@@ -345,7 +345,12 @@ static void imu_logProbeFailure(ImuStatus st)
     vals[1] = (sint32)g_whoAmI;
     vals[2] = (sint32)g_errCount;
     vals[3] = (sint32)IMU_actualClockHz();
-    XCORE_logi("IMUERR st/id/err/clk=", vals, 4u);
+    {
+        static const char *const cause[] = {"ok", "invalid_parameter", "identity_mismatch",
+            "spi_busy", "spi_hw_error", "spi_timeout"};
+        XCORE_LOG_FIELDS("[IMU_ERROR]", XL_S("cause", vals[0]>=0 && vals[0]<6 ? cause[vals[0]] : "unknown"),
+            XL_H("whoami", vals[1]), XL_U("spi_errors_total", vals[2]), XL_U("spi_hz", vals[3]));
+    }
 }
 
 static boolean imu_configure(void)
@@ -484,7 +489,7 @@ void IMU_init(void)
     imu_eruSetup();
 
     g_reprobeMs = STIME_nowMs() + IMU_REPROBE_MS;
-    g_logMs     = STIME_nowMs() + IMU_LOG_PERIOD_MS;
+    g_logMs     = STIME_nowMs();
 
     st = imu_probe();
     if ((st == IMU_OK) && imu_configure())
@@ -595,7 +600,12 @@ void IMU_task(void)
         vals[7] = snap.tempCentiC;
         vals[8] = (sint32)snap.drdyCount;
         vals[9] = (sint32)snap.errCount;
-        XCORE_logi("IMU", vals, 10u);
+        XCORE_LOG_FIELDS("[IMU]", XL_U("uptime_ms", STIME_nowMs()),
+            XL_U("alive", snap.alive), XL_S("axes", "sensor_raw"), XL_H("whoami", vals[0]),
+            XL_I("acc_x_mg", vals[1]), XL_I("acc_y_mg", vals[2]), XL_I("acc_z_mg", vals[3]),
+            XL_I("gyro_x_mdps", vals[4]), XL_I("gyro_y_mdps", vals[5]), XL_I("gyro_z_mdps", vals[6]),
+            XL_I("temp_centi_c", vals[7]), XL_U("drdy_edges_total", snap.drdyCount),
+            XL_U("spi_errors_total", snap.errCount));
     }
 }
 

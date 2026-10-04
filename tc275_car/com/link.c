@@ -23,7 +23,7 @@
  * once, then at most one line per second carries the suppressed count. The
  * counter in Link_Stats stays one-for-one either way - the line is for the
  * human, the counter is for the tripwire. */
-#define LINK_CMDQ_FULL_LOG_MS 1000u
+#define LINK_CMDQ_FULL_LOG_MS 5000u
 
 typedef struct
 {
@@ -260,10 +260,9 @@ static void link_forward(uint8 cmd, const uint8 *data, uint8 len)
             ((uint32)(nowMs - s_lastLogMs) >= LINK_CMDQ_FULL_LOG_MS))
         {
             uint32 suppressed = g_stats.cmdRejectedQueue - s_lastCount;
-            uint32 vals[1];
-
-            vals[0] = suppressed;
-            XCORE_logu("LINK cmdq full x", vals, 1u);
+            XCORE_LOG_FIELDS("[LINK_COMMAND]", XL_U("uptime_ms", nowMs),
+                XL_U("rejected_since_last_log", suppressed),
+                XL_U("rejected_total", g_stats.cmdRejectedQueue));
             s_everLogged = TRUE;
             s_lastLogMs  = nowMs;
             s_lastCount  = g_stats.cmdRejectedQueue;
@@ -843,121 +842,51 @@ void LINK_getHealth(Link_Health *health)
     }
 }
 
-/* Bench observability: CPU2 has no printf and no UART of its own, so one
- * diagnostic line is pushed through the xcore log bridge (CPU0 drains it to
- * ASCLIN0). It only reads the health snapshot LINK_main() already maintains
- * plus the live IRQ level, so it perturbs neither the pump timing nor the wire
- * - safe to call from the CPU2 superloop at a low rate. The fields, in order:
- *
- *   LINKDBG=<state> <irq> <clkHz> <ready> <txPend> <rxRoom> <sinceAlive>
- *           <errStat> <tx> <timeout> <hwErr> <spiErr> <crc> <seq>
- *
- *   state       0 DOWN / 1 READY / 2 LOST (Link_State)
- *   irq         P23.0 level now: 1 = slave asserting IRQ
- *   clkHz       wire clock after divider quantisation
- *   ready       LINK_REG_READY, expect 0x5F534601 ("_SF1") when the slave is up
- *   txPend      slave's queued-bytes claim (LINK_REG_TX_PENDING)
- *   rxRoom      slave RX room (LINK_REG_RX_ROOM)
- *   sinceAlive  ms since LINK_REG_ALIVE last advanced (0 = never seen)
- *   errStat     slave LINK_REG_ERRSTAT bitfield
- *   tx          SPIHAL transactions issued
- *   timeout     SPIHAL transaction timeouts (bus stalled, driver re-armed)
- *   hwErr       QSPI error-interrupt latches
- *   spiErr      link-level transactions that did not complete cleanly
- *   crc/seq     SF frames the codec rejected on CRC / sequence
- *   wrSeg       WRDMA segments pushed to the slave (compare to the slave's own
- *               wrdma counter: if this climbs but the slave's does not, the
- *               write-direction preamble is not being parsed)
- *   txFrames    SF frames actually put on the wire (telemetry + commands)
- *   txQFull     LINK_send() refused because the TX queue was full (backpressure)
- *   rdSeg       RDDMA segments taken from the slave (compare to the slave's rddma)
- *   cmdqRej     CPU0 command-queue rejections in link_forward: must stay 0;
- *               non-zero means diverse (non-coalescable) commands arrived
- *               faster than CPU0's 10 ms drain - the burst tripwire
- *
- * Printing policy (bench log hygiene): a healthy idle link would otherwise emit
- * the same line every LINK_DIAG_PERIOD_MS forever and bury the one line that
- * matters. So a full line is emitted only when something a human cares about
- * moved - the link state, the wire clock, or any error/fault counter
- * (timeout / hwErr / spiErr / crc / seq) - and, failing that, one keep-alive
- * line every LINK_DIAG_HEARTBEAT calls so a silent console still proves CPU2 is
- * pumping. An error line is tagged "LINKERR=" so it stands out in the stream;
- * a steady-state line stays "LINKDBG=". Volatile-by-design fields (irq level,
- * sinceAlive, the free-running transaction count) are reported but never by
- * themselves trigger a line, otherwise nothing would ever be suppressed. */
-#define LINK_DIAG_HEARTBEAT   10u   /* keep-alive: one forced line per N calls */
-
+/* Snapshot only: state changes are immediate, repeated faults are rate limited.
+ * Slave registers are meaningful only after the READY magic is observed. */
 void LINK_diagPrint(void)
 {
-    static uint32  s_prevState   = 0xFFFFFFFFu;
-    static uint32  s_prevClockHz = 0xFFFFFFFFu;
-    static uint32  s_prevReady   = 0xFFFFFFFFu;
-    static uint32  s_prevErrSum  = 0xFFFFFFFFu;
-    static uint32  s_sinceForced = LINK_DIAG_HEARTBEAT;
-
-    uint32 vals[19];
-    uint32 state;
-    uint32 clockHz;
-    uint32 ready;
-    uint32 errSum;
-    uint32 faults;
-    boolean changed;
-    boolean isError;
-
-    state   = (uint32)g_health.state;
-    clockHz = g_health.clockHz;
-    ready   = link_reg(g_reg, LINK_REG_READY);
-
-    /* Fault counters that must stay 0 on a healthy link; their sum is the change
-     * detector for "something went wrong since last time". */
-    faults = g_health.spi.timeouts + g_health.spi.hwErrors
-           + g_health.stats.spiErrors + g_health.stats.crcErrors
-           + g_health.stats.seqErrors;
-    /* Slave-reported error bitfield folds in too, so a slave-side fault surfaces
-     * even when the master's own counters are quiet. */
-    errSum = faults + g_health.slaveErrStat;
-
-    changed = (boolean)((state != s_prevState) || (clockHz != s_prevClockHz)
-                        || (ready != s_prevReady) || (errSum != s_prevErrSum));
-
-    s_sinceForced++;
-    if (!changed && (s_sinceForced < LINK_DIAG_HEARTBEAT))
+    static uint32 prevState = 0xFFFFFFFFu, prevClock = 0u, prevReady = 0u;
+    static uint32 prevFaults = 0u, prevSlave = 0u, lastMs = 0u;
+    static boolean initialized = FALSE;
+    uint32 now = STIME_nowMs();
+    uint32 state = (uint32)g_health.state;
+    uint32 ready = link_reg(g_reg, LINK_REG_READY);
+    boolean valid = (boolean)(ready == LINK_READY_MAGIC);
+    uint32 slave = valid ? g_health.slaveErrStat : 0u;
+    uint32 faults = g_health.spi.timeouts + g_health.spi.hwErrors
+                  + g_health.stats.spiErrors + g_health.stats.crcErrors
+                  + g_health.stats.seqErrors + g_health.stats.txQueueFull
+                  + g_health.stats.cmdRejectedQueue;
+    boolean transition = (boolean)(!initialized || state != prevState
+                         || ready != prevReady || g_health.clockHz != prevClock);
+    boolean faultChange = (boolean)(faults != prevFaults || slave != prevSlave);
+    if (!transition && (uint32)(now - lastMs) < 30000u
+        && !(faultChange && ((prevFaults == 0u && prevSlave == 0u)
+                             || (uint32)(now - lastMs) >= 5000u))) return;
+    initialized = TRUE; lastMs = now;
+    prevState = state; prevClock = g_health.clockHz; prevReady = ready;
+    prevFaults = faults; prevSlave = slave;
+    XCORE_LOG_FIELDS("[LINK]", XL_U("uptime_ms", now),
+        XL_S("state", state == LINK_READY ? "ready" : state == LINK_LOST ? "lost" : "down"),
+        XL_U("registers_valid", valid), XL_U("spi_hz", g_health.clockHz),
+        XL_U("irq_asserted", SPIHAL_irqAsserted()), XL_H("ready_reg", ready));
+    if (valid)
     {
-        return;      /* steady state: suppress the duplicate line */
+        XCORE_LOG_FIELDS("[LINK_SLAVE]", XL_U("uptime_ms", now),
+            XL_U("tx_pending_bytes", g_health.txPending), XL_U("rx_room_bytes", g_health.rxRoom),
+            XL_U("alive_age_ms", g_health.sinceAliveMs), XL_H("error_bits", slave));
     }
-    s_sinceForced = 0u;
-
-    s_prevState   = state;
-    s_prevClockHz = clockHz;
-    s_prevReady   = ready;
-    s_prevErrSum  = errSum;
-
-    vals[0]  = state;
-    vals[1]  = (SPIHAL_irqAsserted() != FALSE) ? 1u : 0u;
-    vals[2]  = clockHz;
-    vals[3]  = ready;
-    vals[4]  = g_health.txPending;
-    vals[5]  = g_health.rxRoom;
-    vals[6]  = g_health.sinceAliveMs;
-    vals[7]  = g_health.slaveErrStat;
-    vals[8]  = g_health.spi.transactions;
-    vals[9]  = g_health.spi.timeouts;
-    vals[10] = g_health.spi.hwErrors;
-    vals[11] = g_health.stats.spiErrors;
-    vals[12] = g_health.stats.crcErrors;
-    vals[13] = g_health.stats.seqErrors;
-    /* Transmit-side counters: whether telemetry is really reaching the slave.
-     * wrSeg is the one to compare against the slave's own wrdma counter. */
-    vals[14] = g_health.stats.wrSegments;
-    vals[15] = g_health.stats.txFrames;
-    vals[16] = g_health.stats.txQueueFull;
-    vals[17] = g_health.stats.rdSegments;
-    vals[18] = g_health.stats.cmdRejectedQueue;
-
-    /* Tag the line so a fault jumps out of the stream; the field order is
-     * identical under both labels so any parser keys off the values, not the
-     * tag. */
-    isError = (boolean)(errSum != 0u);
-    XCORE_logu(isError ? "LINKERR=" : "LINKDBG=", vals, 19u);
+    else XCORE_LOG_FIELDS("[LINK_SLAVE]", XL_U("uptime_ms", now), XL_S("data", "unknown"));
+    XCORE_LOG_FIELDS("[LINK_ERRORS]", XL_U("uptime_ms", now),
+        XL_U("spi_timeout_total", g_health.spi.timeouts), XL_U("spi_hw_error_total", g_health.spi.hwErrors),
+        XL_U("spi_error_total", g_health.stats.spiErrors), XL_U("crc_error_total", g_health.stats.crcErrors),
+        XL_U("sequence_error_total", g_health.stats.seqErrors),
+        XL_U("tx_queue_full_total", g_health.stats.txQueueFull),
+        XL_U("cmd_rejected_total", g_health.stats.cmdRejectedQueue));
+    XCORE_LOG_FIELDS("[LINK_TRAFFIC]", XL_U("uptime_ms", now),
+        XL_U("spi_transactions_total", g_health.spi.transactions),
+        XL_U("write_segments_total", g_health.stats.wrSegments),
+        XL_U("read_segments_total", g_health.stats.rdSegments),
+        XL_U("tx_frames_total", g_health.stats.txFrames));
 }
-

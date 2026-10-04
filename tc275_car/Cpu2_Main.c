@@ -208,9 +208,9 @@ static void link_sendTelemetry(void)
 }
 
 /* Bench speed line: the figures this core puts into telemetry vMeasL/R and
- * odoSession, on the CPU0 console at 1 Hz so a bench check of the speed
- * display needs no phone on the link. Signed values, hence XCORE_logi. */
-#define LINK_SPEED_PERIOD_MS     1000u
+ * odoSession, on the CPU0 console every 10 seconds so a bench check of the speed
+ * display needs no phone on the link. Named fields include units. */
+#define LINK_SPEED_PERIOD_MS     10000u
 
 static void link_speedPrint(void)
 {
@@ -223,7 +223,9 @@ static void link_speedPrint(void)
     vals[2] = (sint32)link_sessionOdoMm(&enc);
     vals[3] = enc.alive ? 1 : 0;
 
-    XCORE_logi("SPD=", vals, 4u);
+    XCORE_LOG_FIELDS("[WHEELS]", XL_U("uptime_ms", STIME_nowMs()),
+        XL_I("left_mm_s", vals[0]), XL_I("right_mm_s", vals[1]),
+        XL_U("session_odo_mm", vals[2]), XL_U("recent_encoder_edges", vals[3]));
 }
 
 extern IfxCpu_syncEvent cpuSyncEvent;

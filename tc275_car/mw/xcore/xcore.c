@@ -96,6 +96,7 @@ static CmdQueue g_cmdQueue;
  * lock and never sees a half-written line. */
 static char     g_logRing[XCORE_LOG_RING_SIZE];
 static uint32   g_logWr;                 /* producers: CPU1/CPU2 */
+static uint32   g_logDropped;
 static uint32   g_logRd;                 /* consumer: CPU0 */
 
 static void XCORE_lock(void)
@@ -138,6 +139,7 @@ void XCORE_init(void)
     g_encoderSeq = 0u;
     memset(&g_tof, 0, sizeof(g_tof));
     memset(&g_fusion, 0, sizeof(g_fusion));
+    g_logDropped = 0u;
     g_logWr    = 0;
     g_logRd    = 0;
     g_jogSeq   = 0u;
@@ -570,6 +572,10 @@ void XCORE_log(const char *s)
         g_logWr++;
         __dsync();
     }
+    else
+    {
+        g_logDropped++;
+    }
     XCORE_unlock();
 }
 
@@ -695,6 +701,61 @@ void XCORE_logi(const char *label, const sint32 *vals, uint8 n)
 
     line[idx] = '\0';
     XCORE_log(line);
+}
+
+uint32 XCORE_logDropped(void)
+{
+    uint32 dropped;
+    XCORE_lock(); dropped = g_logDropped; XCORE_unlock();
+    return dropped;
+}
+
+/* Append bounded text, marking overlong input explicitly rather than overrunning. */
+static uint32 XCORE_logText(char *dst, uint32 at, uint32 limit, const char *src)
+{
+    if (!src) src = "unknown";
+    while (*src && at < limit) dst[at++] = *src++;
+    if (*src && at >= 3u) {
+        dst[at-3u] = '.'; dst[at-2u] = '.'; dst[at-1u] = '.';
+    }
+    return at;
+}
+
+void XCORE_logFields(const char *tag, const XcoreLogField *fields, uint8 count)
+{
+    char line[XCORE_LOG_LINE_MAX + 1u];
+    char field[128];
+    char dec[10];
+    uint32 prefix = XCORE_logText(line, 0u, 48u, tag);
+    uint32 at = prefix;
+    uint8 i;
+    if (!fields) count = 0u;
+    for (i=0u; i<count; i++) {
+        uint32 used = XCORE_logText(field, 0u, 48u, fields[i].name);
+        uint32 value = fields[i].number;
+        const char *digits;
+        field[used++] = '=';
+        if (fields[i].kind == 3u) {
+            used = XCORE_logText(field, used, sizeof(field)-1u, fields[i].text);
+        } else if (fields[i].kind == 2u) {
+            int shift;
+            static const char hex[] = "0123456789ABCDEF";
+            field[used++]='0'; field[used++]='x';
+            for (shift=28; shift>=0; shift-=4) field[used++]=hex[(value>>shift)&15u];
+        } else {
+            if (fields[i].kind == 1u && (value & 0x80000000u)) {
+                field[used++]='-'; value=0u-value;
+            }
+            digits=XCORE_u32ToDec(value, dec+sizeof(dec));
+            while (digits<dec+sizeof(dec)) field[used++]=*digits++;
+        }
+        if (at+1u+used>XCORE_LOG_LINE_MAX) {
+            line[at]='\0'; XCORE_log(line); at=prefix;
+        }
+        line[at++]=' ';
+        memcpy(line+at,field,used); at+=used;
+    }
+    line[at]='\0'; XCORE_log(line);
 }
 
 void XCORE_logService(void)

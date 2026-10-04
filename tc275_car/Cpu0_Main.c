@@ -199,16 +199,40 @@ static void vRobotControlTask(void *pvParameters)
                 FUSION_step(&g_driveFusion, &g_fusionInput);
                 XCORE_fusionPublish(&g_driveFusion.out);
                 {
-                    static uint32 logMs;
-                    if ((uint32)(g_fusionInput.nowMs-logMs)>=1000u) {
-                        sint32 v[10];
-                        logMs=g_fusionInput.nowMs;
-                        v[0]=g_driveFusion.out.flags; v[1]=g_driveFusion.out.reason;
-                        v[2]=g_driveFusion.out.nearestMm; v[3]=g_driveFusion.out.capMmS;
-                        v[4]=g_driveFusion.out.speedMmS; v[5]=g_driveFusion.out.tofAgeMs;
-                        v[6]=g_driveFusion.out.effective[0]; v[7]=g_driveFusion.out.effective[1];
-                        v[8]=g_driveFusion.out.validZones; v[9]=g_driveFusion.out.brake;
-                        XCORE_logi("FUSION flags/reason/mm/cap/v/age/L/R/z/brake=",v,10u);
+                    static XcoreLogGate gate;
+                    static const char *const action[] = {"none", "limit_speed", "stop_obstacle",
+                        "stop_tof_unavailable", "stop_tilt", "stop_encoder_unavailable"};
+                    FusionOutput *out = &g_driveFusion.out;
+                    uint32 signature = ((uint32)out->flags & 0x6Fu) | ((uint32)out->reason << 8u);
+                    boolean urgent = (out->reason >= FUSION_OBSTACLE) ? TRUE : FALSE;
+                    if (XCORE_logDue(&gate, g_fusionInput.nowMs, signature, 5000u, 1000u, urgent)) {
+                        const char *permission = "allowed";
+                        if (!g_fusionInput.wheelsCalibrated) permission = "blocked_wheel_calibration";
+                        else if (!(out->flags & FUSION_ENCODER_OK)) permission = "blocked_encoder";
+                        else if (!(out->flags & FUSION_TOF_OK)) permission = "blocked_tof";
+                        else if (out->nearestMm <= g_driveFusion.cfg.marginMm) permission = "blocked_near_obstacle";
+                        else if (out->flags & FUSION_NEUTRAL_REQUIRED) permission = "blocked_release_required";
+                        if (out->reason == FUSION_TILT) permission = "blocked_tilt";
+                        XCORE_LOG_FIELDS("[FUSION]",
+                            XL_U("uptime_ms", g_fusionInput.nowMs),
+                            XL_S("action", out->reason < 6u ? action[out->reason] : "unknown"),
+                            XL_S("forward", permission), XL_U("nearest_mm", out->nearestMm),
+                            XL_U("forward_cap_mm_s", out->capMmS), XL_I("speed_mm_s", out->speedMmS),
+                            XL_U("tof_age_ms", out->tofAgeMs), XL_U("valid_zones", out->validZones));
+                        XCORE_LOG_FIELDS("[FUSION_CONTROL]", XL_U("uptime_ms", g_fusionInput.nowMs),
+                            XL_I("target_left_pct_x10", out->effective[0]),
+                            XL_I("target_right_pct_x10", out->effective[1]),
+                            XL_U("brake", out->brake), XL_H("health_flags", out->flags));
+                        XCORE_LOG_FIELDS("[FUSION_HEALTH]",
+                            XL_U("uptime_ms", g_fusionInput.nowMs),
+                            XL_U("tof_valid", out->flags & FUSION_TOF_OK ? 1u : 0u),
+                            XL_U("imu_fresh", out->flags & FUSION_IMU_OK ? 1u : 0u),
+                            XL_U("encoder_fresh", out->flags & FUSION_ENCODER_OK ? 1u : 0u),
+                            XL_S("imu_axes", out->flags & FUSION_CALIBRATED ? "calibrated" : "uncalibrated"),
+                            XL_S("gyro_bias", out->flags & FUSION_BIAS_READY ? "ready" : "learning"),
+                            XL_U("wheel_gyro_mismatch", out->flags & FUSION_SLIP ? 1u : 0u),
+                            XL_U("release_required", out->flags & FUSION_NEUTRAL_REQUIRED ? 1u : 0u),
+                            XL_U("log_dropped_total", XCORE_logDropped()));
                     }
                 }
             }

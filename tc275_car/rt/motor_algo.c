@@ -143,9 +143,9 @@ static void MOTOR_ALGO_brakeAll(void)
 
 /* ---- closed loop ----------------------------------------------------------- */
 
-static boolean g_servoLogAsked;          /* 1 Hz bench line, only when active */
+static boolean g_servoLogAsked;          /* 5-second bench line, only when active */
 
-/* One SRV= line per second while anything is moving: target, measured and
+/* One named SERVO line every 5 seconds while anything is moving: target, measured and
  * applied duty per side (percent*10), the figures the bench tune of doc 21
  * SS15.3 needs. Idle robot stays silent so the console does not spam. */
 static void MOTOR_ALGO_diag(XcoreEncoder *enc, sint16 dutyL, sint16 dutyR)
@@ -157,7 +157,7 @@ static void MOTOR_ALGO_diag(XcoreEncoder *enc, sint16 dutyL, sint16 dutyR)
         (dutyL == 0) && (dutyR == 0) &&
         (enc->pctLeft == 0) && (enc->pctRight == 0))
     {
-        g_servoLogAsked = FALSE;
+        /* Keep the rate gate across short idle gaps / encoder jitter. */
         return;
     }
 
@@ -171,9 +171,12 @@ static void MOTOR_ALGO_diag(XcoreEncoder *enc, sint16 dutyL, sint16 dutyR)
         vals[3] = g_right.target;
         vals[4] = enc->pctRight;
         vals[5] = dutyR;
-        XCORE_logi("SRV=", vals, 6u);
+        XCORE_LOG_FIELDS("[SERVO]", XL_U("uptime_ms", now),
+            XL_I("target_left_pct_x10", vals[0]), XL_I("measured_left_pct_x10", vals[1]),
+            XL_I("duty_left_pct_x10", vals[2]), XL_I("target_right_pct_x10", vals[3]),
+            XL_I("measured_right_pct_x10", vals[4]), XL_I("duty_right_pct_x10", vals[5]));
 
-        nextLogMs       = now + 1000u;
+        nextLogMs       = now + 5000u;
         g_servoLogAsked = TRUE;
     }
 }
@@ -306,7 +309,11 @@ static void MOTOR_ALGO_calibStep(void)
                     vals[i] = ENCODER_getInvert(i);
                     vals[i + 4u] = g_calib.delta[i];
                 }
-                XCORE_logi("ENCCAL", vals, 8u);   /* invert[0..3] delta[0..3] */
+                XCORE_LOG_FIELDS("[ENCODER_CALIBRATION]",
+                    XL_I("invert_A", vals[0]), XL_I("invert_B", vals[1]),
+                    XL_I("invert_C", vals[2]), XL_I("invert_D", vals[3]),
+                    XL_I("delta_A_counts", vals[4]), XL_I("delta_B_counts", vals[5]),
+                    XL_I("delta_C_counts", vals[6]), XL_I("delta_D_counts", vals[7]));   /* invert[0..3] delta[0..3] */
 
                 MOTOR_ALGO_calibPublish(CALIB_STATUS_DONE);
                 g_calib.active = FALSE;

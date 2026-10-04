@@ -361,6 +361,57 @@ static void test_sensor_snapshots(void)
     CHECK_EQ(got.seq,0u); CHECK_EQ(read.flags,0); CHECK_EQ(enc.seq,0u);
 }
 
+static void test_named_logs(void)
+{
+    XcoreLogGate gate = {0};
+    XcoreLogField many[20];
+    char longText[180];
+    int i, found = 0;
+    XCORE_init(); g_uartCount = 0;
+    XCORE_LOG_FIELDS("[TEST]", XL_U("total", 0xFFFFFFFFu),
+        XL_I("signed", (-2147483647 - 1)), XL_H("register", 0xFFFFFFFFu),
+        XL_S("state", "ready"), XL_S("missing", NULL_PTR));
+    XCORE_logService();
+    CHECK_EQ(g_uartCount, 1);
+    CHECK(strcmp(g_uartLines[0], "[TEST] total=4294967295 signed=-2147483648 register=0xFFFFFFFF state=ready missing=unknown") == 0);
+    memset(longText, 'x', sizeof(longText)); longText[179] = 0;
+    XCORE_LOG_FIELDS("[LONG]", XL_S("text", longText), XL_U("after", 123));
+    XCORE_logService();
+    CHECK(strstr(g_uartLines[1], "... after=123") != NULL);
+    for (i = 0; i < 20; i++) {
+        many[i].name = "counter_total"; many[i].number = 4294967295u;
+        many[i].text = NULL_PTR; many[i].kind = 0u;
+    }
+    g_uartCount = 0;
+    XCORE_logFields("[SPLIT]", many, 20u);
+    for (i=0; i<10; i++) XCORE_logService();
+    CHECK(g_uartCount >= 2);
+    for (i=0; i<g_uartCount; i++) {
+        const char *cursor = g_uartLines[i];
+        CHECK(strlen(cursor) <= 256u);
+        CHECK(strncmp(cursor, "[SPLIT] ", 8u) == 0);
+        while ((cursor = strstr(cursor, "counter_total=4294967295")) != NULL) {
+            found++; cursor += strlen("counter_total=4294967295");
+        }
+    }
+    CHECK_EQ(found, 20);
+    CHECK_EQ(XCORE_logDropped(), 0);
+    /* Must exceed the 2048 B ring even when it starts empty. */
+    for (i=0; i<300; i++) XCORE_logln("overflow");
+    CHECK(XCORE_logDropped() > 0);
+    XCORE_init(); CHECK_EQ(XCORE_logDropped(), 0);
+    CHECK(XCORE_logDue(&gate, 100u, 1u, 5000u, 1000u, FALSE));
+    CHECK(!XCORE_logDue(&gate, 200u, 1u, 5000u, 1000u, TRUE));
+    CHECK(!XCORE_logDue(&gate, 200u, 2u, 5000u, 1000u, FALSE));
+    CHECK(XCORE_logDue(&gate, 1100u, 2u, 5000u, 1000u, FALSE));
+    CHECK(XCORE_logDue(&gate, 1110u, 3u, 5000u, 1000u, TRUE));
+    CHECK(!XCORE_logDue(&gate, 1120u, 3u, 5000u, 1000u, TRUE));
+    CHECK(XCORE_logDue(&gate, 6110u, 3u, 5000u, 1000u, FALSE));
+    gate.lastMs = 0xFFFFFFF0u;
+    CHECK(!XCORE_logDue(&gate, 20u, 3u, 5000u, 1000u, FALSE));
+    CHECK(XCORE_logDue(&gate, 5000u, 3u, 5000u, 1000u, FALSE));
+}
+
 /* ---- main ------------------------------------------------------------------- */
 
 int main(void)
@@ -375,6 +426,7 @@ int main(void)
     test_logu_line_format();
     test_imu_block();
     test_sensor_snapshots();
+    test_named_logs();
 
     printf("%d checks, %d failures\n", g_checks, g_failed);
     return (g_failed == 0) ? 0 : 1;

@@ -96,3 +96,8 @@ $env:PYTHONPATH='C:/Code/smartcar/esp32c6_car/build/idf-runtime/Lib/site-package
 此记录针对当前开发机，不是可移植依赖锁定；清理 build 会删除该临时环境。
 
 最终镜像再次烧录校验 Pass，COM16 从启动采集 20 s：确认 `APPFW tc275_car v1.2.0`；下载期间目标 L/R=0；ToF 配置后帧 27→236、err=0；距离 70–75 mm、帧龄 1–63 ms；零偏就绪后 flags=39，目标持续为 0。
+
+
+### 2026-10-04：v1.2.1 日志格式更新
+
+当前日志改为带字段名、单位和状态名称的输出，周期日志降频，故障与恢复保留事件。完整频率和每个字段的含义见 [38-developer-logging.md](38-developer-logging.md)；本文的旧日志样例作为历史验证记录保留。

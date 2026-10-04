@@ -338,7 +338,9 @@ static void calib_logSlot(const char *label)
                ((uint32)slot[(i * 4u) + 2u] << 8)  |
                (uint32)slot[(i * 4u) + 3u];
     }
-    XCORE_logu(label, v, 5u);
+    XCORE_LOG_FIELDS("[CAL_SLOT]", XL_S("stage", label), XL_H("address", g_calibSectorAddr),
+        XL_H("bytes_0_3", v[0]), XL_H("bytes_4_7", v[1]), XL_H("bytes_8_11", v[2]),
+        XL_H("bytes_12_15", v[3]), XL_H("bytes_16_19", v[4]));
 }
 
 /* Save sequence, v1.0.5. ONLY the command-issue phase runs masked (the
@@ -362,16 +364,13 @@ static boolean calib_flashSave(const CalibRecord *rec)
     CALIBREC_encode(rec, g_opBlob);
 
     WDG_serviceCpu();
-    calib_logSlot("CALSLOT0=");          /* slot state entering the save     */
+    calib_logSlot("before_erase");          /* slot state entering the save     */
     {
         /* Per-attempt verdict data (byte reads are bench-proven benign):
          * the slot the firmware actually uses + the two DF0 boundary words
          * the boot probe decided on - so a missed boot banner still leaves
          * the full picture in every save attempt. */
-        sint32 dbg[1];
-
-        dbg[0] = (sint32)g_calibSectorAddr;
-        XCORE_logi("CALSEC=", dbg, 1u);
+        XCORE_LOG_FIELDS("[CAL_FLASH]", XL_H("sector_address", g_calibSectorAddr));
     }
     fsr0 = FLASH0_FSR.U;
     __disable();                          /* issue phase only                 */
@@ -407,15 +406,10 @@ static boolean calib_flashSave(const CalibRecord *rec)
     WDG_serviceCpu();
     if (ok == FALSE)
     {
-        sint32 v[4];
-
         /* step: 1 erase 2 pagemode 3 program 4 verify 5 endinit */
-        v[0] = (sint32)g_flashFailStep;
-        v[1] = (sint32)fsr0;             /* FSR before anything this attempt */
-        v[2] = (sint32)fsr1;             /* FSR right after the command      */
-        v[3] = (sint32)g_flashFailFsr;   /* FSR at the failure verdict       */
-        XCORE_logi("CALSAVE FAIL st/FSR0/1/2=", v, 4u);
-        calib_logSlot("CALSLOT1=");      /* slot state after the failed save */
+        XCORE_LOG_FIELDS("[CAL_SAVE_ERROR]", XL_U("step_raw", g_flashFailStep),
+            XL_H("fsr_before", fsr0), XL_H("fsr_after_command", fsr1), XL_H("fsr_failure", g_flashFailFsr));
+        calib_logSlot("after_save_failure");      /* slot state after the failed save */
     }
     return ok;
 }
@@ -556,7 +550,7 @@ void CALIB_init(void)
     CalibRecord rec;
 
     calib_flashRead(blob);
-    calib_logSlot("CALSLOT=");            /* bench: raw slot bytes at boot    */
+    calib_logSlot("boot");            /* bench: raw slot bytes at boot    */
     if (CALIBREC_decode(blob, &rec) != 0u)
     {
         UART_println("CALIBREC loaded from DFLASH");

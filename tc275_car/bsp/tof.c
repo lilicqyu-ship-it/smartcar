@@ -96,7 +96,7 @@
  * drop alive after this many consecutive failed ULD calls. */
 #define TOF_REPROBE_MS          1000u
 #define TOF_ALIVE_FAIL_LIMIT    20u
-#define TOF_LOG_PERIOD_MS       2000u
+#define TOF_LOG_PERIOD_MS       10000u
 
 typedef enum
 {
@@ -738,7 +738,7 @@ static void tof_gpioProbe(void)
         IfxPort_setPinHigh(TOF_SDA_PORT, TOF_SDA_PIN); /* STOP if clock released */
         vTaskDelay(pdMS_TO_TICKS(1u));
     }
-    XCORE_logu("TOFGPIO status/bits/ack/diff=", vals, 4u);
+    XCORE_LOG_FIELDS("[TOF_GPIO]", XL_U("status_raw", vals[0]), XL_H("address_echo", vals[1]), XL_U("ack_line_level", vals[2]), XL_U("first_different_bit", vals[3]));
     tof_busSetup(); /* restore peripheral pin selection and clock */
 }
 
@@ -769,7 +769,7 @@ static void tof_gpioIsolation(void)
         vals[7] = TOF_SDA_PORT->IOCR4.U;
         vals[8] = TOF_I2C->GPCTL.U;
         vals[9] = TOF_I2C->RUNCTRL.U;
-        XCORE_logu("TOFISO step/reqScl/reqSda/scl/sda/in/out/iocr4/gpctl/run=", vals, 10u);
+        XCORE_LOG_FIELDS("[TOF_ISOLATION]", XL_U("step", vals[0]), XL_U("requested_scl", vals[1]), XL_U("requested_sda", vals[2]), XL_U("scl_level", vals[3]), XL_U("sda_level", vals[4]), XL_H("port_in", vals[5]), XL_H("port_out", vals[6]), XL_H("iocr4", vals[7]), XL_H("gpctl", vals[8]), XL_H("runctrl", vals[9]));
     }
     /* Compare the external bias with a known internal weak pull-up after
      * discharging SDA. Keep SCL low so these are not START/STOP edges. */
@@ -789,7 +789,7 @@ static void tof_gpioIsolation(void)
         vals[2] = IfxPort_getPinState(TOF_SDA_PORT, TOF_SDA_PIN) ? 1u : 0u;
         vals[3] = TOF_SDA_PORT->IN.U;
         vals[4] = TOF_SDA_PORT->IOCR4.U;
-        XCORE_logu("TOFBIAS pullUp/scl/sda/in/iocr4=", vals, 5u);
+        XCORE_LOG_FIELDS("[TOF_BIAS]", XL_U("internal_pull_up", vals[0]), XL_U("scl_level", vals[1]), XL_U("sda_level", vals[2]), XL_H("port_in", vals[3]), XL_H("iocr4", vals[4]));
     }
     IfxPort_setPinHigh(TOF_SDA_PORT, TOF_SDA_PIN);
     IfxPort_setPinModeInput(TOF_SDA_PORT, TOF_SDA_PIN, IfxPort_InputMode_pullUp);
@@ -957,19 +957,26 @@ static TofStatus tof_stFailed(uint8_t st)
 
 static void tof_logFailure(void)
 {
-    sint32 vals[4];
-
+    static const char *const errors[] = {"ok", "invalid_parameter", "no_ack", "bus_error", "timeout", "uld_error"};
+    static const char *const phases[] = {"none", "bus_free", "tx_space", "tx_request", "tx_end", "rx_mode", "rx_request", "stop"};
+    static const char *const clear[] = {"idle", "released", "scl_stuck", "sda_stuck"};
     g_errLogMs = tof_nowMs();
-
-    vals[0] = (sint32)g_lastErr;
-    vals[1] = (sint32)g_stStatus;
-    vals[2] = (sint32)g_cfgStep;
-    vals[3] = (sint32)g_errCount;
-    XCORE_logi("TOFERR berr/st/step/err=", vals, 4u);
+    XCORE_LOG_FIELDS("[TOF_ERROR]", XL_U("uptime_ms", g_errLogMs),
+        XL_S("cause", (uint32)g_lastErr < 6u ? errors[g_lastErr] : "unknown"),
+        XL_H("uld_status", g_stStatus), XL_U("config_step", g_cfgStep), XL_U("errors_total", g_errCount));
     if (g_busDiagValid != FALSE)
     {
-        XCORE_logu("TOFBUS phase/rw/reg/len/pirq/err/ris/bs/ffs/scl/sda/tps/addr=", g_busDiag, 13u);
-        XCORE_logu("TOFCLEAR result/pulses/scl/sda=", g_busClear, 4u);
+        XCORE_LOG_FIELDS("[TOF_BUS]", XL_U("uptime_ms", g_errLogMs),
+            XL_S("phase", g_busDiag[0] < 8u ? phases[g_busDiag[0]] : "unknown"),
+            XL_S("direction", g_busDiag[1] ? "read" : "write"),
+            XL_H("register", g_busDiag[2]), XL_U("length_bytes", g_busDiag[3]),
+            XL_H("protocol_irq", g_busDiag[4]), XL_H("error_irq", g_busDiag[5]),
+            XL_H("raw_irq", g_busDiag[6]), XL_U("bus_state_raw", g_busDiag[7]),
+            XL_U("fifo_words", g_busDiag[8]), XL_U("scl_level", g_busDiag[9]), XL_U("sda_level", g_busDiag[10]),
+            XL_U("packet_bytes", g_busDiag[11]), XL_H("wire_address", g_busDiag[12]));
+        XCORE_LOG_FIELDS("[TOF_CLEAR]", XL_U("uptime_ms", g_errLogMs),
+            XL_S("result", g_busClear[0] < 4u ? clear[g_busClear[0]] : "unknown"),
+            XL_U("pulses", g_busClear[1]), XL_U("scl_level", g_busClear[2]), XL_U("sda_level", g_busClear[3]));
     }
 }
 
@@ -1236,7 +1243,7 @@ void TOF_init(void)
      * immediately". The ULD's own identity check is what decides alive. */
     g_reprobeMs = tof_nowMs() - TOF_REPROBE_MS;
     g_logMs     = tof_nowMs();
-    g_errLogMs  = tof_nowMs();
+    g_errLogMs  = tof_nowMs() - TOF_LOG_PERIOD_MS;
 }
 
 void TOF_task(void)
@@ -1254,7 +1261,7 @@ void TOF_task(void)
         vals[3] = TOF_SDA_PORT->OUT.U;
         vals[4] = TOF_SDA_PORT->IOCR4.U;
         vals[5] = TOF_I2C->RUNCTRL.U;
-        XCORE_logu("TOFHOLD scl/sda/in/out/iocr4/run=", vals, 6u);
+        XCORE_LOG_FIELDS("[TOF_HOLD]", XL_U("uptime_ms", nowMs), XL_U("scl_level", vals[0]), XL_U("sda_level", vals[1]), XL_H("port_in", vals[2]), XL_H("port_out", vals[3]), XL_H("iocr4", vals[4]), XL_H("runctrl", vals[5]));
     }
     return;
 #endif
@@ -1369,24 +1376,17 @@ void TOF_task(void)
 
     if ((uint32)(tof_nowMs() - g_logMs) >= TOF_LOG_PERIOD_MS)
     {
-        sint32 vals[12];
-        uint8  nearestStatus = 0u;
-        sint16 nearest       = tof_nearestMm(&nearestStatus);
-
+        static const char *const states[] = {"dead", "probe", "init", "config", "ranging"};
+        uint8 nearestStatus = 0u;
+        sint16 nearest = tof_nearestMm(&nearestStatus);
         g_logMs = tof_nowMs();
-        vals[0]  = (sint32)g_state;
-        vals[1]  = (g_alive != FALSE) ? 1 : 0;
-        vals[2]  = (sint32)g_frameCount;
-        vals[3]  = (sint32)g_errCount;
-        vals[4]  = (sint32)g_initMs;
-        vals[5]  = (sint32)g_actualHz;
-        vals[6]  = (sint32)TOF_ZONE_COUNT;
-        vals[7]  = (sint32)nearest;
-        vals[8]  = (sint32)nearestStatus;
-        vals[9]  = (sint32)TOF_intLevel();
-        vals[10] = (sint32)g_whoAmI[0];     /* expect 240 = 0xF0, 0 until an answer */
-        vals[11] = (sint32)g_whoAmI[1];     /* expect 2   = 0x02, 0 until an answer */
-        XCORE_logi("TOF", vals, 12u);
+        XCORE_LOG_FIELDS("[TOF]", XL_U("uptime_ms", g_logMs),
+            XL_S("state", (uint32)g_state < 5u ? states[g_state] : "unknown"),
+            XL_U("alive", g_alive), XL_U("frames_total", g_frameCount), XL_U("errors_total", g_errCount),
+            XL_I("nearest_mm", nearest), XL_U("target_status_raw", nearestStatus), XL_U("int_level", TOF_intLevel()));
+        XCORE_LOG_FIELDS("[TOF_CONFIG]", XL_U("uptime_ms", g_logMs), XL_U("init_ms", g_initMs),
+            XL_U("i2c_hz", g_actualHz), XL_U("zones", TOF_ZONE_COUNT),
+            XL_H("device_id", g_whoAmI[0]), XL_H("revision_id", g_whoAmI[1]));
     }
 }
 

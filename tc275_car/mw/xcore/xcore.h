@@ -185,6 +185,54 @@ void XCORE_log(const char *s);            /* append without newline */
 void XCORE_logln(const char *s);          /* append one line */
 void XCORE_logService(void);              /* CPU0 only: print pending lines */
 
+/* Structured diagnostics: named units, exact u32/i32, hex registers and text.
+ * Formatting occurs outside the mutex. Long records split at FIELD boundaries,
+ * repeating the tag; no field is silently dropped to satisfy the line limit. */
+typedef struct {
+    const char *name;
+    uint32 number;
+    const char *text;
+    uint8 kind; /* 0=u32, 1=i32, 2=hex32, 3=text */
+} XcoreLogField;
+/* TASKING 6.x requires constant aggregate initializers. Assign runtime fields
+ * individually; determine the exact array length at preprocessing time. */
+static inline void XCORE_logFieldSet(XcoreLogField *fields, uint8 *count,
+    const char *name, uint32 number, const char *text, uint8 kind)
+{
+    XcoreLogField *field = &fields[(*count)++];
+    field->name = name; field->number = number; field->text = text; field->kind = kind;
+}
+#define XL_U(name, value) XCORE_logFieldSet(logFields, &logCount, name, (uint32)(value), NULL_PTR, 0u)
+#define XL_I(name, value) XCORE_logFieldSet(logFields, &logCount, name, (uint32)(sint32)(value), NULL_PTR, 1u)
+#define XL_H(name, value) XCORE_logFieldSet(logFields, &logCount, name, (uint32)(value), NULL_PTR, 2u)
+#define XL_S(name, value) XCORE_logFieldSet(logFields, &logCount, name, 0u, value, 3u)
+#define XCORE_LOG_COUNT_(a,b,c,d,e,f,g,h,i,j,k,l,m,n,o,p,count,...) count
+#define XCORE_LOG_COUNT(...) XCORE_LOG_COUNT_(__VA_ARGS__,16,15,14,13,12,11,10,9,8,7,6,5,4,3,2,1,0)
+#define XCORE_LOG_FIELDS(tag, ...) do { \
+    XcoreLogField logFields[XCORE_LOG_COUNT(__VA_ARGS__)]; \
+    uint8 logCount = 0u; \
+    (void)(__VA_ARGS__); \
+    XCORE_logFields(tag, logFields, logCount); \
+} while (0)
+void XCORE_logFields(const char *tag, const XcoreLogField *fields, uint8 count);
+uint32 XCORE_logDropped(void); /* discarded WHOLE lines since XCORE_init */
+
+/* Caller-owned rate gate. Unsigned elapsed arithmetic tolerates clock wrap.
+ * Counters and raw sensor values belong in periodic summaries, not signatures.
+ * urgent is a NEW fault/stop transition, never a persistent fault level. */
+typedef struct { uint32 lastMs, signature; boolean initialized; } XcoreLogGate;
+static inline boolean XCORE_logDue(XcoreLogGate *g, uint32 nowMs, uint32 signature,
+                                   uint32 periodMs, uint32 changeMinMs, boolean urgent)
+{
+    uint32 elapsed = nowMs - g->lastMs;
+    if (!g->initialized || elapsed >= periodMs ||
+        ((signature != g->signature) && (urgent || elapsed >= changeMinMs))) {
+        g->initialized = TRUE; g->lastMs = nowMs; g->signature = signature;
+        return TRUE;
+    }
+    return FALSE;
+}
+
 /* Formatted diagnostic line for cores with no printf (CPU1/CPU2): emits
  * "label=v0 v1 v2 ..." as one line, each value in unsigned decimal. Meant for
  * low-rate bench observation (e.g. the SPI link state), so the value count is
