@@ -13,6 +13,8 @@
    `scripts/check-contracts.sh` 逐字节校验各工程副本，杜绝拷贝漂移。
 3. **固件工具链** — `firmware/fw.py` 统一编译/烧录/归档/OTA 入口，`justfile` 一条命令直达。
 
+TC275 ↔ C6 的下一阶段交互契约见 [事务与传感器验收协议](contracts/link/transaction-v1.md)（设计基线，尚未实现）。验收入口为 iOS Remote，保留现有 SPI/SF 和驾驶接口，新增会话、请求回执、结果查询与完整数据分片。
+
 > 📘 **完整使用指南见 [doc/00-usage.md](doc/00-usage.md)**：概念速成、六大日常场景分步操作、
 > 全部命令/脚本手册、CI 说明与故障排查 FAQ。
 >

@@ -6,6 +6,16 @@
 
 #define MOTOR_PWM_FREQUENCY  20000U
 
+/* TB6612 STBY (D24A J4-2) - one net for both chips, so it arms all four
+ * channels. Low = standby: AIN/BIN/PWM are ignored and the outputs go
+ * high-impedance. The pin is a kit X1-16 output; with the wire unplugged or
+ * the MCU in reset the line floats and TB6612's internal 200k pull-down holds
+ * it low, so "no firmware" always means "driver not armed".
+ * Note: 3.3V drive sits below the datasheet VIH(STB) = VCC*0.7 = 3.5V (VCC is
+ * the board's 5V rail) - the same margin as the 3V3 jumper it replaces. */
+#define MOTOR_STBY_PORT        (&MODULE_P22)
+#define MOTOR_STBY_PIN         2u
+
 typedef struct
 {
     IfxGtm_Atom_Pwm_Driver pwm;
@@ -101,6 +111,11 @@ void MOTOR_init(void)
             IfxPort_setPinLow(g_dirPins[i][1].port, g_dirPins[i][1].pinIndex);
         }
     }
+
+    /* Every IN pin is low and every duty is 0 at this point, so arming the
+     * driver cannot produce an unrequested move. */
+    IfxPort_setPinMode(MOTOR_STBY_PORT, MOTOR_STBY_PIN, IfxPort_Mode_outputPushPullGeneral);
+    MOTOR_setEnabled(TRUE);
 }
 
 void MOTOR_setSpeed(MotorId id, sint16 speed)
@@ -158,4 +173,17 @@ void MOTOR_stopAll(void)
     {
         MOTOR_stop(i);
     }
+}
+
+void MOTOR_setEnabled(boolean enabled)
+{
+    if (!enabled)
+    {
+        /* Clear the inputs first: while armed, IN1=IN2=low is the stop state;
+         * dropping STBY afterwards leaves nothing to be latched high. */
+        MOTOR_stopAll();
+    }
+
+    IfxPort_setPinState(MOTOR_STBY_PORT, MOTOR_STBY_PIN,
+                        enabled ? IfxPort_State_high : IfxPort_State_low);
 }

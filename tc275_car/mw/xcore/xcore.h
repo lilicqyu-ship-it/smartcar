@@ -74,6 +74,7 @@ uint16 XCORE_battGetMv(void);             /* any core                           
 typedef struct
 {
     uint32  seq;                          /* bumped by XCORE_imuPublish       */
+    uint32  stampMs;                      /* CPU1 sampling time, STM ms       */
     boolean alive;
     uint8   whoAmI;                       /* last probe result (0x71 expected)*/
     sint16  accMilliG[3];                 /* X/Y/Z, mg                        */
@@ -169,6 +170,18 @@ void    XCORE_evtPop(void);                         /* CPU2: after send OK     *
 /* Command queue: CPU2 pushes decoded frames, CPU0 consumes in the control task */
 boolean XCORE_cmdPush(const XcoreCmdMsg *msg);
 boolean XCORE_cmdPop(XcoreCmdMsg *msg);
+
+/* Diagnostics never consume the driving queue or control event slots. */
+boolean XCORE_diagCmdPush(const XcoreCmdMsg *msg); /* CPU2, depth 4 */
+boolean XCORE_diagCmdPeek(XcoreCmdMsg *msg);      /* CPU0, retain on backpressure */
+void XCORE_diagCmdPop(void);
+boolean XCORE_dataEvtPush(const XcoreEvtFrame *frame); /* CPU0, depth 8 */
+boolean XCORE_dataEvtPeek(XcoreEvtFrame *frame);        /* CPU2 */
+void XCORE_dataEvtPop(void);
+void XCORE_linkPublish(boolean up, uint32 stampMs); /* CPU2 */
+boolean XCORE_linkRead(uint32 *stampMs);              /* CPU0 */
+void XCORE_benchSetActive(boolean active); /* CPU1 calibration ownership */
+boolean XCORE_benchIsActive(void);
 
 /* Newest-wins variant of XCORE_cmdPush: if a message with the same cmd byte is
  * still queued, it is overwritten in place (the newest of them, so CPU0

@@ -10,6 +10,7 @@
 #include "com/ota_app.h"
 #include "mw/ota/ota_rx.h"
 #include "mw/xcore/xcore.h"
+#include "mw/diag/diag_wire.h"
 #include "bsp/stime.h"
 
 #include <string.h>
@@ -217,12 +218,18 @@ static void link_forward(uint8 cmd, const uint8 *data, uint8 len)
 {
     XcoreCmdMsg msg;
     boolean     queued;
+    boolean diagnostic=(boolean)(cmd==PROTO_CMD_DIAG && len && data && data[0]==DT_SUB);
 
     if (len > LINK_CMD_DATA_MAX)
     {
         /* No truncation: a command wider than the CPU0 mailbox is a protocol
          * mismatch and must be visible, not quietly shortened. */
         g_stats.cmdOversize++;
+        if(diagnostic) {
+            uint8 reject[DT_FRAME_MAX];
+            uint8 n=DT_rejection(reject,data,len,DT_BAD_LENGTH,STIME_nowMs());
+            if(n) (void)LINK_send(SF_TYPE_EVT,DT_CONTROL_CID,reject,n);
+        }
         return;
     }
 
@@ -240,8 +247,8 @@ static void link_forward(uint8 cmd, const uint8 *data, uint8 len)
         memcpy(msg.data, data, len);
     }
 
-    queued = (cmd == PROTO_CMD_SET_SPEED) ? XCORE_cmdPushLatest(&msg)
-                                          : XCORE_cmdPush(&msg);
+    queued = diagnostic ? XCORE_diagCmdPush(&msg) :
+        ((cmd == PROTO_CMD_SET_SPEED) ? XCORE_cmdPushLatest(&msg) : XCORE_cmdPush(&msg));
     if (queued == FALSE)
     {
         /* Rejection is still counted one-for-one (the counter is the tripwire
@@ -256,6 +263,11 @@ static void link_forward(uint8 cmd, const uint8 *data, uint8 len)
         uint32 nowMs = STIME_nowMs();
 
         g_stats.cmdRejectedQueue++;
+        if(diagnostic) {
+            uint8 reject[DT_FRAME_MAX];
+            uint8 n=DT_rejection(reject,data,len,DT_BUSY,nowMs);
+            if(n) (void)LINK_send(SF_TYPE_EVT,DT_CONTROL_CID,reject,n);
+        }
         if ((s_everLogged == FALSE) ||
             ((uint32)(nowMs - s_lastLogMs) >= LINK_CMDQ_FULL_LOG_MS))
         {
@@ -310,6 +322,14 @@ static void link_dispatch(const SF_Frame *frame)
     }
 
     op = frame->payload[0];
+    if(op==PROTO_CMD_DIAG && frame->len>=2u && frame->payload[1]==DT_SUB &&
+       (frame->cid!=SF_CID_DIAG || frame->flags!=0u)) {
+        uint8 reject[DT_FRAME_MAX];
+        uint8 n=DT_rejection(reject,&frame->payload[1],(uint8)(frame->len-1u),DT_BAD_ARGUMENT,STIME_nowMs());
+        g_stats.cmdBadLen++;
+        if(n) (void)LINK_send(SF_TYPE_EVT,DT_CONTROL_CID,reject,n);
+        return;
+    }
 
     if (frame->cid == SF_CID_DRIVE)
     {

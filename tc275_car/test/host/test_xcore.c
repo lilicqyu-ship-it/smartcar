@@ -414,6 +414,49 @@ static void test_named_logs(void)
 
 /* ---- main ------------------------------------------------------------------- */
 
+static void test_diagnostic_channels(void)
+{
+    XcoreCmdMsg cmd, got;
+    XcoreEvtFrame event, read;
+    XcoreImu imu;
+    FusionTof tof;
+    uint32 stamp;
+    unsigned i;
+    XCORE_init(); memset(&cmd,0,sizeof(cmd)); cmd.cmd=0x53; cmd.len=16;
+    for(i=0;i<4;i++) { cmd.data[8]=(uint8)i; CHECK(XCORE_diagCmdPush(&cmd)); }
+    CHECK(!XCORE_diagCmdPush(&cmd));
+    /* Diagnostic saturation must leave every ordinary command slot available. */
+    cmd.cmd=PROTO_CMD_SET_SPEED; CHECK(XCORE_cmdPush(&cmd));
+    CHECK(XCORE_cmdPop(&got)); CHECK_EQ(got.cmd,PROTO_CMD_SET_SPEED);
+    for(i=0;i<4;i++) {
+        CHECK(XCORE_diagCmdPeek(&got)); CHECK_EQ(got.data[8],i);
+        CHECK(XCORE_diagCmdPeek(&got)); CHECK_EQ(got.data[8],i); XCORE_diagCmdPop();
+    }
+    CHECK(!XCORE_diagCmdPeek(&got));
+    memset(&event,0,sizeof(event)); event.type=5; event.cid=0x29; event.len=32;
+    for(i=0;i<8;i++) { event.payload[0]=(uint8)i; CHECK(XCORE_dataEvtPush(&event)); }
+    CHECK(!XCORE_dataEvtPush(&event));
+    event.cid=0x28; CHECK(XCORE_evtPush(&event)); CHECK(XCORE_evtPeek(&read));
+    CHECK_EQ(read.cid,0x28); XCORE_evtPop();
+    for(i=0;i<8;i++) {
+        CHECK(XCORE_dataEvtPeek(&read)); CHECK_EQ(read.payload[0],i);
+        CHECK(XCORE_dataEvtPeek(&read)); CHECK_EQ(read.payload[0],i); XCORE_dataEvtPop();
+    }
+    CHECK(!XCORE_dataEvtPeek(&read));
+    event.len=33; CHECK(!XCORE_dataEvtPush(&event));
+    XCORE_linkPublish(TRUE,1234); CHECK(XCORE_linkRead(&stamp)); CHECK_EQ(stamp,1234);
+    XCORE_benchSetActive(TRUE); CHECK(XCORE_benchIsActive());
+    XCORE_benchSetActive(FALSE); CHECK(!XCORE_benchIsActive());
+    XCORE_dirCalibRequest(); CHECK(XCORE_benchIsActive()); CHECK(XCORE_dirCalibConsume());
+    CHECK(!XCORE_benchIsActive());
+    memset(&imu,0,sizeof(imu)); imu.stampMs=0xfffffffeu;
+    XCORE_imuPublish(&imu); XCORE_imuRead(&imu); CHECK_EQ(imu.stampMs,0xfffffffeu);
+    memset(&tof,0,sizeof(tof)); tof.sampleStampMs=9876;
+    XCORE_tofPublish(&tof); XCORE_tofRead(&tof); CHECK_EQ(tof.sampleStampMs,9876);
+    XCORE_init(); CHECK(!XCORE_linkRead(&stamp)); CHECK_EQ(stamp,0);
+    CHECK(!XCORE_benchIsActive()); CHECK(!XCORE_dataEvtPeek(&read)); CHECK(!XCORE_diagCmdPeek(&got));
+}
+
 int main(void)
 {
     test_cmd_fifo_and_capacity();
@@ -427,6 +470,7 @@ int main(void)
     test_imu_block();
     test_sensor_snapshots();
     test_named_logs();
+    test_diagnostic_channels();
 
     printf("%d checks, %d failures\n", g_checks, g_failed);
     return (g_failed == 0) ? 0 : 1;

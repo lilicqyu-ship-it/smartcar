@@ -134,6 +134,18 @@ static void link_sendPendingEvents(void)
     }
 }
 
+/* Separate low-priority data ring. Control frames always get first admission
+ * to LINK_send; retry the same fragment if the transport queue is full. */
+static void link_sendSensorData(void)
+{
+    XcoreEvtFrame frame;
+    uint8 sent=0u;
+    while(sent<4u && XCORE_dataEvtPeek(&frame)) {
+        if(!LINK_send(frame.type,frame.cid,frame.payload,frame.len)) break;
+        XCORE_dataEvtPop(); sent++;
+    }
+}
+
 static void link_sendTelemetry(void)
 {
     Link_Health    health;
@@ -236,6 +248,7 @@ void core2_main(void)
     uint32 nextDiagMs;
     uint32 nextSpdMs;
     uint32 nextFusionMs;
+    uint32 nextEventMs;
 
     IfxCpu_enableInterrupts();
 
@@ -261,11 +274,19 @@ void core2_main(void)
     nextDiagMs = STIME_nowMs() + LINK_DIAG_PERIOD_MS;
     nextSpdMs  = STIME_nowMs() + LINK_SPEED_PERIOD_MS;
     nextFusionMs = STIME_nowMs() + 200u;
+    nextEventMs = STIME_nowMs();
 
     while (1)
     {
         LINK_main();                       /* pump: registers, read, write      */
         OTAAPP_tick();                     /* self-test confirm (doc 24 SS5.2)  */
+        if((sint32)(STIME_nowMs()-nextEventMs)>=0) {
+            uint32 now=STIME_nowMs();
+            nextEventMs=now+5u;
+            XCORE_linkPublish(LINK_isUp(),now);
+            link_sendPendingEvents();
+            link_sendSensorData();
+        }
 
         if ((sint32)(STIME_nowMs() - nextTelMs) >= 0)
         {

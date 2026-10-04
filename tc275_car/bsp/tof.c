@@ -1,4 +1,5 @@
 #include "bsp/tof.h"
+#include "bsp/stime.h"
 
 #include "I2c/Std/IfxI2c.h"
 #include "IfxCpu.h"
@@ -1183,6 +1184,7 @@ static void tof_rangingStep(void)
     g_frameMs = tof_nowMs();
     g_snapshot.seq = g_frameCount;
     g_snapshot.stampMs = g_frameMs;
+    g_snapshot.sampleStampMs = STIME_nowMs();
     g_snapshot.alive = 1u;
     g_snapshot.zones = TOF_ZONE_COUNT;
     {

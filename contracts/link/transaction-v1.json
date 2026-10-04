@@ -1,0 +1,185 @@
+{
+  "name": "TC275-C6 diagnostic transactions",
+  "status": "design_not_implemented",
+  "schema": 1,
+  "date": "2026-10-04",
+  "entrypoint": "ios_remote",
+  "request_sub": 96,
+  "sf_command_type": 1,
+  "sf_command_cid": 3,
+  "sf_opcode": 83,
+  "sf_control_event_cid": 40,
+  "sf_sensor_event_cid": 41,
+  "request_bytes": 16,
+  "response_header_bytes": 18,
+  "response_max_bytes": 32,
+  "fragment_body_max_bytes": 14,
+  "fragment_max_count": 32,
+  "endian": "little",
+  "sf_crc_endian": "big",
+  "opcodes": {
+    "HELLO": 1,
+    "GET_CAPS": 2,
+    "GET_STATUS": 3,
+    "CANCEL": 4,
+    "KEEPALIVE": 5,
+    "CAPTURE": 16,
+    "IMU_STATIC_CHECK": 17,
+    "TOF_REFERENCE_CHECK": 18
+  },
+  "record_kinds": {
+    "ACK": 1,
+    "PROGRESS": 2,
+    "RESULT": 3,
+    "CAPS": 4,
+    "STATUS": 5,
+    "IMU": 16,
+    "TOF": 17
+  },
+  "codes": {
+    "OK": 0,
+    "BAD_LENGTH": 1,
+    "UNSUPPORTED_SCHEMA": 2,
+    "UNSUPPORTED_OPCODE": 3,
+    "BAD_ARGUMENT": 4,
+    "BUSY": 5,
+    "NOT_READY": 6,
+    "STALE_SENSOR": 7,
+    "ID_CONFLICT": 8,
+    "SESSION_LOST": 9,
+    "CANCELED": 10,
+    "LINK_LOST": 11,
+    "BUFFER_OVERFLOW": 12,
+    "INTERNAL_ERROR": 13,
+    "RESULT_EXPIRED": 14,
+    "MOTION_ACTIVE": 15,
+    "UNAUTHORIZED": 16
+  },
+  "timing_ms": {
+    "ack_timeout": 500,
+    "session_lease": 1000,
+    "keepalive": 250,
+    "ios_heartbeat": 500,
+    "ios_timeout": 1000,
+    "fragment_timeout": 500,
+    "progress": 500,
+    "completion_grace": 1000,
+    "result_retention": 30000
+  },
+  "limits": {
+    "max_attempts": 3,
+    "max_duration_ms": 60000,
+    "max_imu_hz": 100,
+    "default_imu_hz_both": 50,
+    "data_fragments_per_10ms": 4,
+    "max_incomplete_records": 4,
+    "short_result_cache": 16,
+    "long_result_cache": 4
+  },
+  "request_fields": [
+    {
+      "name": "sub",
+      "offset": 0,
+      "bytes": 1
+    },
+    {
+      "name": "schema",
+      "offset": 1,
+      "bytes": 1
+    },
+    {
+      "name": "opcode",
+      "offset": 2,
+      "bytes": 1
+    },
+    {
+      "name": "flags",
+      "offset": 3,
+      "bytes": 1
+    },
+    {
+      "name": "session_id",
+      "offset": 4,
+      "bytes": 4
+    },
+    {
+      "name": "request_id",
+      "offset": 8,
+      "bytes": 2
+    },
+    {
+      "name": "args",
+      "offset": 10,
+      "bytes": 6
+    }
+  ],
+  "response_fields": [
+    {
+      "name": "schema",
+      "offset": 0,
+      "bytes": 1
+    },
+    {
+      "name": "kind",
+      "offset": 1,
+      "bytes": 1
+    },
+    {
+      "name": "code",
+      "offset": 2,
+      "bytes": 1
+    },
+    {
+      "name": "flags",
+      "offset": 3,
+      "bytes": 1
+    },
+    {
+      "name": "session_id",
+      "offset": 4,
+      "bytes": 4
+    },
+    {
+      "name": "request_id",
+      "offset": 8,
+      "bytes": 2
+    },
+    {
+      "name": "record_seq",
+      "offset": 10,
+      "bytes": 2
+    },
+    {
+      "name": "stamp_ms",
+      "offset": 12,
+      "bytes": 4
+    },
+    {
+      "name": "fragment_index",
+      "offset": 16,
+      "bytes": 1
+    },
+    {
+      "name": "fragment_count",
+      "offset": 17,
+      "bytes": 1
+    }
+  ],
+  "golden_vectors": [
+    {
+      "name": "hello",
+      "request_hex": "60010100785634120100010100000000",
+      "sf_hex": "5a010100001100035360010100785634120100010100000000729600"
+    },
+    {
+      "name": "capture_both_50hz_10s",
+      "request_hex": "60011000785634120200033210270000",
+      "sf_hex": "5a0101010011000353600110007856341202000332102700001b2000"
+    },
+    {
+      "name": "tof_reference_1000mm_50mm_10s_zone5",
+      "request_hex": "60011200785634120300e80332000a05",
+      "sf_hex": "5a010102001100035360011200785634120300e80332000a05946200"
+    }
+  ]
+}

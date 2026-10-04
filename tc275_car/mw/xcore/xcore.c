@@ -72,6 +72,12 @@ static XcoreRecordLive g_recordLive;
 
 /* CPU0 -> CPU2 event frame outbox (doc 34 SS9.4); same ring discipline as the
  * command queue, head written by CPU0, tail by CPU2. */
+static XcoreCmdMsg g_diagQueue[4];
+static uint32 g_diagHead, g_diagTail;
+static XcoreEvtFrame g_dataQueue[XCORE_EVT_QUEUE_LEN];
+static uint32 g_dataHead, g_dataTail;
+static boolean g_linkUp, g_benchActive;
+static uint32 g_linkStampMs;
 static XcoreEvtFrame g_evtQueue[XCORE_EVT_QUEUE_LEN];
 static uint32        g_evtHead;                /* writer: CPU0 */
 static uint32        g_evtTail;                /* reader: CPU2 */
@@ -143,6 +149,10 @@ void XCORE_init(void)
     g_logWr    = 0;
     g_logRd    = 0;
     g_jogSeq   = 0u;
+    memset(g_diagQueue, 0, sizeof(g_diagQueue));
+    memset(g_dataQueue, 0, sizeof(g_dataQueue));
+    g_diagHead = g_diagTail = g_dataHead = g_dataTail = 0u;
+    g_linkUp = g_benchActive = FALSE; g_linkStampMs = 0u;
     g_evtHead  = 0u;
     g_evtTail  = 0u;
     __dsync();
@@ -794,4 +804,66 @@ void XCORE_logService(void)
             UART_println(line);
         }
     }
+}
+
+/* All accessors retain the same IRQ-preserving short-copy mutex discipline. */
+boolean XCORE_diagCmdPush(const XcoreCmdMsg *msg)
+{
+    boolean ok=FALSE;
+    if (msg==NULL_PTR || msg->len>PROTO_MAX_PAYLOAD) return FALSE;
+    XCORE_lock();
+    if (g_diagHead-g_diagTail<4u) {
+        g_diagQueue[g_diagHead%4u]=*msg; g_diagHead++; __dsync(); ok=TRUE;
+    }
+    XCORE_unlock(); return ok;
+}
+boolean XCORE_diagCmdPeek(XcoreCmdMsg *msg)
+{
+    boolean ok=FALSE;
+    XCORE_lock();
+    if (g_diagHead!=g_diagTail) { *msg=g_diagQueue[g_diagTail%4u]; ok=TRUE; }
+    XCORE_unlock(); return ok;
+}
+void XCORE_diagCmdPop(void)
+{
+    XCORE_lock(); if(g_diagHead!=g_diagTail) { g_diagTail++; __dsync(); } XCORE_unlock();
+}
+boolean XCORE_dataEvtPush(const XcoreEvtFrame *frame)
+{
+    boolean ok=FALSE;
+    if(frame==NULL_PTR || frame->len>XCORE_EVT_MAX_PAYLOAD) return FALSE;
+    XCORE_lock();
+    if(g_dataHead-g_dataTail<XCORE_EVT_QUEUE_LEN) {
+        g_dataQueue[g_dataHead%XCORE_EVT_QUEUE_LEN]=*frame; g_dataHead++; __dsync(); ok=TRUE;
+    }
+    XCORE_unlock(); return ok;
+}
+boolean XCORE_dataEvtPeek(XcoreEvtFrame *frame)
+{
+    boolean ok=FALSE;
+    XCORE_lock();
+    if(g_dataHead!=g_dataTail) { *frame=g_dataQueue[g_dataTail%XCORE_EVT_QUEUE_LEN]; ok=TRUE; }
+    XCORE_unlock(); return ok;
+}
+void XCORE_dataEvtPop(void)
+{
+    XCORE_lock(); if(g_dataHead!=g_dataTail) { g_dataTail++; __dsync(); } XCORE_unlock();
+}
+void XCORE_linkPublish(boolean up,uint32 stampMs)
+{
+    XCORE_lock(); g_linkUp=up; g_linkStampMs=stampMs; __dsync(); XCORE_unlock();
+}
+boolean XCORE_linkRead(uint32 *stampMs)
+{
+    boolean up;
+    XCORE_lock(); up=g_linkUp; *stampMs=g_linkStampMs; XCORE_unlock(); return up;
+}
+void XCORE_benchSetActive(boolean active)
+{
+    XCORE_lock(); g_benchActive=active; __dsync(); XCORE_unlock();
+}
+boolean XCORE_benchIsActive(void)
+{
+    boolean active;
+    XCORE_lock(); active=(boolean)(g_benchActive || g_calibReq); XCORE_unlock(); return active;
 }

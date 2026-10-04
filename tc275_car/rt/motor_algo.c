@@ -241,6 +241,7 @@ static void MOTOR_ALGO_calibStart(void)
     }
 
     g_calib.active       = TRUE;
+    XCORE_benchSetActive(TRUE);
     g_calib.wheel        = 0u;
     g_calib.phase        = CALIB_PULSE;
     g_calib.phaseStartMs = STIME_nowMs();
@@ -317,6 +318,7 @@ static void MOTOR_ALGO_calibStep(void)
 
                 MOTOR_ALGO_calibPublish(CALIB_STATUS_DONE);
                 g_calib.active = FALSE;
+        XCORE_benchSetActive(FALSE);
                 g_calib.phase  = CALIB_IDLE;
                 MOTOR_stopAll();
             }
@@ -335,6 +337,7 @@ static void MOTOR_ALGO_calibStep(void)
     case CALIB_IDLE:
     default:
         g_calib.active = FALSE;
+        XCORE_benchSetActive(FALSE);
         break;
     }
 }
@@ -344,6 +347,7 @@ static void MOTOR_ALGO_calibAbort(void)
     if (g_calib.active)
     {
         g_calib.active = FALSE;
+        XCORE_benchSetActive(FALSE);
         g_calib.phase  = CALIB_IDLE;
         MOTOR_stopAll();
         MOTOR_ALGO_calibPublish(CALIB_STATUS_ABORTED);
@@ -460,6 +464,7 @@ void MOTOR_ALGO_init(void)
     g_servoLogAsked  = FALSE;
 
     g_calib.active       = FALSE;
+        XCORE_benchSetActive(FALSE);
     g_calib.wheel        = 0u;
     g_calib.phase        = CALIB_IDLE;
     g_calib.phaseStartMs = 0u;

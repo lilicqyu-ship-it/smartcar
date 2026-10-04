@@ -434,6 +434,7 @@ static void imu_publish(void)
     XcoreImu imu;
     uint8 i;
 
+    imu.stampMs  = STIME_nowMs();
     imu.alive    = g_alive;
     imu.whoAmI   = g_whoAmI;
     for (i = 0u; i < 3u; i++)

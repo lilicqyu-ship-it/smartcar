@@ -21,6 +21,7 @@ APPLY=0
 # 声明表: contracts/内文件  各仓库副本路径...
 # 各仓库采纳接口后，把它的路径追加到对应行即可纳入校验。
 CHECKS=(
+  "link/diag_wire.h     tc275_car/mw/diag/diag_wire.h"
   "link/proto_frames.h  esp32c6_car/components/c6_proto/proto_frames.h smartcar_remote/main/proto/proto_frames.h"
   "link/proto_frames.c  esp32c6_car/components/c6_proto/proto_frames.c smartcar_remote/main/proto/proto_frames.c"
   # Camera WS 帧头（S3-CAM camera_ws TX ↔ S3 Remote scr_cam RX）；

@@ -27,6 +27,7 @@ enum
 typedef struct
 {
     uint32_t seq, stampMs;
+    uint32_t sampleStampMs; /* STM common clock for diagnostic acquisition */
     uint8_t alive, zones;
     int16_t distanceMm[FUSION_MAX_ZONES];
     uint8_t status[FUSION_MAX_ZONES], targets[FUSION_MAX_ZONES];

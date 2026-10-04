@@ -338,10 +338,10 @@ typedef struct {                 /* 每页 = 头(16B) + 载荷 + CRC32 */
   - 堵转：|v_target|>20% 满速 且 |v_meas|<5% 持续 500 ms → `ERR_STALL` → 安全态（STBY 拉低）；
   - 滑差：左右轮实测速差 > 配置阈值且同目标 → 仅上报 `ERR_SLIP`（不干预，供遥测）；
   - 欠压：`adc_batt` 低于警告阈值 → 目标全局限幅 50%；低于临界 → 受控减速停车 + `ERR_BATT_LOW`（区别于急停的立即刹车）；
-  - **STBY 硬线**：`bsp/stby` 独占控制 TB6612 STBY，任何 `ERR_STALL/ERR_BATT_CRIT/急停/看门狗复位路径` 直接拉低——与软件 PWM 形成双通道断电。
+  - **STBY 硬线**：`bsp/stby` 独占控制 TB6612 STBY，任何 `ERR_STALL/ERR_BATT_CRIT/急停/看门狗复位路径` 直接拉低——与软件 PWM 形成双通道断电。**落地状态（V1.15，2026-10-04）与一处待裁决语义**：STBY 已从"跳线常接板载 3V3"改为 TC275 GPIO 受控（**P22.2 / X1-16 → D24A J4-2**，一根线管四路，真源 [23 §3/§3.2](23-wiring.md) V1.23），控制函数落在 `bsp/motor.c:MOTOR_setEnabled()`（未新开 `bsp/stby` 文件），当前只用于 **① `MOTOR_init` 末步使能（8 根 IN/PWM 已置低、duty=0 才拉高）② 未跑固件/MCU 复位时由高阻 + TB6612 片内 200 kΩ 下拉自然落回 standby**。"**故障/急停路径拉低 STBY"这半仍未接**，原因是与现实现冲突：`rt/motor_algo.c:MOTOR_ALGO_brakeAll()` 是 IN1=IN2=H 的**短接刹车**，STBY 一拉低即退化为高阻滑行、急停距离变长——属安全语义决策，需用户放行后与 `motor_guard` 同批做。另：D24A 把两片 TB6612 的 VCC 接板载 **5 V** ⇒ `VIH(STB)=VCC×0.7=3.5 V`，3.3 V GPIO 在保证门限之下（与原跳线接法同级裕量，非新引入缺陷），spec-clean 需 PMOS 抬到 5 V，本批不做。
 - **失败行为**：目标流 E2E 失效或 150 ms 无更新（继承 demo 看门狗）→ 目标置零减速停车。
 
-> **落地状态（2026-09-27，V1.7）**：**闭环本体已落地**——`rt/servo.c/.h`（每侧 PI：前馈 + Kp + 抗饱和积分限幅 ±30% duty、输出钳位 ±1000 + 死区 0.5%、`ENCODER_getSpeeds` 换为 xcore 编码器快照的 percent×10 域）+ `rt/motor_algo.c` 接入（目标斜坡 → servo → BSP，急停/失联看门狗语义不变，新增 1 Hz `SRV=` 台架行）。与上图的两处**诚实偏差**：① 目标域暂为 percent×10（§11 物理运动学未标定，CPU0 只产百分比），mm/s 仅经 `ENCODER_FULL_SCALE_MM_S` 出现在遥测；② 增益 `Kp=0.8 / Ki=0.01/ms / FF_GAIN=1.0` 是"近似线性被控对象"的**待标定初值**，台架按 `SRV=` 行整定（§15.3）。**逐电机 jog（V1.10 新增，34 §9.3）**：`0x71 MOTOR_JOG {motor, duty}` 经 xcore `Jog` 块进 CPU1，优先级 **急停 > 标定 > jog > servo**（`MOTOR_ALGO_task` 内即此次序），duty 钳 ±500、**受故障锁存门禁、不发心跳**，`jogSeq` 每次刷新续期、**300 ms 无刷新自动归零并 `SERVO_reset` + `MOTOR_stopAll`**（防页面掉线后推杆僵在高位）；jog 是纯开环，只用于台架单轮转向核对。**判向结果回传 + 自动持久化**：标定结束（DONE / ABORT / **BUSY 拒绝且不重启**）由 CPU1 发布 `CalibResult`，CPU0 组 EVT 0x22（含 `saved`）经 xcore 出站队列由 CPU2 发送，DONE 时自动写 DFlash（34 §3/§8.3/§11.2 D1）。**闭环安全次序（硬性门禁）**：首次闭环前必须先执行 §5.1 的 `0x70` 自动判向并核对 `ENCCAL=` 结果——某轮符号错的闭环是**正反馈**（越推越快），判向先于闭环，不是建议。**V1.11 起该门禁由固件强制执行**（34 §13 闭环使能门 `g_closedLoopOk`）：标定记录 `src=0`（首次烧录/校验失败回落/0x74 清记录）时 CPU1 把 `SERVO_update` 的 `measValid` 钳 FALSE，走既有失活兜底（duty=目标、清积分）——"编码器已接线但方向未标定"不再可能闭环跑飞（原点回中电机仍转现象的根治）；0x70 DONE（CPU0 取结果即翻转 RecordLive version，DFlash 物理写是延迟队列）/0x73 REC_SET 自动开门，0x74 关门，翻变各打一行 `SERVO open-loop (record src=0; calibrate via 0x70)` / `SERVO closed-loop enabled`。**未做**：motor_guard 全部保护项（堵转/滑差/欠压/STBY 硬线）、双斜率两参数、产测在线整定与回存。
+> **落地状态（2026-09-27，V1.7）**：**闭环本体已落地**——`rt/servo.c/.h`（每侧 PI：前馈 + Kp + 抗饱和积分限幅 ±30% duty、输出钳位 ±1000 + 死区 0.5%、`ENCODER_getSpeeds` 换为 xcore 编码器快照的 percent×10 域）+ `rt/motor_algo.c` 接入（目标斜坡 → servo → BSP，急停/失联看门狗语义不变，新增 1 Hz `SRV=` 台架行）。与上图的两处**诚实偏差**：① 目标域暂为 percent×10（§11 物理运动学未标定，CPU0 只产百分比），mm/s 仅经 `ENCODER_FULL_SCALE_MM_S` 出现在遥测；② 增益 `Kp=0.8 / Ki=0.01/ms / FF_GAIN=1.0` 是"近似线性被控对象"的**待标定初值**，台架按 `SRV=` 行整定（§15.3）。**逐电机 jog（V1.10 新增，34 §9.3）**：`0x71 MOTOR_JOG {motor, duty}` 经 xcore `Jog` 块进 CPU1，优先级 **急停 > 标定 > jog > servo**（`MOTOR_ALGO_task` 内即此次序），duty 钳 ±500、**受故障锁存门禁、不发心跳**，`jogSeq` 每次刷新续期、**300 ms 无刷新自动归零并 `SERVO_reset` + `MOTOR_stopAll`**（防页面掉线后推杆僵在高位）；jog 是纯开环，只用于台架单轮转向核对。**判向结果回传 + 自动持久化**：标定结束（DONE / ABORT / **BUSY 拒绝且不重启**）由 CPU1 发布 `CalibResult`，CPU0 组 EVT 0x22（含 `saved`）经 xcore 出站队列由 CPU2 发送，DONE 时自动写 DFlash（34 §3/§8.3/§11.2 D1）。**闭环安全次序（硬性门禁）**：首次闭环前必须先执行 §5.1 的 `0x70` 自动判向并核对 `ENCCAL=` 结果——某轮符号错的闭环是**正反馈**（越推越快），判向先于闭环，不是建议。**V1.11 起该门禁由固件强制执行**（34 §13 闭环使能门 `g_closedLoopOk`）：标定记录 `src=0`（首次烧录/校验失败回落/0x74 清记录）时 CPU1 把 `SERVO_update` 的 `measValid` 钳 FALSE，走既有失活兜底（duty=目标、清积分）——"编码器已接线但方向未标定"不再可能闭环跑飞（原点回中电机仍转现象的根治）；0x70 DONE（CPU0 取结果即翻转 RecordLive version，DFlash 物理写是延迟队列）/0x73 REC_SET 自动开门，0x74 关门，翻变各打一行 `SERVO open-loop (record src=0; calibrate via 0x70)` / `SERVO closed-loop enabled`。**未做**：motor_guard 全部保护项（堵转/滑差/欠压；STBY 的"上电使能 + 未跑固件即断电"已随 23 V1.23 落进 `bsp/motor.c`，**故障/急停拉低仍未做**，见上一条）、双斜率两参数、产测在线整定与回存。
 
 ### 5.3 app/mission —— 运行模式状态机（CPU0，替代并扩展 robot.c）
 
@@ -490,7 +490,7 @@ FLAGS: bit0=FRAG(段内后续还有分片)  bit1=FRAG_END(本帧末片)  bit2..7
 
 | 故障 | 检测 | 响应 | 时间 |
 |---|---|---|---|
-| CPU1 挂死 | CPU1 看门狗 | 硬复位（boot 后 POST） | ≤200 ms；复位期间 STBY 由“上电默认拉低”保证电机断电 |
+| CPU1 挂死 | CPU1 看门狗 | 硬复位（boot 后 POST） | ≤200 ms；复位期间 STBY 由 GPIO 高阻 + TB6612 片内 200 kΩ 下拉落回 standby（V1.15，见下方口径注） |
 | CPU0 挂死 | CPU0 看门狗（SM 看门狗） | 安全复位 | ≤200 ms |
 | CPU2 挂死 | CPU2 看门狗 | 复位 CPU2；LINK 断 → 停车不复位整车 | ≤200 ms |
 | C6 死机/断链 | **唯一判据**：握手寄存器 `SF_ALIVE` 500 ms 不推进（事务失败/魔数错不判死，V1.6） | 目标置零受控停车 | ≤520 ms |
@@ -501,7 +501,8 @@ FLAGS: bit0=FRAG(段内后续还有分片)  bit1=FRAG_END(本帧末片)  bit2..7
 | 5V 掉电/电压跌落 | EVRC brownout + ADC | TC275 复位至安全态；C6 brownout 自保护 | 硬件级 |
 | PFlash 位翻转 | 整 bank CRC（POST）+ 常数段 CRC（RUNST） | 拒绝启动/进入 FAULT | 上电 / 10 s 周期 |
 
-> **V1.8 口径更正（本表前两行；V1.13 再更正）**：CPU0/CPU1 看门狗现已启用，故"硬复位"这条路径在纸面上已经存在（≈**1.4 s**，非 ≤200 ms，见 §7.2；V1.8 曾误写 0.3~0.5 s）——但 V1.13 揭示它**到 tc275_car v1.1.2 才真正闭合**（WDT 到期只发 NMI，此前无复位钩子，到期即假死）。而"复位期间 STBY 上电默认拉低 → 电机断电"这一假设**与实物不符**——D24A 的 STBY 由跳线接板载 3300mil 常使能（[23 §9.3](23-wiring.md)），复位期间 MCU 引脚浮空、TB6612 输入行为未逐项核实。因此**复位是否等于电机断电尚未被证明**，是 §7.2 列出的台架检查项；真正的"许可关闭"要等 STBY 硬线化（§17 未做项）。
+> **V1.8 口径更正（本表前两行；V1.13 再更正）**：CPU0/CPU1 看门狗现已启用，故"硬复位"这条路径在纸面上已经存在（≈**1.4 s**，非 ≤200 ms，见 §7.2；V1.8 曾误写 0.3~0.5 s）——但 V1.13 揭示它**到 tc275_car v1.1.2 才真正闭合**（WDT 到期只发 NMI，此前无复位钩子，到期即假死）。
+> **V1.15 再更正（本表第 1 行的 STBY 假设）**：V1.13 写的"复位期间 STBY 上电默认拉低 → 电机断电**与实物不符**"在当时是对的——D24A 的 STBY 用跳线接板载 3V3 **常使能**，MCU 复位对它没有任何影响。现在 **STBY 已改 GPIO 受控（P22.2/X1-16 → J4-2，[23 §3.2](23-wiring.md) V1.23）**，且 TB6612 的 STBY（连同六根 IN/PWM）**内部都有 200 kΩ 下拉**（datasheet 引脚表），所以：MCU 复位/未烧录 → GPIO 高阻 → 片内下拉把 STBY 拉到 0 → standby、输出关断；即便 STBY 为高，浮空 IN 也被各自拉低，真值表 `L L / PWM=L / STBY=H` = **OFF（高阻）**。**纸面答案自此为"复位期间电机滑行、不会带着最后占空比继续转"**，但两点未结：① **实物尚未改线**（跳线帽未拔 = 常使能照旧，本条结论对旧接线不成立）；② 复位瞬间的实际波形/电机行为仍是 §7.2 台架项，实测记入 51-verification-log。另外本表"堵转 → STBY 安全态"与 §5.2 的"急停直接拉低"仍未接入（会与短接刹车互斥，见 §5.2 落地状态），**故障路径的"许可关闭"仍属 §17/§5.2 未做项**。
 
 ### 7.2 看门狗链（吸收并关闭评估报告 P0-4）
 
@@ -527,7 +528,7 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 
 **超时反应（V1.13，2026-10-03，"看门狗假死"根治）**：TC27x 的硬件事实是 **CPU 看门狗到期只向本核发 NMI（trap class 7），不会自行复位**——iLLD 默认的 NMI 钩子（`IfxCpu_Trap.c:IFX_CFG_CPU_TRAP_NMI_HOOK`）是空宏、直接返回，于是 V1.8 交付的"断喂 → 复位"链**从未真正闭合**：看门狗到期后核被 NMI 打死、复位永远不来，整车冻结而非回安全态（台架 2026-10-03 复现的"假死"）。修复：`Configurations/Ifx_Cfg.h` 定义 `IFX_CFG_CPU_TRAP_NMI_HOOK` → `IfxCpu_triggerSwReset()`（`SCU_SWRSTCON.SWRSTREQ=1`，无密码无 ENDINIT，NMI 上下文唯一安全的复位原语；钩子**不返回**）。NMI 上下文约束：不能打印（`blockingWrite` 等 TX ISR → 死锁）、不能走 xcore（自旋锁可能被被打断的上下文持有 → 死锁），只有寄存器写复位合法。三核 trap 表共用该钩子；实际只有 CPU0/CPU1 的 WDT 被武装，故实践中它就是"喂狗断流 → 整机软复位 → 上电安全态"的终点。**栈溢出钩子与排障手册的"断喂复位"叙事自此才真正成立**（V1.8 时是未闭合的假设）。待台架：拔喂狗复现实测复位窗口。
 
-复位后的安全态由软件默认值保证，不依赖硬件：`MOTOR_init` duty=0 + `MOTOR_ALGO_init` 的 `MOTOR_stopAll()` + 零目标 + 应用层看门狗（CPU1 150 ms 失联 / CPU0 100 ms 心跳）。**台架待验证项**：复位瞬间 TB6612 输入浮空期间电机行为（D24A 的 STBY 由板载 3V3 常使能，23 §9.3），实测结果记入 51-verification-log。
+复位后的安全态由软件默认值保证，不依赖硬件：`MOTOR_init` duty=0 + `MOTOR_ALGO_init` 的 `MOTOR_stopAll()` + 零目标 + 应用层看门狗（CPU1 150 ms 失联 / CPU0 100 ms 心跳）。**V1.15 起还多一层硬件保证**：`MOTOR_init` 把 STBY 拉高是**最后一步**（此前 8 根 IN/PWM 已置低、duty=0），复位/未烧录期间 STBY 由 GPIO 高阻 + 片内 200 kΩ 下拉留在 standby ⇒ 驱动根本没解锁。**台架待验证项**：① **改线后的复位瞬间**实测——高阻期间 STBY 是否真被片内下拉拉低、电机是否只滑行（D24A 原为板载 3V3 常使能，23 §3.2；**改线未做前此项不适用**）；② 改线前后各跑一次"带占空比复位"，对比 §7.1 表第 1 行的纸面结论；实测结果记入 51-verification-log。
 
 窗口值 `REL=0xF800`（`bsp/wdg.h`）按官方示例 `Watchdog_1_KIT_TC275_LK` 的 `0xE000`≈1.3 s **线性换算 ≈1.4 s**（0xF800 > 0xE000；V1.8 曾写"≈0.3~0.5 s"，与自己的换算锚点算术矛盾，V1.13 更正），**尚未台架实测**；实测后按 §7.1 目标收紧至 ≤200 ms——注意下限是 DF0 保存路径（34 §8.3：一次完整擦除窗口关中断不喂狗）的实测时长。调试器挂接时 TriCore OCD 会挂起看门狗，因此启用不影响 flash 调试，仅脱机运行才真复位。
 
@@ -692,7 +693,7 @@ CPU2 看门狗   ←── 泵巡检喂 (条件: RX/TX 环未溢出)
 | `Middleware/protocol.c` | 不再是 LINK 段**容器**真源：SF 编解码落地于 `mw/sf/`（§6.1a），主机单测对象。命令**码表**（`PROTO_CMD_*`，现 `mw/proto/protocol.h`）仍是唯一真源并被 `link.c` 直接复用为 SF 载荷首字节，被取代的只是 UART 时代的 `AA 55` 容器；`mw/proto` 只保留手机 WS 段 v2 帧（§6.1b，在 C6 侧实现） |
 | `Middleware/wifi_at.c` | 现位于 `com/wifi_at.c`。已退出板间链路（**2026-09-26 决策：UART 弃用**，两个 TASKING 配置都定义 `USE_SPI_LINK`，§5.6 末条）；保留为**C6 调试控制台 + G1 失败应急返修 + 产线返工**通道，只在手动删除该符号时才编译；极性翻正为 `USE_WIFI_AT` 的动作仍排在 G1 之后；前端页面字符串迁移至 C6 assets |
 | （新增，无 demo 对应） | 已落地：`com/link.c`（QSPI3 主机事务调度器，§5.6；V1.6 起为单读快照 + ALIVE 判活）、`com/spi_hal_pins.c`（引脚/时钟档/前导模拟）、`mw/sf/sf_frame.c`（SF 编解码，`test/host/test_sf.c` **2948** 断言通过，含 SEQ 越窗重锁 `test_seq_relock` 与 V1.10 的 DPT EVT/记录编解码 3 个用例组）、`mw/sf/sf_telemetry.c`（38 B 遥测 codec，`test/host/test_sf_telemetry.c` 跨侧模式 154 断言、无跨侧 116 项，含编译从机解码器的交叉验证，§6.3）、`rt/servo.c`（闭环速度 PI，§5.2 落地状态注记；motor_algo 自 V1.7 起为任务属主 + 保护钩位）。尚未落地：`com/auth`、`com/fw_stream`（OTA 走 SF TYPE 0x06/0x07，§9）、`rt/motor_guard`（堵转/滑差/欠压/STBY，§5.2）；`rt/encoder` 解码层已落地（原 `Bsp/encoder.c`，判向已可运行时标定 + 0x70 自动判向），§5.1 的量产增量（自检、`ERR_ENC_DEAD` 联动、标定回存 DFlash）仍待做 |
-| `Bsp/motor.c` | 保留，增加 STBY 控制与钳位职责确认 |
+| `Bsp/motor.c` | 保留，增加 STBY 控制与钳位职责确认。**STBY 控制已落地（V1.15）**：`MOTOR_STBY_PORT/PIN`（P22.2 → D24A J4-2，23 §3.2）+ `MOTOR_setEnabled(boolean)` + `MOTOR_init()` 末步使能；**未新开 `bsp/stby` 文件**（单路 GPIO 不值得一个模块，职责归电机 BSP 属主 CPU1），**故障/急停路径调用它仍未做**（§5.2 语义冲突待裁决） |
 | `Bsp/uart.c` / `Bsp/stime.c` | 保留（console 归 diag；时基归 `rt/timebase` 并承担喂狗） |
 | `Cpu0/1/2_Main.c` | 重写为 §3.4 初始化时序（POST → 任务创建 → 看门狗链启动） |
 | FreeRtos/ 仓库膨胀、aws/ SDK | 仓库瘦身（评估报告 P3-1），仅保留 Kernel + Tasking 移植 |
@@ -733,3 +734,9 @@ CPU0 在心跳/故障处理后增加编码器速度与前向 ToF 距离安全包
 ### 2026-10-04：v1.2.1 开发者日志优化
 
 周期日志改为字段名+单位，稳定融合 5 秒、IMU/ToF/车速 10 秒、链路 30 秒；短暂编码器活动不重置伺服日志节流。关键状态变化保留事件，队列溢出可观察。采样、控制和遥测周期保持原值。当前格式和全字段字典见 [38](../30-tc275/38-developer-logging.md)。
+
+### 2026-10-04：TC275-C6 事务协议设计（目标态，尚未实现）
+
+用户确定以 iOS Remote 为出厂检查和验收入口，先冻结两板交互协议。沿用 SPI/SF、驾驶与现有遥测，新增 DIAG 0x53/sub 0x60 和 EVT 0x28/0x29 的版本化事务层；16 B 请求、32 B 以内事件适配现有跨核上限。通过会话隔离、请求 ID 去重、明确 ACK/RESULT、终态缓存与查询、租约、有限采集及数据完整性核对支持 IMU/ToF 和后续扩展。
+
+完整字节布局、ID 登记、iOS-C6 边界、错误码、重试/复位语义、调度预算和验收门禁冻结在 [共享契约](../../../contracts/link/transaction-v1.md)，机器可读登记和黄金向量见 [transaction-v1.json](../../../contracts/link/transaction-v1.json)。这批为设计交付，未改变固件行为或烧录。实现阶段必须同步双端 codec、C6 桥接、iOS 与测试；接口副本一致性不能代替硬件/故障注入验收。

@@ -18,4 +18,11 @@ void MOTOR_brake(MotorId id);
 void MOTOR_stop(MotorId id);
 void MOTOR_stopAll(void);
 
+/* TB6612 STBY (P22.2 -> D24A J4-2), one line for all four channels.
+ * FALSE = standby: outputs high-impedance and IN/PWM ignored (MOTOR_setEnabled
+ * stops every channel first). TRUE = armed: MOTOR_brake/stop take effect.
+ * MOTOR_init arms the driver as its last step, so the channels stay in
+ * standby until CPU1 has run its BSP init. */
+void MOTOR_setEnabled(boolean enabled);
+
 #endif

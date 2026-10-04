@@ -37,6 +37,7 @@
 #include "bsp/uart.h"
 #include "bsp/wdg.h"
 #include "mw/calib/calib_store.h"
+#include "mw/diag/diag_service.h"
 #include "mw/xcore/xcore.h"
 #include "mw/proto/protocol.h"
 #include "mw/app_version.h"
@@ -123,6 +124,7 @@ static void vRobotControlTask(void *pvParameters)
         }
 
         ROBOT_task();
+        DIAG_tick();
 
         /* DPT result mailbox + deferred calibration saves (doc 34 SS8.3).
          * A save masks this core's interrupts for tens of ms; the 10 ms feed
@@ -341,6 +343,7 @@ void core0_main(void)
 
     /* Initialize the robot state machine / motion controller */
     ROBOT_init();
+    DIAG_init();
     FUSION_init(&g_driveFusion);
 
     /* Create the robot control task (10 ms safety + status upload) */

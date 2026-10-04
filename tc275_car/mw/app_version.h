@@ -14,9 +14,9 @@
  */
 
 #define APP_VERSION_MAJOR 1
-#define APP_VERSION_MINOR 2
-#define APP_VERSION_PATCH 4
-#define APP_VERSION_STRING "1.2.4"
+#define APP_VERSION_MINOR 3
+#define APP_VERSION_PATCH 0
+#define APP_VERSION_STRING "1.3.0"
 
 /* 魔术前缀 "APPFW" 使版本串在 elf/hex 里可直接检索 */
 extern const char g_app_version[];

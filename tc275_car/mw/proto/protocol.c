@@ -13,10 +13,13 @@
 #include "mw/calib/calib_store.h"
 #include "mw/xcore/xcore.h"
 #include "mw/app_version.h"
+#include "mw/diag/diag_service.h"
+#include "mw/diag/diag_wire.h"
 
 /* CPU0 only: execute a validated command against the robot controller */
 void PROTO_handleCommand(uint8 cmd, const uint8 *data, uint8 len)
 {
+    DIAG_onCommand(cmd,data,len);
     switch (cmd)
     {
     case PROTO_CMD_STOP:
@@ -117,7 +120,11 @@ void PROTO_handleCommand(uint8 cmd, const uint8 *data, uint8 len)
     case PROTO_CMD_DIAG:
         /* Not a driving command: no heartbeat, no fault gating. The beacon
          * itself is sent by the CPU0 task right after this queue drain. */
-        if ((len >= 1u) && (data[0] == PROTO_DIAG_SUB_VER_REQ))
+        if ((len >= 1u) && (data[0] == DT_SUB))
+        {
+            (void)DIAG_command(data,len);
+        }
+        else if ((len >= 1u) && (data[0] == PROTO_DIAG_SUB_VER_REQ))
         {
             app_ver_request();
         }
