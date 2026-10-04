@@ -96,7 +96,8 @@ static void summary(DT_Record *r,const DT_Job *j,const DT_Input *in)
     t8(r,15u,j?j->verdict:DT_UNASSESSED);
     t16(r,16u,j && j->cache.requestBytes[2]==DT_TOF_REFERENCE?1u:0u);
     DT_put32(b,in->imuErrors); DT_put32(b+4,in->tofErrors); tlv(r,20u,b,8u);
-    t16(r,21u,r->seq);
+    if(r->kind==DT_RESULT) t16(r,21u,r->seq);
+    else if(j && j->state!=DT_RUNNING) t16(r,21u,j->cache.records[0].seq);
     if(j && j->cache.requestBytes[2]==DT_TOF_REFERENCE) {
         uint32_t std=0u; int32_t mean=0;
         if(j->tofValid) {
@@ -125,6 +126,15 @@ static void finish(DT_Engine *s,const DT_Input *in,uint8_t code)
     if(s->active==NO_JOB) return;
     j=&s->jobs[s->active];
     dropStream(j,&s->imuStream); dropStream(j,&s->tofStream);
+    if(code==DT_OK && (j->sensors&1u)) {
+        uint32_t period=1000u/j->hz;
+        uint32_t expected=(j->duration+period-1u)/period;
+        if(j->imuCount<expected) {
+            uint32_t missing=expected-j->imuCount;
+            j->imuCount+=missing; j->drops+=missing*2u;
+            j->nextSeq=(uint16_t)(j->nextSeq+missing);
+        }
+    }
     j->end=in->nowMs;
     j->state=code==DT_OK?DT_COMPLETED:(code==DT_CANCELED?DT_TASK_CANCELED:DT_FAILED);
     if(code==DT_OK && j->drops) { code=DT_OVERFLOW; j->state=DT_FAILED; }
@@ -261,6 +271,9 @@ uint8_t DT_submit(DT_Engine *s,const uint8_t *q,uint8_t len,const DT_Input *in)
             memcpy(j->cache.requestBytes,q,16u); j->state=DT_RUNNING;
             j->start=in->nowMs; j->progressMs=in->nowMs; j->duration=duration;
             j->sensors=sensors; j->hz=hz; j->imuDue=in->nowMs;
+            /* Capture only publications newer than admission: the cached
+             * pre-start frame can belong to the previous fixture/pose. */
+            j->imuSource=in->imuSeq; j->tofSource=in->tof.seq;
             j->imuErrors=in->imuErrors; j->tofErrors=in->tofErrors;
             if(op==DT_TOF_REFERENCE) { j->reference=DT_u16(q+10); j->tolerance=DT_u16(q+12); j->zone=q[15]; }
             record(&r,session,id,j->nextSeq++,DT_ACK,DT_OK,in->nowMs);
@@ -273,6 +286,7 @@ uint8_t DT_submit(DT_Engine *s,const uint8_t *q,uint8_t len,const DT_Input *in)
     } else code=DT_BAD_OPCODE;
     record(&last,session,id,0u,DT_RESULT,code,in->nowMs);
     t8(&last,9u,code==DT_OK?DT_COMPLETED:DT_FAILED);
+    if(code!=DT_OK) t8(&last,15u,DT_INCONCLUSIVE);
     if(code==DT_OK && op==DT_CAPS) {
         uint8_t b[5];
         record(&r,session,id,0u,DT_CAPS_RECORD,DT_OK,in->nowMs);

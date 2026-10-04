@@ -125,24 +125,25 @@ TLV 不可重复；越界/固定 tag 长度错误则整个记录无效。已知�
 | 0x07 | policy_versions:{id:u8,version:u16}[] | CAPS；列表长度必须为 3 的倍数 |
 | 0x08 | granted_config:{imu_hz:u8,tof_hz:u8,duration_ms:u16} | 启动 ACK 必需；不能静默降频/缩时，无法满足时拒绝 |
 | 0x09 | task_state:u8 | STATUS/RESULT 必需；0 idle，1 running，2 completed，3 canceled，4 failed，5 unknown |
-| 0x0A | sensor_health_bits:u16 | STATUS/RESULT 必需；bit0 IMU alive，1 IMU fresh，2 ToF alive，3 ToF fresh |
+| 0x0A | sensor_health_bits:u16 | STATUS/长任务 RESULT 必需；bit0 IMU alive，1 IMU fresh，2 ToF alive，3 ToF fresh |
 | 0x0B | imu_records:u32 | 采集 RESULT 必需，TC275 生成的逻辑记录数，包括未成功入队的记录 |
 | 0x0C | tof_records:u32 | 同上 |
-| 0x0D | dropped_fragments:u32 | RESULT 必需，TC275 已知的出站数据丢片数 |
-| 0x0E | elapsed_ms:u32 | RESULT 必需 |
+| 0x0D | dropped_fragments:u32 | 长任务 RESULT 必需，TC275 已知的出站数据丢片数与缺少的采样槽位对应片数 |
+| 0x0E | elapsed_ms:u32 | 长任务 RESULT 必需 |
 | 0x0F | verdict:u8 | 检查 RESULT 必需；0 未评定，1 通过，2 失败，3 无法判定 |
 | 0x10 | policy_version:u16 | 检查 RESULT 必需；policy_id 随报告记录，不用固件版本代替判据版本 |
 | 0x11 | target_request:u16 | CANCEL/任务查询必需，指向原任务 |
 | 0x12 | imu_source_seq:u32 | STATUS 可选 |
 | 0x13 | tof_source_seq:u32 | STATUS 可选 |
-| 0x14 | driver_errors:{imu:u32,tof:u32} | STATUS/RESULT 必需 |
-| 0x15 | completed_record_seq:u16 | RESULT 必需，终态自身的逻辑序号，用于核对之前记录完整性 |
+| 0x14 | driver_errors:{imu:u32,tof:u32} | STATUS/长任务 RESULT 必需 |
+| 0x15 | completed_record_seq:u16 | 长任务 RESULT 必需，终态自身的逻辑序号；已完成任务 STATUS 可回显原终态序号 |
 | 0x16 | reference:{reference_mm:u16,tolerance_mm:u16,zone:u8,policy_id:u8} | ToF 检查 RESULT 必需 |
 | 0x17 | tof_statistics:{total:u32,valid:u32,mean_mm:i32,std_mm:u32} | ToF 检查 RESULT 必需；显示值取整数，阈值比较不取整 |
 | 0x18 | imu_face:u8 | IMU static RESULT 必需 |
 | 0x19 | imu_info:{expected_who:u8,observed_who:u8,odr_code:u8,xl_fs_code:u8,gy_fs_code:u8,body_axis_calibrated:u8,nominal_publish_ms:u16} | CAPS/STATUS 必需；LSM6DSV16BX 配置码，当前车体轴未标定 |
 
 CAPS 未报告的功能不得调用；健康位表示检测状态，不能直接当作精度合格。
+接纳前拒绝的 RESULT 不代表开始过长任务，只要求关联头、非 OK code、task_state=failed、verdict=inconclusive；不要求采集/统计 TLV。
 future tags 0x1A～0xEF 为统一登记区，0xF0～0xFF 为厂商试验区，不进入量产验收必需字段。
 TC275 v1.3.0：IMU static 只支持 policy_id=0（采集、未评定），非零判据拒绝；CAPS 的 policy 1/version 1 只属于 ToF reference。
 ToF policy 1 要求静止参考板、指定单区域至少 5 个有效帧、有效率至少 80%、均值偏差与总体标准差都不超过请求容差。
@@ -210,6 +211,8 @@ CAPS 与 ACK 必须报告实际受支持组合；不能把理论 SPI 带宽等�
 每个产生的逻辑记录都分配 record_seq，包括后来丢失的记录。C6/iOS 结合序号、分片与 RESULT 计数检查完整性。
 任何缺片、序号缺口、重复内容冲突、生成数与接收数不符，验收报告必须含缺失量与 INCONCLUSIVE。
 终态的已知 drop=0 不等于 iOS 收齐，iOS 仍要核对接收完整性；串口日志节流不影响验收数据流。
+控制优先级可让 RESULT 先于已入队的数据片到达；iOS 须等待至多 500 ms 的重组宽限并核对终态计数，再给出完整性结论，不能收到 RESULT 就立即误判缺片或 PASS。
+TC275 只采集接纳后新发布的样本；IMU 缺少请求频率要求的采样槽位计入丢片与序号缺口，不能把短时冻结解释成完整采集。
 stamp_ms 使用 TC275 时基，32 位回绕用无符号差处理；不与 iPhone 墙钟直接相减。
 跨会话禁止拼接时间轴；iOS 另存接收时间用于通信时延观察。
 

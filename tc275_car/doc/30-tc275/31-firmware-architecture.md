@@ -249,3 +249,7 @@ iLLD ASC 驱动的软件 FIFO 与临界区只在属主核内互斥；两个核�
 **看门狗现状**（2026-09-27 起；**2026-10-03 超时反应闭合**）：**CPU0/CPU1 的 CPU 看门狗已启用**——`bsp/wdg.h` 提供 `WDG_enableCpu()`（改重载值 `REL=0xF800`，≈**1.4 s**；旧稿 0.3~0.5 s 是与换算锚点 0xE000≈1.3 s 矛盾的算术错误）与 `WDG_serviceCpu()`，喂狗点分别为 CPU1 的 1 kHz 环（`rt/motor_algo.c`）与 CPU0 的 robot 任务（10 ms）。**超时反应**：TC27x 的 CPU WDT 到期只发 NMI 不自行复位，`Configurations/Ifx_Cfg.h` 的 `IFX_CFG_CPU_TRAP_NMI_HOOK` → `IfxCpu_triggerSwReset()` 兜底（tc275_car v1.1.2；缺它则到期即整车假死，`21 §7.2` V1.13）。SM(安全)与 CPU2 看门狗**有意保持关闭**，理由见 SDD §7.2 现状表。
 两条约束：① 新增核/新循环必须自带喂狗点，否则该核在窗口内被复位；② 喂狗只能用 `bsp/wdg.h` 的 clear+set 平衡对——`ENDINIT` 是饱和计数器，纯 set 的 `IfxScuWdt_serviceCpuWatchdog()` 累加 16 次后 ENDINIT 再也解不开，Flash/DFlash 解锁会静默卡死（SDD §18 C8）。
 调试期挂 TASKING 调试器时 TriCore OCD 会挂起看门狗，故启用不影响 flash 调试；脱机跑才是真复位。
+
+## 2026-10-04：v1.3.0 诊断事务
+
+CPU0 的 10 ms 控制任务增加 `DIAG_tick`，由纯 C99 `app/diag_txn` 管理会话、请求去重、有限采集、终态及分片。CPU2 分派新 DIAG sub=0x60 到独立 4 深请求队列，诊断数据走独立 8 深事件队列；既有驾驶命令/急停路径不变。CPU2 每 5 ms 发布链路状态、先排控制回包再排传感器片。CPU1 IMU 与 CPU0 ToF 发布 STM 采样时间供诊断，不跨核访问硬件。实现、检查判据和未完成的 C6/iOS 边界见 [39](39-diagnostic-transactions.md)。

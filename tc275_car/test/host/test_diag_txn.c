@@ -125,7 +125,7 @@ static void test_capture_and_query(void)
     reset(); capture(2,3,200); memcpy(saved,q,16);
     for(now=110;now<=320;now+=10) tick(now);
     drain(); CHECK(lastCode(2)==DT_OK); CHECK(s.active==255);
-    CHECK(tag(2,DT_RESULT,11)==10 && tag(2,DT_RESULT,12)==3 && tag(2,DT_RESULT,13)==0);
+    CHECK(tag(2,DT_RESULT,11)==10 && tag(2,DT_RESULT,12)==2 && tag(2,DT_RESULT,13)==0);
     CHECK(body(2,DT_IMU_RECORD,b)==20); CHECK(DT_u16(b+4)==1000 && (int32_t)DT_u32(b+6)==-123456);
     CHECK(body(2,DT_TOF_RECORD,b)==68 && b[0]==4 && b[1]==16 && DT_u16(b+4)==1000);
     CHECK(DT_submit(&s,saved,16,&in)); drain(); CHECK(lastCode(2)==DT_OK && s.active==255);
@@ -145,6 +145,11 @@ static void test_failures(void)
     blockControl=0; drain();
     blockData=1; tick(120); blockData=0; drain();
     CHECK(lastCode(2)==DT_OVERFLOW && tag(2,DT_RESULT,13)>0);
+    /* A short frozen source is still within the 100 ms health window, but
+     * cannot falsely complete a full-rate 100 ms IMU acquisition. */
+    reset(); capture(2,1,100); tick(110); in.nowMs=200;
+    DT_tick(&s,&in,send,NULL); drain();
+    CHECK(lastCode(2)==DT_OVERFLOW && tag(2,DT_RESULT,11)==5 && tag(2,DT_RESULT,13)==8);
     reset(); capture(2,1,500); in.nowMs=210; DT_tick(&s,&in,send,NULL); drain(); CHECK(lastCode(2)==DT_STALE);
     reset(); capture(2,2,500); in.linkUp=0; DT_tick(&s,&in,send,NULL); drain(); CHECK(lastCode(2)==DT_LINK_LOST && !s.session);
     reset(); capture(2,1,2000); tick(1100); drain(); CHECK(lastCode(2)==DT_SESSION_LOST && !s.session);

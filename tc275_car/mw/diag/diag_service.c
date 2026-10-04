@@ -67,6 +67,7 @@ void DIAG_tick(void)
 void DIAG_onCommand(uint8 cmd,const uint8 *data,uint8 len)
 {
     boolean changes=FALSE;
+    if(g_diag.active==255u) return; /* ordinary driving pays no snapshot cost */
     if(cmd>=PROTO_CMD_FORWARD && cmd<=PROTO_CMD_ROTATE_RIGHT) changes=TRUE;
     if(cmd==PROTO_CMD_SET_SPEED && len && data &&
         (data[0] || (len>=2u && data[1]))) changes=TRUE;
