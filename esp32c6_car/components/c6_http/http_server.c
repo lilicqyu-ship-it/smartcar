@@ -46,6 +46,8 @@ typedef struct
 } http_ctx_t;
 
 static http_ctx_t s_http;
+/* Registered before http_start by the composition root; no link dependency. */
+static bool (*s_link_up_provider)(void);
 
 /* httpd_ws_send_frame_async() writes the WS header and the payload with two
  * separate send() calls and takes no lock.  WS frames leave this box from
@@ -108,7 +110,10 @@ static esp_err_t send_json(httpd_req_t *req, int code, const char *json)
     return httpd_resp_send(req, json, HTTPD_RESP_USE_STRLEN);
 }
 
-/* extract ?token= or X-Session-Token header */
+/* extract ?token= or X-Session-Token header.  Both callers are conditional
+ * (ws_pre_handshake's #else, ota_upload_handler's #if !C6_OTA_NO_AUTH), so a
+ * bench build with C6_BENCH_CTRL + C6_OTA_NO_AUTH would leave this dead. */
+#if !CONFIG_C6_BENCH_CTRL || !CONFIG_C6_OTA_NO_AUTH
 static bool get_request_token(httpd_req_t *req, char *out, size_t cap)
 {
     char query[128];
@@ -131,6 +136,7 @@ static bool get_request_token(httpd_req_t *req, char *out, size_t cap)
     out[cap - 1u] = '\0';                /* httpd fills cap without NUL */
     return found;
 }
+#endif
 
 static const char *content_type_for(const char *name)
 {
@@ -259,7 +265,7 @@ static esp_err_t ws_send_hello(int fd)
                    "\"pair\":\"%s\",\"ctrl\":%s}",
                    (ws_sess_ctrl_fd() == fd) ? "ctrl" : "spectator",
                    s_http.fw_ver,
-                   "down",                        /* bridge refreshes via link_state frames */
+                   (s_link_up_provider != NULL && s_link_up_provider()) ? "up" : "down",
                    (ps == PAIR_OPEN) ? "open" : ((ps == PAIR_CLAIMED) ? "claimed" : "idle"),
                    (ws_sess_ctrl_fd() >= 0) ? "true" : "false");
     return ws_send_ctl(fd, json);
@@ -647,7 +653,7 @@ static const char DIAG_PAGE[] =
 "const r=await fetch(\"/api/diag\",{cache:\"no-store\",signal:c.signal});\n"
 "clearTimeout(t);\n"
 "if(!r.ok){throw new Error(\"HTTP \"+r.status)}\n"
-"const j=await r.json();const L=j.link||{};const I=j.imu;\n"
+"const j=await r.json();const L=j.link||{};\n"
 "let h=\"\";\n"
 "h+=\"<h2>系统</h2><table>\";\n"
 "h+=row(\"固件版本\",p(j,\"ver\"));\n"
@@ -667,34 +673,6 @@ static const char DIAG_PAGE[] =
 "h+=row(\"CRC / 格式错误\",tag((L.crc_err||0)+\" / \"+(L.fmt_err||0),ok0((L.crc_err||0)+(L.fmt_err||0))));\n"
 "h+=row(\"发送拥塞\",(L.busy||0)+( (L.busy||0)>0?' <span class=\"warn\">偏高</span>':\"\"));\n"
 "h+=row(\"配对状态\",p(j,\"pair\"));\n"
-"h+=\"</table>\";\n"
-"h+=\"<h2>IMU 三轴加速度（ADXL345）</h2>\";\n"
-"if(I&&I.ok){\n"
-" const mg=I.mg||[0,0,0];\n"
-" const g=function(v){return ((+v)/1000).toFixed(3)};\n"
-" const pitch=Math.atan2(mg[0],mg[2])*180/Math.PI;\n"
-" const roll=Math.atan2(mg[1],mg[2])*180/Math.PI;\n"
-" const snap=function(a){return Math.abs(a)<2?0:a};\n"
-" const P=snap(pitch),R=snap(roll);\n"
-" const parts=[];\n"
-" if(Math.abs(P)>=0.5)parts.push((P>0?\"前倾 \":\"后仰 \")+Math.abs(P).toFixed(1)+\"°\");\n"
-" if(Math.abs(R)>=0.5)parts.push((R>0?\"左倾 \":\"右倾 \")+Math.abs(R).toFixed(1)+\"°\");\n"
-" if(!parts.length)parts.push(\"水平放置\");\n"
-" const mag=+I.mag||0;\n"
-" const magCls=(mag>=950&&mag<=1050)?\"ok\":\"warn\";\n"
-" h+=row(\"三轴读数\",'<span class=\"big\">'+g(mg[0])+\" / \"+g(mg[1])+\" / \"+g(mg[2])+'</span> g');\n"
-" h+=row(\"姿态\",'<span class=\"big\">'+parts.join(\" · \")+\"</span>\");\n"
-" h+=row(\"合幅值\",tag(g(mag)+\" g\",magCls)+(magCls===\"ok\"?\"（≈1 g 静止正常）\":\"（偏离 1 g，正在运动？）\"));\n"
-" h+=row(\"采样\",((I.upd||0))+\" 次\"+((I.err||0)>0?' · <span class=\"bad\">异常 '+I.err+\"</span>\":\"\"));\n"
-"}else if(I&&I.probe){\n"
-" h+=row(\"传感器\",'<span class=\"bad\">未检测到</span>');\n"
-" h+=row(\"总线探测值\",'<span class=\"big\">'+I.probe+\"</span>（要求 0xe5）\");\n"
-" h+='<div class=\"hint\">判读：0xff = MISO 悬空或 SDO 未接 · 稳定的错误值 = 时钟/接线错位 · 数值跳动 = 接触不良。<br>核对接线：CS→GPIO7 · SCL→GPIO10 · SDA→GPIO11 · SDO→GPIO6 · VCC→3V3 · GND</div>';\n"
-"}else{\n"
-" h+=row(\"传感器\",'<span class=\"dim\">未启动（imu:null）</span>');\n"
-"}\n"
-"h+=\"<table>\";\n"
-"h+=row(\"重力方向参考\",\"三轴为板上坐标系；倾角方向依模块安装方向而定\");\n"
 "h+=\"</table>\";\n"
 "h+=\"<h2>Web 服务</h2><table>\";\n"
 "h+=row(\"在线客户端\",(j.cli||0)+\" 个\");\n"
@@ -1019,6 +997,11 @@ void http_register_upload_sink(const char *uri, const http_upload_sink_t *s)
         s_http.sink_tc = *s;
         s_http.have_tc = true;
     }
+}
+
+void http_set_link_provider(bool (*fn)(void))
+{
+    s_link_up_provider = fn;
 }
 
 void http_set_diag_provider(http_diag_fn fn)

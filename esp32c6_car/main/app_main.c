@@ -14,7 +14,6 @@
 #include "freertos/task.h"
 
 #include "app_state.h"
-#include "adxl345.h"
 #include "bridge.h"
 #include "factory.h"
 #include "http_server.h"
@@ -140,13 +139,6 @@ void app_main(void)
         ESP_LOGE(TAG, "bridge start failed");
     }
 
-    /* 3b. local bench sensor, diag-only (never on the v2/SF wire): absent
-     * chip just logs a warning and /diag reports "imu":null */
-    if (adxl345_start() != ESP_OK)
-    {
-        ESP_LOGW(TAG, "adxl345 not started - imu diag disabled");
-    }
-
     /* 4. network (softAP + captive DNS + mDNS) */
     factory_ap_ssid(&fact, ssid, sizeof(ssid));
     net_cfg_t ncfg = {
@@ -176,7 +168,8 @@ void app_main(void)
         led_pattern(LED_PAT_FAULT);
     }
 
-    /* 5. web plane */
+    /* 5. web plane: hello queries actual LINK state, never a down placeholder. */
+    http_set_link_provider(link_is_up);
     if (http_start() == ESP_OK)
     {
         (void)http_register_upload_sink("/ota/c6", &SINK_SELF);

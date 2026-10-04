@@ -47,6 +47,8 @@ void http_broadcast_ctl(const char *json);
 void http_on_session_change(void (*cb)(void));           /* -> LINK_STATE   */
 void http_register_upload_sink(const char *uri, const http_upload_sink_t *s);
 void http_set_diag_provider(http_diag_fn fn);
+/* Register before http_start; hello must report the current vehicle state. */
+void http_set_link_provider(bool (*fn)(void));
 /* {"t":"tcver"} text from any WS client -> cb (bridge_request_tcver). */
 void http_on_tcver_request(void (*cb)(void));
 

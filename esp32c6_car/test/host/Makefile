@@ -1,6 +1,7 @@
 # Host-side unit tests (G1 gate, coding plan 5): build with any C99 compiler.
 #   make -C test/host        (or: cc -Icomponents/c6_proto ... directly)
 CC      ?= gcc
+PYTHON  ?= python3
 CFLAGS  ?= -std=c99 -O1 -g -Wall -Wextra -Wno-unused-parameter
 INC     := -I../../components/c6_proto -I../../components/c6_ota -I../../components/c6_sf
 
@@ -29,6 +30,8 @@ run-%: %
 	./$<
 
 check: $(TESTS) $(RUN_TARGETS)
+	$(PYTHON) test_ws_hello.py
+	$(PYTHON) test_diag.py
 
 clean:
 	rm -f $(TESTS)

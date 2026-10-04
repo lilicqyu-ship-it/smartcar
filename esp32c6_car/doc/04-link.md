@@ -93,3 +93,8 @@ void        link_set_tap(void (*tap)(const proto_frame_t *f));  /* v2 帧镜像 
 | L-8 | TWDT 订阅（01 文档缺口 S-2 修复） | ✅ | link_task 已 add/reset |
 | L-9 | 22 §8 G1 波形兼容 | 🔴 | 需 TC275 侧最小验证代码 + 台架 |
 | L-10 | G3 时延 / G4 安全语义 / G5 提速 / G6 老化 | 🔴 | 待台架（13 号文档清单） |
+
+
+## 2026-10-04 · v1.1.2：链路可观测性
+
+c6_link 单独启用 INFO，链路上下线保留事件，稳定统计降为每 10 秒一组 SPI_LINK；不改变控制/遥测时序或引脚。字段：host_events_total=任务处理的主机活动数（ISR 通知可能合并）；up=链路存活；rx_frames_total=成功映射到 v2 的接收帧数；tx_enqueued_total=本地成功入队帧数，尚不等于实际发出；crc_errors_total/format_errors_total/sequence_errors_total=本次启动累计错误；rdbuf_total/wrbuf_total=共享寄存器读/写 ISR 数；rddma_done_total/wrdma_done_total=从机发送/接收 DMA 完成 ISR 数；tx_in_flight=发送 DMA 当前仍由驱动持有。ESP 日志前缀时间为启动毫秒，累计错误需看增量，不能拿 TC275 在 C6 烧录期间累积的旧错误当新的实时故障。

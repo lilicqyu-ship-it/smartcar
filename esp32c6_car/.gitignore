@@ -27,6 +27,7 @@ build/
 # Host-test build products (make -C test/host): bare binaries + macOS dSYM
 /test/host/test_*
 !/test/host/test_*.c
+!/test/host/test_*.py
 
 # ESP-IDF specific build outputs
 *.bin

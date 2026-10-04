@@ -124,3 +124,12 @@ python tools/serial_sniff.py COM14 30
 pong/err、`?token=` 握手、`/api/pair`、DRIVE 0x50@30 Hz 心跳、TELEMETRY 0x41
 全部按 02/06/07 文档既有口径对接）。待两仓同台架联调：配对 → DRIVE/遥测 →
 失联停机 → 手机与 S3 双端控制权切换（单 CTRL 互斥）。
+
+
+## 2026-10-04 · v1.1.2：握手与本地传感器移除回归
+
+- `test/host/test_ws_hello.py`：生产函数的在线广播先于 hello、真实离线、未注册提供者三种路径通过；模拟 iOS applyHello 后在线状态不被固定 down 覆盖。
+- `test/host/test_diag.py`：生产 /api/diag 格式化函数输出可解析 JSON，link 状态保留、imu 字段删除；嵌入诊断页 JS 通过 Node --check，ADXL345 UI 删除。两个脚本已纳入 host Makefile check。
+- C6 SF 编解码原有 8 项测试（含 1000 万字节随机输入）全部通过；沿用原 Makefile 警告策略，旧测试第 272 行存在带符号比较编译警告。
+- ESP-IDF 6.1 完整构建通过，v1.1.2 应用大小 0x10da90；ADXL345 组件和生成 Kconfig 引用均移除。
+- v1.1.1 中间镜像曾采集双串口 45 秒：C6 up=1，收发持续增长、crc/format/sequence 计数全 0；TC275 ready，主机 SPI 超时/硬件/事务错误全 0；TC275 旧 CRC/SEQ/队列满是跨 C6 烧录保留的累计值，不能称为当前新错。最终 v1.1.2 实机结果另附。

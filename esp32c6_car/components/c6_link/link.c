@@ -681,7 +681,8 @@ static void link_task(void *arg)
 {
     link_ctx_t *L = &s_link;
     spi_slave_hd_data_t *done;
-    TickType_t last_1s = xTaskGetTickCount();
+    TickType_t last_diag = xTaskGetTickCount();
+    TickType_t last_health = last_diag;
 
     (void)arg;
     (void)esp_task_wdt_add(NULL);
@@ -787,9 +788,9 @@ static void link_task(void *arg)
         }
 
         /* poll-cadence estimate for the telemetry rtt display */
-        if ((xTaskGetTickCount() - last_1s) >= pdMS_TO_TICKS(1000))
+        if ((xTaskGetTickCount() - last_health) >= pdMS_TO_TICKS(1000))
         {
-            last_1s = xTaskGetTickCount();
+            last_health = xTaskGetTickCount();
             L->health.frames_tx = L->frames_tx_total;
             if (L->up_reported)
             {
@@ -797,6 +798,11 @@ static void link_task(void *arg)
                     (uint16_t)((L->last_host_ev1 - L->last_host_ev2) & 0xFFFFu);
             }
 
+        }
+
+        if ((xTaskGetTickCount() - last_diag) >= pdMS_TO_TICKS(10000))
+        {
+            last_diag = xTaskGetTickCount();
             /* Bench bring-up diagnostic (tc275_car LINKDBG counterpart): the single
              * most useful fact is whether the master's SPI transactions reach
              * this slave at all. host_ev counts every CS-driven callback
@@ -804,8 +810,9 @@ static void link_task(void *arg)
              * (CS/SCLK/MOSI/GND) is not getting here - nothing on this side can
              * fix that. up=1 means the 500 ms watchdog is fed. */
             ESP_LOGI(TAG,
-                     "SPIDBG host_ev=%lu up=%d rx=%lu tx=%lu crc=%lu fmt=%lu seq=%lu "
-                     "| isr rdbuf=%lu wrbuf=%lu rddma=%lu wrdma=%lu tx_infl=%d",
+                     "[SPI_LINK] host_events_total=%lu up=%d rx_frames_total=%lu tx_enqueued_total=%lu "
+                     "crc_errors_total=%lu format_errors_total=%lu sequence_errors_total=%lu "
+                     "rdbuf_total=%lu wrbuf_total=%lu rddma_done_total=%lu wrdma_done_total=%lu tx_in_flight=%d",
                      (unsigned long)L->host_ev_total,
                      (int)L->up_reported,
                      (unsigned long)L->health.frames_rx,
@@ -966,6 +973,8 @@ esp_err_t link_init(void)
         .name     = "sf_alive",
     };
 
+    /* Link transitions and a 10-second summary stay visible in WARN-default builds. */
+    esp_log_level_set(TAG, ESP_LOG_INFO);
     memset(&s_link, 0, sizeof(s_link));
     sf_parser_init(&s_link.parser);
     s_link.health.state    = LINK_DOWN;

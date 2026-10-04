@@ -79,3 +79,10 @@
 [0.1.2]: https://github.com/lilicqyu-ship-it/esp32c6_car/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/lilicqyu-ship-it/esp32c6_car/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/lilicqyu-ship-it/esp32c6_car/releases/tag/v0.1.0
+
+
+## 1.1.2 — 2026-10-04
+
+- hello 报告实时 TC275 链路状态，修复 iOS 被固定 down 覆盖的假离线。
+- 删除 C6 本地 ADXL345 驱动、配置、启动与诊断内容；使用 TC275 IMU。
+- C6 SPI 统计明确字段含义并改为 10 秒周期，WARN 默认构建仍能观察链路事件。

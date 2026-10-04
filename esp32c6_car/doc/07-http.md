@@ -116,3 +116,10 @@ assets.bin: "ASSETS"|ver=1|rsv|count u16|total u32|pad2
 | H-9 | 会话表主机单测 | 🔴 | ws_sessions 依赖 FreeRTOS 互斥，未做主机测（LLDD §9 列项） |
 | H-11 | **真机首测缺陷修复**：启动时序竞态 | ✅ | bridge_task 先于 httpd 启动即查询客户端集合 → 对 NULL 互斥句柄 assert panic（`xQueueSemaphoreTake` 死循环重启，真机 2026-09-26 首烧复现）。修复：ws_sessions 全部访问器对未初始化状态容错返回安全值；同类隐患一并收敛（bridge_post_cmd/link_send 的队列未创建守卫） |
 | H-10 | 慢客户端降级观测指标暴露 | 🔴 | slow/dead 计数未进 /api/diag |
+
+
+## 2026-10-04 · v1.1.2：iOS 假离线修复
+
+旧顺序为 ws_sess_set_ws → session-change 广播 tc:on → 固定 hello.tc=down，iOS 的 applyHello 会把刚收到的在线状态覆盖为离线。现在由 app_main 在 http_start 前注册 http_set_link_provider(link_is_up)，hello 实时查询并输出 up/down。HTTP 组件仍通过回调获取状态，不直接依赖 c6_link；未注册回调时输出 down。首次连接与连接既有在线链路均不依赖未来状态边沿。主机 test/host/test_ws_hello.py 抽取生产握手函数，覆盖在线广播先于 hello、真实离线、未注册提供者与 iOS 最终状态。
+
+应用户要求删除 C6 本地 ADXL345，包括组件、启动、Kconfig、/api/diag 的 imu 对象与 /diag 的三轴卡片。TC275 的六轴 IMU 与驾驶融合不受影响。
