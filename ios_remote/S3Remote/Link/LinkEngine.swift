@@ -33,6 +33,10 @@ public final class LinkEngine: NSObject, URLSessionWebSocketDelegate {
     public static let reconnectDelayS: UInt64 = 3
     public static let controlRateHz: Int = 30
 
+    /// Pairing HTTP goes through here so tests can stub it (URLProtocol mock);
+    /// production uses the default shared-style configuration.
+    var pairSession: URLSession = URLSession(configuration: .default)
+
     public init(app: AppState) {
         self.app = app
         super.init()
@@ -200,12 +204,12 @@ public final class LinkEngine: NSObject, URLSessionWebSocketDelegate {
         req.httpMethod = "POST"
         req.timeoutInterval = 8
         do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
+            let (data, resp) = try await pairSession.data(for: req)
             let status = (resp as? HTTPURLResponse)?.statusCode ?? 0
             if status == 200,
                let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
                let token = obj["token"] as? String, !token.isEmpty {
-                app.settings.token = token
+                app.setToken(token) // runtime + Keychain, never the settings blob
                 app.log("INFO", "配对成功 — token 已保存，重连以取得控制权")
                 connect()
                 return "配对成功，已保存 token 并重连"

@@ -1,132 +1,9 @@
 /*
- * Components.swift — cockpit instrument set shared across pages:
- * speed gauge, radial battery meter, RTT chip/sparkline, link pulse.
+ * Components.swift — cockpit instrument set shared across pages: radial
+ * battery meter, signal bars, RTT sparkline, logo gauge, horn button.
  */
 
 import SwiftUI
-
-// ---- speed gauge (Home hero) --------------------------------------------------
-
-struct SpeedGaugeView: View {
-    @Environment(AppState.self) private var app
-
-    static let maxKmh = 2.2 // full scale: 600 mm/s ≈ 2.16 km/h
-
-    var body: some View {
-        ZStack {
-            Canvas { ctx, size in
-                drawDial(ctx: ctx, size: size)
-            }
-            VStack(spacing: 0) {
-                Text(speedText)
-                    .font(Theme.display(54, weight: .heavy))
-                    .foregroundStyle(speedColor)
-                    .contentTransition(.numericText())
-                    .monospacedDigit()
-                Text("km/h")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(Theme.dim)
-                stateChip
-                    .padding(.top, 6)
-            }
-        }
-    }
-
-    private var speedKmh: Double {
-        guard app.teleFresh, let t = app.telemetry else { return 0 }
-        let mmS = (Int(t.vMeasL) + Int(t.vMeasR)) / 2
-        return abs(Double(mmS) * 3.6 / 1000.0)
-    }
-
-    private var speedText: String {
-        guard app.teleFresh, app.telemetry != nil else { return "--" }
-        return String(format: "%.2f", speedKmh)
-    }
-
-    private var speedColor: Color {
-        if !app.teleFresh { return Theme.dim }
-        if app.stopLatched || app.emergActive { return Theme.stopRed }
-        return Theme.text
-    }
-
-    private var stateChip: some View {
-        let (text, color): (String, Color) = {
-            if app.emergActive { return ("E-STOP", Theme.crit) }
-            if app.stopLatched { return ("STOPPED", Theme.stopRed) }
-            if app.connState != .connected { return ("OFFLINE", Theme.dim) }
-            if !app.ctrlRole { return ("NO CTRL", Theme.warn) }
-            if speedKmh < 0.02 { return ("READY", Theme.accent) }
-            return (outV < 0 ? "REV" : "FWD", Theme.info)
-        }()
-        return Text(text)
-            .font(Theme.mono(12, weight: .bold))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.14), in: Capsule())
-            .overlay(Capsule().strokeBorder(color.opacity(0.55), lineWidth: 1))
-            .foregroundStyle(color)
-            .glow(color, radius: 4, opacity: 0.25)
-    }
-
-    private var outV: Int16 { app.outV }
-
-    private func drawDial(ctx: GraphicsContext, size: CGSize) {
-        let center = CGPoint(x: size.width / 2, y: size.height * 0.52)
-        let radius = min(size.width, size.height) * 0.44
-        let start = Angle.degrees(140)
-        let sweep = Angle.degrees(260)
-        let fraction = min(speedKmh / Self.maxKmh, 1)
-
-        var track = Path()
-        track.addArc(center: center, radius: radius,
-                     startAngle: start, endAngle: start + sweep, clockwise: false)
-        ctx.stroke(track, with: .color(Theme.panelStroke.opacity(0.55)), lineWidth: 13)
-
-        if fraction > 0.005 {
-            // GraphicsContext.Shading has no angular gradient: stroke the arc
-            // in small segments, lerping accent → warn → crit along the sweep
-            let segments = 44
-            let style = StrokeStyle(lineWidth: 13, lineCap: .round)
-            for i in 0..<segments {
-                let f0 = fraction * Double(i) / Double(segments)
-                let f1 = fraction * Double(i + 1) / Double(segments)
-                var seg = Path()
-                seg.addArc(center: center, radius: radius,
-                           startAngle: start + sweep * f0,
-                           endAngle: start + sweep * f1, clockwise: false)
-                ctx.stroke(seg, with: .color(dialColor(f0)), style: style)
-            }
-            // needle tip dot at the arc head
-            let head = start + sweep * fraction
-            let tip = CGPoint(x: center.x + CGFloat(radius * CGFloat(cos(head.radians))),
-                              y: center.y + CGFloat(radius * CGFloat(sin(head.radians))))
-            ctx.fill(Path(ellipseIn: CGRect(x: tip.x - 5, y: tip.y - 5, width: 10, height: 10)),
-                     with: .color(.white))
-        }
-
-        // ticks: 9 across the sweep, last fifth in crit (SPORT territory)
-        for i in 0...8 {
-            let angle = start + sweep * (Double(i) / 8)
-            let c = CGFloat(cos(angle.radians))
-            let s = CGFloat(sin(angle.radians))
-            let inner = CGPoint(x: center.x + (radius - 22) * c,
-                                y: center.y + (radius - 22) * s)
-            let outer = CGPoint(x: center.x + (radius - 13) * c,
-                                y: center.y + (radius - 13) * s)
-            var tick = Path()
-            tick.move(to: inner)
-            tick.addLine(to: outer)
-            ctx.stroke(tick, with: .color(i >= 7 ? Theme.crit.opacity(0.8) : Theme.dim.opacity(0.7)),
-                       lineWidth: 2)
-        }
-    }
-
-    /// Three-band dial coloring: accent (cruise) → warn (approaching limit)
-    /// → crit (SPORT territory).
-    private func dialColor(_ f: Double) -> Color {
-        f < 0.55 ? Theme.accent : f < 0.8 ? Theme.warn : Theme.crit
-    }
-}
 
 // ---- radial battery meter -------------------------------------------------------
 
@@ -150,60 +27,24 @@ struct BatteryRadialView: View {
                     .font(Theme.display(size * 0.24))
                     .foregroundStyle(Theme.text)
                     .monospacedDigit()
+                    .contentTransition(.numericText())
                 Text(label)
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(Theme.dim)
             }
         }
         .frame(width: size, height: size)
+        .animation(.easeInOut(duration: 0.3), value: pct)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("电量")
+        .accessibilityValue(pct.map { "\($0)%" } ?? "无数据")
     }
 }
 
 // ---- link pulse + chips ----------------------------------------------------------
 
-/// Pulsing link dot: animates while connected, steady red when offline.
-struct LinkDotView: View {
-    @Environment(AppState.self) private var app
-
-    var body: some View {
-        TimelineView(.animation(minimumInterval: 0.05)) { timeline in
-            let phase = app.connState == .connected
-                ? 0.5 + 0.5 * sin(timeline.date.timeIntervalSinceReferenceDate * 2 * .pi / 1.6)
-                : 0
-            Circle()
-                .fill(connColor)
-                .frame(width: 11, height: 11)
-                .glow(connColor, radius: 6, opacity: 0.25 + 0.55 * phase)
-        }
-    }
-
-    private var connColor: Color {
-        switch app.connState {
-        case .connected: app.teleFresh ? Theme.accent : Theme.warn
-        case .connecting: Theme.warn
-        case .disconnected: Theme.crit
-        }
-    }
-}
-
-struct RTTChip: View {
-    let ms: Int
-
-    var body: some View {
-        Text("\(ms) ms")
-            .font(Theme.mono(12))
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.14), in: Capsule())
-            .foregroundStyle(color)
-    }
-
-    private var color: Color {
-        ms <= 0 ? Theme.dim : ms <= 60 ? Theme.accent : ms <= 120 ? Theme.warn : Theme.crit
-    }
-}
-
-// ---- signal strength bars -----------------------------------------------------
+// (LinkDotView and RTTChip removed in v1.3 — dead code; the live link chip
+// lives in HomeView's StatusDeck and DiagView's stats panel.)
 
 /// 4 ascending bars (0 = offline). Colors follow the S3 remote's quality
 /// grading: ≥3 green, 2 amber, ≤1 red.
@@ -221,6 +62,9 @@ struct SignalBarsView: View {
             }
         }
         .animation(.easeOut(duration: 0.2), value: bars)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("信号强度")
+        .accessibilityValue("\(bars) 格")
     }
 
     private var color: Color {
@@ -246,5 +90,104 @@ struct RTTSparkline: View {
             ctx.stroke(path, with: .color(Theme.accent), style: StrokeStyle(lineWidth: 2, lineCap: .round))
             ctx.stroke(path, with: .color(Theme.accent.opacity(0.18)), style: StrokeStyle(lineWidth: 6))
         }
+        .accessibilityLabel("往返时延走势图")
+        .accessibilityValue(history.last.map { "当前 \($0) 毫秒" } ?? "暂无采样")
+    }
+}
+
+// ---- logo gauge (iOS home-screen battery ring style) ----------------------------
+
+/// Concentric arc rings around the app mark — outer ring = battery %, inner
+/// ring = signal quality, in the style of the iOS home-screen battery widget.
+/// Display-only: uses the debounced battery display value and the composite
+/// signal bars; alarms/colors elsewhere keep using raw telemetry.
+struct LogoGaugeView: View {
+    @Environment(AppState.self) private var app
+
+    private let ringWidth: CGFloat = 5
+    private let innerPadding: CGFloat = 8.5
+
+    private var batteryFraction: Double {
+        min(max(Double(app.batteryDisplayPct ?? 0) / 100, 0), 1)
+    }
+
+    private var signalFraction: Double {
+        min(max(Double(app.signalBars) / 4, 0), 1)
+    }
+
+    var body: some View {
+        ZStack {
+            ring(padding: 0, fraction: batteryFraction, color: batteryColor)
+            ring(padding: innerPadding, fraction: signalFraction, color: signalColor)
+            centerMark
+        }
+        .frame(width: 66, height: 66)
+        .animation(.easeInOut(duration: 0.4), value: batteryFraction)
+        .animation(.easeInOut(duration: 0.4), value: signalFraction)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("电量 \(app.batteryDisplayPct.map(String.init) ?? "--")%,信号 \(app.signalBars) 格")
+    }
+
+    /// Track + value arc, filling clockwise from 12 o'clock.
+    private func ring(padding p: CGFloat, fraction: Double, color: Color) -> some View {
+        ZStack {
+            Circle()
+                .stroke(Theme.dim.opacity(0.20), lineWidth: ringWidth)
+                .padding(p)
+            Circle()
+                .trim(from: 0, to: fraction)
+                .stroke(color, style: StrokeStyle(lineWidth: ringWidth, lineCap: .round))
+                .padding(p)
+                .rotationEffect(.degrees(-90))
+        }
+    }
+
+    private var centerMark: some View {
+        Image(systemName: "steeringwheel")
+            .font(.system(size: 21, weight: .light))
+            .foregroundStyle(Theme.accent)
+            .frame(width: 38, height: 38)
+            .background(Theme.panel, in: Circle())
+            .overlay(Circle().strokeBorder(Theme.panelStroke, lineWidth: 1))
+    }
+
+    /// Same grading as the C6 page's raw battery pill: green >20 %, amber
+    /// ≤20 %, red ≤10 %.
+    private var batteryColor: Color {
+        let pct = app.batteryDisplayPct ?? 100
+        if pct <= 10 { return Theme.crit }
+        if pct <= 20 { return Theme.warn }
+        return Theme.live
+    }
+
+    /// Same grading as SignalBarsView: ≥3 accent, 2 amber, 1 red, 0 dim.
+    private var signalColor: Color {
+        switch app.signalBars {
+        case 3...: return Theme.accent
+        case 2: return Theme.warn
+        case 1: return Theme.crit
+        default: return Theme.dim
+        }
+    }
+}
+
+// ---- horn (synthesized locally, needs the sound toggle on) ----------------------
+
+struct HornButton: View {
+    @Environment(AppState.self) private var app
+
+    var body: some View {
+        Button {
+            app.hornPressed()
+        } label: {
+            Image(systemName: "speaker.wave.3.fill")
+                .font(.system(size: 15, weight: .bold))
+                .frame(width: 40, height: 40)
+                .background(.white.opacity(0.09), in: Circle())
+                .foregroundStyle(.white)
+        }.buttonStyle(.plain)
+            .disabled(!app.ctrlRole)
+            .opacity(app.ctrlRole ? 1 : 0.5)
+            .accessibilityLabel("喇叭")
     }
 }

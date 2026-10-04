@@ -43,7 +43,35 @@ public func Panel<Content: View>(@ViewBuilder content: () -> Content) -> some Vi
 }
 public extension View {
     func panel() -> some View { modifier(PanelModifier()) }
-    func glow(_ color: Color, radius: CGFloat = 8, opacity: Double = 0.6) -> some View { self }
+    /// Two-layer shadow halo (tight core + wide falloff) — the "instrument
+    /// glow" of the cockpit design language. Extracted helper keeps the
+    /// parameters unit-testable (GlowModifierTests guards against another
+    /// identity-function regression).
+    func glow(_ color: Color, radius: CGFloat = 8, opacity: Double = 0.6) -> some View {
+        modifier(GlowModifier(color: color, radius: radius, opacity: opacity))
+    }
+}
+
+public struct GlowModifier: ViewModifier {
+    public let color: Color
+    public let radius: CGFloat
+    public let opacity: Double
+
+    public init(color: Color, radius: CGFloat, opacity: Double) {
+        self.color = color
+        self.radius = radius
+        self.opacity = opacity
+    }
+
+    public static func shadows(color: Color, radius: CGFloat, opacity: Double) -> [(radius: CGFloat, spread: CGFloat)] {
+        [(radius: radius, spread: 0.85), (radius: radius * 2.4, spread: 0.35)]
+    }
+
+    public func body(content: Content) -> some View {
+        content
+            .shadow(color: color.opacity(opacity * 0.85), radius: radius)
+            .shadow(color: color.opacity(opacity * 0.35), radius: radius * 2.4)
+    }
 }
 public struct Page<Content: View>: View {
     private let content: Content

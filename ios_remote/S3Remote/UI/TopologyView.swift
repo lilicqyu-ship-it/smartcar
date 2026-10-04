@@ -133,35 +133,50 @@ struct TopologyView: View {
         .overlay(Capsule().strokeBorder(app.tcUp ? Theme.accent.opacity(0.35) : Theme.panelStroke.opacity(0.6), lineWidth: 1))
     }
 
-    /// 视觉平面（s3-gateway）v1 未接入：虚线占位，接通后此处换正式节点
+    /// 视觉平面（s3-gateway :81）：相机开启时显示实时接入状态，否则虚线占位
     private var gatewayStub: some View {
-        HStack(spacing: 10) {
+        let live = app.settings.cameraEnabled && app.camera.state == .live
+        let (chip, chipColor): (String, Color) = {
+            guard app.settings.cameraEnabled else { return ("OFF", Theme.dim) }
+            switch app.camera.state {
+            case .idle: return ("OFF", Theme.dim)
+            case .connecting: return ("CONNECTING", Theme.warn)
+            case .live: return ("LIVE", Theme.live)
+            case .busy: return ("BUSY", Theme.warn)
+            case .failed: return ("ERROR", Theme.crit)
+            }
+        }()
+        return HStack(spacing: 10) {
             Image(systemName: "camera.on.rectangle")
                 .font(.subheadline)
-                .foregroundStyle(Theme.dim.opacity(0.7))
+                .foregroundStyle(live ? Theme.accent : Theme.dim.opacity(0.7))
             VStack(alignment: .leading, spacing: 1) {
                 Text("s3-gateway · 视觉网关")
                     .font(.footnote.weight(.semibold))
-                    .foregroundStyle(Theme.dim)
-                Text("Camera WS :81 — 相机面未接入（v1 控制面）")
+                    .foregroundStyle(live ? Theme.text : Theme.dim)
+                Text(app.settings.cameraEnabled
+                     ? "MJPEG :81/stream · 驾驶页实时画面"
+                     : "Camera WS :81 — 相机面未开启（设置里可开）")
                     .font(.caption2)
                     .foregroundStyle(Theme.dim.opacity(0.75))
             }
             Spacer()
-            Text("IDLE")
+            Text(chip)
                 .font(Theme.mono(11, weight: .bold))
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background(Theme.dim.opacity(0.12), in: Capsule())
-                .foregroundStyle(Theme.dim)
+                .background(chipColor.opacity(0.12), in: Capsule())
+                .foregroundStyle(chipColor)
         }
         .padding(12)
         .background(Theme.panel.opacity(0.4), in: RoundedRectangle(cornerRadius: 16))
         .overlay(
             RoundedRectangle(cornerRadius: 16)
-                .strokeBorder(Theme.panelStroke.opacity(0.55), style: StrokeStyle(lineWidth: 1.2, dash: [5, 4])))
+                .strokeBorder(live ? Theme.accent.opacity(0.45) : Theme.panelStroke.opacity(0.55),
+                              style: StrokeStyle(lineWidth: 1.2, dash: live ? [] : [5, 4])))
         .padding(.top, 10)
         .padding(.leading, 28)
+        .accessibilityElement(children: .combine)
     }
 
     // ---- derived ----------------------------------------------------------------

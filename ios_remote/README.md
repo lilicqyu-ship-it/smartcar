@@ -21,12 +21,19 @@ C6 ──SPI/SF帧── TC275 ── 车辆
 - 摇杆：上/下对应前进/后退，左/右对应转向；离开驾驶页或失去控制权时归零。
 - 停止：轻点锁存停车，长按 1.2 秒触发急停；支持 VoiceOver 停车和急停操作。
 - 车辆：遥测过期后隐藏旧读数；电池告警仍由实际遥测驱动。
-- 配对凭证：使用安全输入框，网关地址支持 IP 或主机名。
+- 配对凭证：token 持久化在 Keychain（v1.3 起不再写入 UserDefaults），
+  网关地址支持 IP 或主机名。
+- Logo 仪表环：驾驶页头部双圆弧围绕标志——外圈电量、内圈信号
+  （iOS 主屏电池小组件风格），档位配色与全 App 信号/电量语义一致。
+- 相机：驾驶页实时画面卡（s3-gateway MJPEG），单查看者礼让，
+  离开驾驶页/退后台自动让位；拓扑页网关节点实时点亮。
+- 玩法：特技动作一键执行，体感驾驶开启后摇杆让位，STOP/急停随时中止一切。
 
 ![新版驾驶页](doc/ui-home-redesign.png)
 ![整车拓扑页](doc/ui-topology.png)
 
-开发参数：`--tab 0..4` 指定初始页，`--no-alert` 抑制告警覆盖层（用于截图/联调）。
+开发参数：`--tab 0..5` 指定初始页，`--no-alert` 抑制告警覆盖层，
+`--no-onboard` 跳过首启引导（用于截图/联调）。
 截图为模拟器未连接状态，不代表实车联调结果。
 
 ## 功能对照（固件模块 → iOS 实现）
@@ -40,24 +47,59 @@ C6 ──SPI/SF帧── TC275 ── 车辆
 | `scr_ctrl.c` 30 Hz 控制 | `S3Remote/Control/DriveController.swift` | 闸门（连接+CTRL）、ECO/NORMAL/SPORT 50/80/100 % 限幅、满行程 v=600 mm/s / ω=300 °/s、零位心跳、STOP 单击锁存、长按 1.2 s 急停 0x32 + 双锁存、RELEASE 后保持停止、控制权丢失冻结 |
 | `safety_watch` | `S3Remote/Control/SafetyMonitor.swift` | 失联 1.2 s 去抖全屏告警 + 恢复事件、故障码、低电 20 %/临界 10 % + 5 % 回差 |
 | 遥测丢包统计（spec 28） | `S3Remote/Control/TelemetryLossCounter.swift` | seq 缺口 Δ∈(1,1000) 记 Δ−1，loss ‰ |
-| 电池显示防抖（C6 cee1189） | `S3Remote/Control/BatteryDisplayFilter.swift` | 电压：5 点中值 + 500 ms EMA + ≤2 Hz 显示闸 + 20 mV 下降迟滞；电量：5 点中值 + 持续 1.5 s 下降确认；会话内只降不升、重连不解除、零电压视为未就绪；告警/颜色仍用真实遥测 |
+| 电池显示防抖（C6 cee1189） | `S3Remote/Control/BatteryDisplayFilter.swift` | 电压：5 点中值 + 500 ms EMA + ≤2 Hz 显示闸 + 20 mV 下降/50 mV 上升双向迟滞；电量：5 点中值 + 持续 1.5 s 下降确认 + 持续 10 s ≥+2 % 回升确认（充电后步进回 100 %）；遥测 uptime 回退（整车重启，即充电断电重开）时双平面重置重播种；重连不解除、零电压视为未就绪；告警/颜色仍用真实遥测 |
+| 车速表 EMA 平滑（C6 renderSpeed） | `S3Remote/Control/SpeedDisplayFilter.swift` | 驾驶页大字：dt 感知 EMA（τ=150 ms）+ 首帧/断流 >400 ms/进出静止（<30 mm/s）吸附，1 位小数、静止读 0.0；轨迹/纪录/安全仍用原始遥测 |
+| 相机面（s3-gateway :81） | `S3Remote/Camera/CameraClient.swift` + `UI/CameraView.swift` | MJPEG `GET :81/stream`（multipart 按 Content-Length 切帧）；单查看者礼让、4 s 短超时 + 0.8→4 s 退避重连、2 s 帧停滞自愈；503"被占用"态；设置独立开关/地址 |
+| 配对凭证 | `S3Remote/Security/TokenStore.swift` | token 存 Keychain（GenericPassword）；首启从 v1.2 UserDefaults blob 自动迁移并剔除；运行时经 `AppState.setToken` 双层同步 |
 | 拓扑/芯片版本 | `S3Remote/UI/TopologyView.swift` + AppState `tcAppVer/tcSblVer` | tcver 信标（{"t":"tcver","app","sbl"}）、hello ver、遥测 fw_ver/hw_rev/link_rtt/link_err——零固件改动；s3-gateway 相机面为虚线占位（v1 控制面） |
 | 信号强度 | `S3Remote/Control/LinkQuality.swift` + UI `SignalBarsView` | 两级：网关在 hello 带可选 `rssi` 字段或周期发 `{"t":"rssi","dbm":N}` 时显示真实 dBm（分档与 S3 遥控器 Kconfig 同源：−60/−67/−75/−85）；否则用 RTT+遥测丢包合成 4 格预估（UI 标注"预估 · x"）。状态舱与诊断页常驻显示 |
 | `app_state.c` | `S3Remote/Model/AppState.swift` | UI 单一事实源、600 ms 遥测过期（"--"）、事件环形日志、快照式发布 |
 | LVGL P1/P2/P4/P5/P9 | `S3Remote/UI/*.swift` | Home（摇杆/大速度/STOP）、Vehicle、Diag（统计+配对+事件日志）、Settings、全屏告警覆盖层（急停 RELEASE / 失联自动清除 / 其余 ACK） |
+| —（App 侧玩法，零固件改动） | `Control/StuntSequencer.swift` 等 | 详见下方「玩法功能」 |
+
+## 玩法功能（v1.2.0，全部纯 App 侧实现）
+
+- **特技动作库**（`Control/StuntSequencer.swift` + 玩法页）：8 个预设动作
+  （原地左/右旋、8 字巡航、S 形绕桩、弹射起步、漂移甩尾、舞蹈串烧、往返冲刺），
+  关键帧线性插值经 30 Hz 控制流走摇杆同一条 DRIVE 通道——模式限幅、STOP、
+  急停、失联、退后台全部即时中止；再次点击执行中的卡片也可中止。
+- **体感驾驶**（`Control/TiltDriver.swift` + `Motion/MotionSource.swift`）：
+  CoreMotion 重力矢量映射，前倾=油门、左右倾斜=转向；死区 + expo 曲线 +
+  灵敏度可调 + 一键水平校准；驾驶页气泡姿态指示，开启后摇杆让位，STOP 锁存
+  时体感条上有"继续"恢复入口。
+- **实时轨迹**（`Control/OdometryTracker.swift`）：由左右轮实测速度做差速
+  航位推算（ω=(vR−vL)/轮距），Canvas 实时绘制、最近段高亮、点位上限 1500
+  自动抽稀、遥测断流 >2 s 自动重画；轮距（mm）设置可调。
+- **竞速与纪录**（`Control/RecordsTracker.swift`）：圈速秒表（开始/打圈/结束/
+  重置 + 最近圈列表）与纪录墙（极速/单程最远/最快圈速），UserDefaults 持久化。
+- **音效包**（`Audio/SoundEngine.swift`）：AVAudioEngine 实时合成引擎嗡鸣
+  （音高随实际输出速度）、双音喇叭、特技启动音；ambient 会话尊重静音键，
+  设置默认关闭。
+- **摇杆转向修复**：`JoystickInput` 此前右推给出 w>0，而固件混控约定
+  w>0 为左转（C6 Web 页 joyW=−dx 同源）——实际驾驶中推右会左转；已修正
+  并补回归测试。
 
 ## 页面
 
-- **驾驶**：状态栏（连接/角色/TC/电量/RTT）、大速度、虚拟摇杆（死区可配、回弹）、
-  T/S 与"实际发出"值、模式限幅、STOP（单击停止锁存 / 长按 1.2 s 急停，带进度提示）。
-- **车辆**：电池 SOC/电压、左右目标/实测速度、本次/总里程、任务状态、故障码、
-  运行时间、C6/TC275 固件版本。
+- **驾驶**：状态栏（连接/角色/TC/电量/RTT）、实时画面卡（相机开启时）、
+  大速度、虚拟摇杆（死区可配、回弹）、T/S 与"实际发出"值、模式限幅、
+  体感驾驶开关（气泡姿态指示 + 校准 + 继续入口）、
+  喇叭（音效开启时显示）、STOP（单击停止锁存 / 长按 1.2 s 急停，带进度提示）。
+- **玩法**：特技动作网格（执行中显示进度、再点中止）、实时轨迹 Canvas
+  （自动缩放/最近段高亮/快照分享/清除）、圈速挑战（秒表 + 打圈 + 最佳圈标冠）、
+  纪录墙（极速/单程最远/最快圈速，可清空）。
+- **车辆**：电池 SOC/电压、左右目标/实测速度、本次/总里程、任务状态、故障码
+  （中文描述）、运行时间、C6/TC275 固件版本。
 - **拓扑**：整车网络拓扑（iPhone → Wi-Fi/WS proto v2 → C6 → SPI/SF 帧 → TC275，
-  外设芯片与 s3-gateway 视觉网关虚线占位），链路状态实时点亮（WS/TV 通道、
-  两级 RTT、误码）；**芯片版本清单**：本 App / C6 固件（hello ver）/
+  外设芯片），链路状态实时点亮；s3-gateway 相机节点随开关/连接状态点亮
+  （LIVE/CONNECTING/BUSY）；**芯片版本清单**：本 App / C6 固件（hello ver）/
   TC275 App（tcver/遥测 fw_ver）/ TC275 SBL（tcver）/ 硬件 rev。
-- **诊断**：TX/RX 帧率、遥测丢包 ‰、RTT last/min/max、配对按钮与结果、事件日志。
-- **设置**：网关地址（默认 192.168.4.1）、token、摇杆死区、默认模式、应用并重连。
+- **连接**：TX/RX 帧率、遥测丢包 ‰、RTT last/min/max、配对按钮与结果、
+  事件日志（可一键分享/复制导出）。
+- **设置**：网关地址（默认 192.168.4.1）、token、摇杆死区、默认模式、
+  音效开关、轨迹轮距、体感灵敏度、相机开关与地址、新手引导重看、应用并重连。
+- **首启引导**：三步 onboarding（加 Wi-Fi → 长按配对键 → PAIR 取控），
+  可跳过、可从设置重看。
 
 ## 构建与运行
 
@@ -111,12 +153,18 @@ Swift 文件放进 `S3Remote/` 或 `S3RemoteTests/` 目录即自动入编。
 
 ## 已知限制
 
-- **相机视频面未做**：固件 `scr_cam`（连 s3-gateway 的 JPEG-over-WS）属独立
-  视频平面，v1 只做控制面；后续可加 `ASSEMBLE` 帧重组 + MJPEG 式解码渲染。
+- **相机面为 MJPEG 直连**：走 `:81/stream`（真机验证路径）；WS `:81/ws/camera`
+  的逐帧 SEQ/丢帧统计与主动控档位（REMOTE/WEB_PREVIEW）为二期，待网关 WS
+  路径真机验证闭环。相机地址默认跟随控制网关，独立 softAP 部署时在设置里单独填。
 - **信号强度为预估**：iOS 公开 API 拿不到 Wi-Fi RSSI，App 用 RTT + 遥测丢包
   合成 4 格信号条（标注"预估"）；若 C6 在 hello 中附加 `"rssi":<dBm>` 字段或
   周期广播 `{"t":"rssi","dbm":N}`（softAP 侧 `esp_wifi_ap_get_sta_list()` 一行
   即可取到），App 自动切换为真实 dBm 显示，无需改动 App。
-- token 存 UserDefaults（开发口径），上架建议迁 Keychain。
-- App 退后台 WebSocket 即断，回前台由看门狗自动重连；驾驶请保持前台。
+- token 持久化已迁 Keychain（v1.3）；Keychain 在卸载重装后可能保留旧 token，
+  用「重置配对」清理。
+- App 退后台 WebSocket 即断，回前台由看门狗自动重连；驾驶请保持前台
+  （退后台会自动中止特技/体感/相机并静音）。
 - 限幅比/死区/电池阈值为台架默认值，与固件同源（Kconfig 默认），**须实车标定**。
+- 轨迹为轮速航位推算（dead reckoning）：轮距默认 150 mm 需按实车微调，
+  打滑/非对称地面会累积漂移，仅供玩法可视化、不用于导航。
+- 体感方向基于竖屏握持假设（前倾=前进）；姿态异常时先点"校准"。

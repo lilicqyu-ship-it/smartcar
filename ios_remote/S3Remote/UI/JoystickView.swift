@@ -64,10 +64,15 @@ struct JoystickView: View {
             .offset(knob)
     }
 
+    /// Zeroes the axes on disable/disappear — but only emits the callback when
+    /// there was actual input to clear: a state flip with the stick already at
+    /// rest (e.g. a stunt disabling the joystick) must not reach the app as a
+    /// phantom move.
     private func reset() {
+        let hadInput = dragging || knob != .zero
         knob = .zero
         dragging = false
-        onChange(0, 0)
+        if hadInput { onChange(0, 0) }
     }
 
     private var drag: some Gesture {

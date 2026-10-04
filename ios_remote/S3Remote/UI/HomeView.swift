@@ -14,16 +14,17 @@ struct HomeView: View {
                             Text("每一程，尽在掌握").font(.system(size: 25, weight: .bold))
                             Text("连接你的车，探索下一程。").font(.caption).foregroundStyle(Theme.dim)
                         }.frame(maxWidth: .infinity, alignment: .leading)
-                        Image(systemName: "steeringwheel")
-                            .font(.system(size: 29, weight: .light))
-                            .frame(width: 54, height: 54)
-                            .background(Theme.panel, in: Circle())
+                        LogoGaugeView()
                     }
                     StatusDeck()
+                    if app.settings.cameraEnabled {
+                        CameraCard()
+                    }
                     drivingCard
                     ModeSelector()
+                    TiltBar()
                     if !app.ctrlRole {
-                        Button { selection = app.connState == .connected ? 2 : 3 } label: {
+                        Button { selection = app.connState == .connected ? Tab.vehicle.rawValue : Tab.link.rawValue } label: {
                             HStack(spacing: 12) {
                                 Image(systemName: "link")
                                 VStack(alignment: .leading, spacing: 4) {
@@ -36,8 +37,8 @@ struct HomeView: View {
                                 .background(Theme.panel, in: RoundedRectangle(cornerRadius: 20))
                         }.buttonStyle(.plain)
                     }
-                }.padding(.horizontal, 20).padding(.top, 8).padding(.bottom, 16)
-                    .frame(maxWidth: 620)
+                }.padding(20)
+                    .frame(maxWidth: 680)
                     .frame(maxWidth: .infinity)
             }
             .safeAreaInset(edge: .bottom, spacing: 0) {
@@ -55,19 +56,24 @@ struct HomeView: View {
                     Text("实时车速").font(.caption).foregroundStyle(.white.opacity(0.65))
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Text(speedText).font(Theme.display(40)).monospacedDigit()
+                            .contentTransition(.numericText())
+                            .animation(.easeInOut(duration: 0.3), value: speedText)
                         Text("km/h").font(Theme.mono(12)).foregroundStyle(.white.opacity(0.6))
                     }
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 8) {
+                    if app.settings.soundEnabled {
+                        HornButton()
+                    }
                     Text(app.stopLatched ? "已驻停" : app.ctrlRole ? "操控就绪" : app.connState == .connected ? "只读观察" : "等待连接")
                         .font(.caption.bold()).padding(.horizontal, 12).padding(.vertical, 7)
                         .background(.white.opacity(0.09), in: Capsule())
-                    Text(app.connState == .connected && !app.tcUp ? "车控未就绪" : "松手自动回中").font(.caption2).foregroundStyle(.white.opacity(0.55))
+                    Text(driveHint).font(.caption2).foregroundStyle(.white.opacity(0.55))
                 }
             }
             JoystickView(deadzone: app.settings.deadzone,
-                         enabled: app.ctrlRole && !app.emergActive,
+                         enabled: app.ctrlRole && !app.emergActive && !app.tiltEnabled && !app.sequencer.active,
                          onTouch: { app.joystickTouch() },
                          onChange: { v, w in app.joystickMoved(v: v, w: w) })
             HStack {
@@ -86,9 +92,19 @@ struct HomeView: View {
             .background(Theme.ink, in: RoundedRectangle(cornerRadius: 30))
     }
 
+    private var driveHint: String {
+        if app.connState == .connected && !app.tcUp { return "车控未就绪" }
+        if app.sequencer.active { return "特技执行中 · STOP 可中止" }
+        if app.tiltEnabled { return "体感驾驶中 · 倾斜手机操控" }
+        return "松手自动回中"
+    }
+
+    /// Smoothed display speed (C6 renderSpeed port): dt-aware EMA in
+    /// AppState, shown with one 0.1 km/h digit; below ~0.1 km/h reads 0.0.
     private var speedText: String {
-        guard app.teleFresh, let t = app.telemetry else { return "—" }
-        return String(format: "%.2f", abs(Double(Int(t.vMeasL) + Int(t.vMeasR)) / 2 * 0.0036))
+        guard app.teleFresh else { return "—" }
+        if abs(app.displaySpeedMmS) < SpeedDisplayFilter.stopMmS { return "0.0" }
+        return String(format: "%.1f", abs(app.displaySpeedMmS) * 0.0036)
     }
     private func driveValue(_ title: String, value: Double) -> some View {
         VStack(spacing: 4) {
@@ -142,6 +158,86 @@ struct ModeSelector: View {
             }.padding(5).background(Theme.bgLift, in: RoundedRectangle(cornerRadius: 20))
                 .disabled(!app.ctrlRole)
         }
+    }
+}
+
+/// Tilt-steering switch row: toggle + bubble-level indicator + calibration.
+struct TiltBar: View {
+    @Environment(AppState.self) private var app
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Button {
+                Haptics.selection()
+                app.setTiltEnabled(!app.tiltEnabled)
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "move.3d")
+                        .font(.system(size: 16, weight: .bold))
+                        .foregroundStyle(app.tiltEnabled ? .white : Theme.accent)
+                        .frame(width: 34, height: 34)
+                        .background(app.tiltEnabled ? Theme.accent : Theme.accent.opacity(0.10),
+                                    in: RoundedRectangle(cornerRadius: 10))
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("体感驾驶").font(.subheadline.bold()).foregroundStyle(Theme.text)
+                        Text(app.tiltEnabled ? "前倾加速 · 左右倾斜转向" : "像握方向盘一样开车")
+                            .font(.caption2).foregroundStyle(Theme.dim)
+                    }
+                    Spacer(minLength: 4)
+                    Text(app.tiltEnabled ? "ON" : "OFF")
+                        .font(Theme.mono(11)).tracking(1)
+                        .foregroundStyle(app.tiltEnabled ? .white : Theme.dim)
+                        .padding(.horizontal, 10).padding(.vertical, 6)
+                        .background(app.tiltEnabled ? Theme.accent : Theme.bgLift, in: Capsule())
+                }.padding(10)
+                    .background(Theme.panel, in: RoundedRectangle(cornerRadius: 18))
+                    .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(Theme.panelStroke, lineWidth: 1))
+            }.buttonStyle(.plain)
+                .disabled(!app.ctrlRole)
+                .opacity(app.ctrlRole ? 1 : 0.55)
+
+            if app.tiltEnabled {
+                bubbleLevel
+                Button {
+                    Haptics.light()
+                    app.calibrateTilt()
+                } label: {
+                    Text("校准").font(.caption.bold())
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(Theme.bgLift, in: Capsule())
+                }.buttonStyle(.plain)
+                if app.stopLatched && !app.emergActive {
+                    // joystick is inert while tilt drives — give the STOP
+                    // latch a touch target here
+                    Button {
+                        Haptics.medium()
+                        app.joystickTouch()
+                    } label: {
+                        Label("继续", systemImage: "hand.tap.fill")
+                            .font(.caption.bold())
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .background(Theme.accent, in: Capsule())
+                            .foregroundStyle(.white)
+                    }.buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// Bubble level: dot shows the current tilt (right/down = tilted).
+    private var bubbleLevel: some View {
+        Circle()
+            .strokeBorder(Theme.panelStroke, lineWidth: 1.5)
+            .background(Theme.panel, in: Circle())
+            .frame(width: 42, height: 42)
+            .overlay {
+                Circle()
+                    .fill(app.tiltAxes.v == 0 && app.tiltAxes.w == 0 ? Theme.accent : Theme.warn)
+                    .frame(width: 11, height: 11)
+                    .offset(x: CGFloat((app.gravity?.x ?? 0) * 15),
+                            y: CGFloat((app.gravity?.z ?? 0) * 15))
+            }
+            .accessibilityLabel("姿态指示")
     }
 }
 

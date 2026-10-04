@@ -1,15 +1,22 @@
 /*
  * BatteryDisplayFilter.swift — port of the C6 control-page battery display
- * debounce (esp32c6_car assets_src/app.js, commit cee1189 "中值+平滑+迟滞锁存"):
+ * debounce (esp32c6_car assets_src/app.js, commit cee1189 "中值+平滑+迟滞锁存")
+ * extended with charge recovery:
  *
  *   voltage : 5-point median + 500 ms time-constant EMA + ≤2 Hz display gate
- *             + 20 mV downward hysteresis — within one session the shown value
- *             only holds or falls; WS reconnects do not reset it, a fresh app
- *             launch re-initializes from the first valid sample
+ *             + 20 mV downward / 50 mV upward hysteresis — the shown value
+ *             follows sustained falls AND sustained rises (charging), WS
+ *             reconnects do not reset it, a fresh app launch re-initializes
+ *             from the first valid sample
  *   percent : 5-point median + 1.5 s sustained-drop confirmation (a single
- *             noisy 1 % dip never latches); likewise holds-or-falls; a >1 s
- *             sample gap clears the pending candidate but keeps the shown
- *             value; 0 % is a legal value when the voltage is valid
+ *             noisy 1 % dip never latches) + 10 s sustained-rise confirmation
+ *             at ≥+2 % (charging walks the display back up to 100 %); a >1 s
+ *             sample gap clears pending candidates but keeps the shown value;
+ *             0 % is a legal value when the voltage is valid
+ *   reboot  : a meaningful uptime regression means the vehicle restarted
+ *             (the typical power-off-charge-power-on cycle) — both planes
+ *             reset and re-seed from the current frame, so the display snaps
+ *             to the truth instead of staying latched below it
  *
  * Display layer ONLY: alarms (SafetyMonitor) and colors keep using the real
  * telemetry values, exactly like the C6 page.
@@ -22,8 +29,13 @@ public struct BatteryDisplayFilter: Sendable {
     public static let displayIntervalMs: Double = 500 // ≤2 updates/s
     public static let tauMs: Double = 500             // EMA time constant
     public static let deadbandMv = 20                 // downward hysteresis
+    public static let riseDeadbandMv = 50             // upward hysteresis (charging)
     public static let percentConfirmMs: Double = 1500 // sustained lower median
+    public static let percentRiseHysteresis = 2       // % above shown to arm a rise
+    public static let percentRiseConfirmMs: Double = 10_000 // charging is minutes-slow
     public static let percentGapResetMs: Double = 1000
+    /// uptime regression beyond this = vehicle restart (not jitter).
+    public static let rebootToleranceMs: UInt32 = 2_000
 
     // voltage plane
     private var vSamples: [Int] = []
@@ -35,9 +47,13 @@ public struct BatteryDisplayFilter: Sendable {
     // percent plane
     private var pSamples: [Int] = []
     private var shownPct: Int?
-    private var candidatePct: Int?
-    private var candidateSince: Double = 0
+    private var dropPct: Int?
+    private var dropSince: Double = 0
+    private var risePct: Int?
+    private var riseSince: Double = 0
     private var pSampleTs: Double?
+
+    private var lastUptimeMs: UInt32?
 
     public init() {}
 
@@ -48,8 +64,29 @@ public struct BatteryDisplayFilter: Sendable {
     /// means "keep showing the previous value" (the DOM keeps its text in C6).
     /// Samples with `mv <= 0` are not-ready and never initialize either plane;
     /// `pct` outside 0...100 is ignored (0 % stays valid with valid voltage).
-    public mutating func apply(pct: Int, mv: Int, nowMs: Double) -> (mv: Int?, pct: Int?) {
-        (voltage(mv, nowMs: nowMs), percent(pct, mv: mv, nowMs: nowMs))
+    /// A `uptimeMs` regression beyond the tolerance resets both planes.
+    public mutating func apply(pct: Int, mv: Int, uptimeMs: UInt32, nowMs: Double) -> (mv: Int?, pct: Int?) {
+        if let last = lastUptimeMs, uptimeMs > 0,
+           uptimeMs + Self.rebootToleranceMs < last {
+            reset()
+        }
+        lastUptimeMs = uptimeMs
+        return (voltage(mv, nowMs: nowMs), percent(pct, mv: mv, nowMs: nowMs))
+    }
+
+    /// Fresh vehicle session: forget every latch, the next valid sample
+    /// re-seeds the display (first-display paths are immediate).
+    public mutating func reset() {
+        vSamples.removeAll()
+        filteredMv = nil
+        shownMv = nil
+        sampleTs = nil
+        displayTs = 0
+        pSamples.removeAll()
+        shownPct = nil
+        dropPct = nil
+        risePct = nil
+        pSampleTs = nil
     }
 
     private mutating func voltage(_ mv: Int, nowMs: Double) -> Int? {
@@ -70,7 +107,9 @@ public struct BatteryDisplayFilter: Sendable {
         displayTs = nowMs
 
         let roundedMv = Int(((filteredMv ?? 0) / 10).rounded()) * 10 // Math.round(x/10)*10
-        if shownMv == nil || roundedMv <= shownMv! - Self.deadbandMv {
+        if shownMv == nil
+            || roundedMv <= shownMv! - Self.deadbandMv      // discharge
+            || roundedMv >= shownMv! + Self.riseDeadbandMv { // charging recovery
             shownMv = roundedMv
             return roundedMv
         }
@@ -79,11 +118,12 @@ public struct BatteryDisplayFilter: Sendable {
 
     private mutating func percent(_ pct: Int, mv: Int, nowMs: Double) -> Int? {
         guard mv > 0, pct >= 0, pct <= 100 else { return nil }
-        // stale stream (e.g. resumed after a gap): drop the pending candidate,
+        // stale stream (e.g. resumed after a gap): drop pending candidates,
         // keep the shown value
         if let ts = pSampleTs, nowMs - ts > Self.percentGapResetMs {
             pSamples.removeAll()
-            candidatePct = nil
+            dropPct = nil
+            risePct = nil
         }
         pSampleTs = nowMs
         push(&pSamples, pct)
@@ -93,21 +133,49 @@ public struct BatteryDisplayFilter: Sendable {
             shownPct = medianPct
             return medianPct
         }
-        if medianPct >= shown {
-            candidatePct = nil
-            return nil
+        if medianPct < shown {
+            return confirmDrop(medianPct, nowMs: nowMs)
         }
-        if candidatePct == nil {
-            candidatePct = medianPct
-            candidateSince = nowMs
+        if medianPct >= shown + Self.percentRiseHysteresis {
+            return confirmRise(medianPct, nowMs: nowMs)
+        }
+        // inside the hysteresis band: nothing pending survives
+        dropPct = nil
+        risePct = nil
+        return nil
+    }
+
+    /// Sustained lower median latches down; the candidate takes the HIGHEST
+    /// lower median so a short deep dip must not overshoot while fluctuating.
+    private mutating func confirmDrop(_ medianPct: Int, nowMs: Double) -> Int? {
+        risePct = nil
+        if let candidate = dropPct {
+            dropPct = max(candidate, medianPct)
         } else {
-            // highest lower estimate in the window: a short deep dip must not
-            // set a falsely low permanent display while readings fluctuate
-            candidatePct = max(candidatePct!, medianPct)
+            dropPct = medianPct
+            dropSince = nowMs
         }
-        if nowMs - candidateSince >= Self.percentConfirmMs {
-            shownPct = candidatePct
-            candidatePct = nil
+        if nowMs - dropSince >= Self.percentConfirmMs {
+            shownPct = dropPct
+            dropPct = nil
+            return shownPct
+        }
+        return nil
+    }
+
+    /// Sustained higher median (charging / resting recovery) latches up; the
+    /// candidate takes the LOWEST rising median so a blip must not overshoot.
+    private mutating func confirmRise(_ medianPct: Int, nowMs: Double) -> Int? {
+        dropPct = nil
+        if let candidate = risePct {
+            risePct = min(candidate, medianPct)
+        } else {
+            risePct = medianPct
+            riseSince = nowMs
+        }
+        if nowMs - riseSince >= Self.percentRiseConfirmMs {
+            shownPct = risePct
+            risePct = nil
             return shownPct
         }
         return nil

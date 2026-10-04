@@ -7,6 +7,7 @@
 
 import Foundation
 import Observation
+import UIKit // UIAccessibility announcements for full-screen alerts
 
 public enum ConnState: Equatable, Sendable {
     case disconnected
@@ -29,32 +30,83 @@ public struct EventEntry: Identifiable, Equatable, Sendable {
 
 public struct AppSettings: Equatable, Codable, Sendable {
     public var host: String
+    /// Runtime value only — NEVER serialized; the persistent copy lives in
+    /// the Keychain (TokenStore). Decoding still accepts it for v1.2 blobs
+    /// (migrated to the Keychain on launch).
     public var token: String
     public var deadzone: Double // 0...0.4
     public var mode: DriveMode
+    // ---- play features ----
+    public var soundEnabled: Bool
+    public var trackWidthMm: Double // odometry guess for the trail view
+    public var tiltSensitivity: Double // 0.5...2
+    // ---- camera plane (s3-gateway :81) ----
+    public var cameraEnabled: Bool
+    public var cameraHost: String // empty = follow the control-plane host
 
     public init(host: String = "192.168.4.1", token: String = "",
-                deadzone: Double = 0.08, mode: DriveMode = .normal) {
+                deadzone: Double = 0.08, mode: DriveMode = .normal,
+                soundEnabled: Bool = false, trackWidthMm: Double = 150,
+                tiltSensitivity: Double = 1.0,
+                cameraEnabled: Bool = false, cameraHost: String = "") {
         self.host = host
         self.token = token
         self.deadzone = deadzone
         self.mode = mode
+        self.soundEnabled = soundEnabled
+        self.trackWidthMm = trackWidthMm
+        self.tiltSensitivity = tiltSensitivity
+        self.cameraEnabled = cameraEnabled
+        self.cameraHost = cameraHost
     }
 
     static let defaultsKey = "s3remote.settings.v1"
 
-    public static func load() -> AppSettings {
+    public static func load(from defaults: UserDefaults = .standard) -> AppSettings {
         guard
-            let data = UserDefaults.standard.data(forKey: defaultsKey),
+            let data = defaults.data(forKey: defaultsKey),
             let s = try? JSONDecoder().decode(AppSettings.self, from: data)
         else { return AppSettings() }
         return s
     }
 
-    func save() {
+    func save(to defaults: UserDefaults = .standard) {
         if let data = try? JSONEncoder().encode(self) {
-            UserDefaults.standard.set(data, forKey: Self.defaultsKey)
+            defaults.set(data, forKey: Self.defaultsKey)
         }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case host, token, deadzone, mode, soundEnabled, trackWidthMm, tiltSensitivity
+        case cameraEnabled, cameraHost
+    }
+
+    /// Lenient decode: a v1 JSON without the play/camera keys must not fail
+    /// (load() would fall back to defaults and wipe the saved host).
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        host = try c.decodeIfPresent(String.self, forKey: .host) ?? "192.168.4.1"
+        token = try c.decodeIfPresent(String.self, forKey: .token) ?? ""
+        deadzone = try c.decodeIfPresent(Double.self, forKey: .deadzone) ?? 0.08
+        mode = try c.decodeIfPresent(DriveMode.self, forKey: .mode) ?? .normal
+        soundEnabled = try c.decodeIfPresent(Bool.self, forKey: .soundEnabled) ?? false
+        trackWidthMm = try c.decodeIfPresent(Double.self, forKey: .trackWidthMm) ?? 150
+        tiltSensitivity = try c.decodeIfPresent(Double.self, forKey: .tiltSensitivity) ?? 1.0
+        cameraEnabled = try c.decodeIfPresent(Bool.self, forKey: .cameraEnabled) ?? false
+        cameraHost = try c.decodeIfPresent(String.self, forKey: .cameraHost) ?? ""
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(host, forKey: .host)
+        // token deliberately omitted — it lives in the Keychain now
+        try c.encode(deadzone, forKey: .deadzone)
+        try c.encode(mode, forKey: .mode)
+        try c.encode(soundEnabled, forKey: .soundEnabled)
+        try c.encode(trackWidthMm, forKey: .trackWidthMm)
+        try c.encode(tiltSensitivity, forKey: .tiltSensitivity)
+        try c.encode(cameraEnabled, forKey: .cameraEnabled)
+        try c.encode(cameraHost, forKey: .cameraHost)
     }
 }
 
@@ -63,7 +115,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
 public final class AppState {
     // ---- persisted ---------------------------------------------------------
     public var settings: AppSettings {
-        didSet { settings.save() }
+        didSet { settings.save(to: defaults) }
     }
 
     // ---- link --------------------------------------------------------------
@@ -93,6 +145,12 @@ public final class AppState {
     public private(set) var batteryDisplayMv: Int?
     public private(set) var batteryDisplayPct: Int?
 
+    // speed display EMA (C6 renderSpeed port): smoothed hero number; raw
+    // telemetry keeps feeding trail/records/safety
+    private var speedFilter = SpeedDisplayFilter()
+    /// Smoothed signed body speed (mm/s) for the drive-page hero readout.
+    public private(set) var displaySpeedMmS: Double = 0
+
     public var teleFresh: Bool {
         telemetry != nil && (nowMs - teleAtMs) < 600
     }
@@ -114,6 +172,34 @@ public final class AppState {
 
     public var emergActive: Bool { controller.emergLatch }
     public var stopLatched: Bool { controller.stopLatch }
+
+    // ---- play (stunts / tilt / trail / records) -------------------------------
+    /// Stunt macro player; output feeds the joystick axes in controlTick.
+    public private(set) var sequencer = StuntSequencer()
+    /// Tilt steering on/off; axes come from MotionSource gravity samples.
+    public private(set) var tiltEnabled = false
+    public private(set) var tiltAxes: (v: Double, w: Double) = (0, 0)
+    public private(set) var tiltDriver = TiltDriver()
+    /// Latest gravity sample (g units) for the bubble-level indicator.
+    public private(set) var gravity: (x: Double, y: Double, z: Double)?
+    /// Trail dead-reckoning from wheel speeds.
+    public private(set) var odometry = OdometryTracker()
+    /// Record wall (top speed / longest session / best lap), persisted.
+    public private(set) var recordsStore = RecordsTracker()
+    public private(set) var lapTimer = LapTimer()
+    /// Synthesized audio; created eagerly, fails soft without an audio device.
+    let sound = SoundEngine()
+    var motion: MotionSource? // lazily created on first tilt enable
+    /// s3-gateway camera plane; started/stopped by tab & scenePhase ownership.
+    public private(set) var camera: CameraClient
+
+    // ---- onboarding ------------------------------------------------------------
+    /// Sheet binding; persisted via OnboardingState, replayable from Settings.
+    public var showOnboarding: Bool
+
+    let tokenStore: any TokenStoring
+    private let defaults: UserDefaults
+    private let announcer: AlertAnnouncer
 
     // ---- safety / alerts -----------------------------------------------------
     public var monitor = SafetyMonitor()
@@ -153,9 +239,40 @@ public final class AppState {
     weak var link: LinkEngine?
     private var seq: UInt8 = 0
 
-    public init(settings: AppSettings = .load()) {
-        self.settings = settings
+    public init(settings: AppSettings = .load(), tokenStore: any TokenStoring = KeychainTokenStore(),
+                defaults: UserDefaults = .standard) {
+        self.tokenStore = tokenStore
+        self.defaults = defaults
+        announcer = AlertAnnouncer { text in
+            UIAccessibility.post(notification: .announcement, argument: text)
+        }
+        camera = CameraClient()
+        var s = settings
+        var migrated = false
+        // Keychain migration: v1.2 blobs carried the token in UserDefaults.
+        if !s.token.isEmpty {
+            if tokenStore.get().isEmpty { tokenStore.set(s.token) }
+            s.token = ""
+            migrated = true
+        }
+        showOnboarding = !ProcessInfo.processInfo.arguments.contains("--no-onboard")
+            && OnboardingState.shouldShow(defaults)
+        self.settings = s
+        // @Observable: mutating any tracked property touches the shared
+        // observation registration, so tracked mutations must wait until
+        // every stored property above is initialized.
+        self.settings.token = tokenStore.get() // runtime value; blob stays clean
+        if migrated { settings.save(to: defaults) }
         monitor.debounceMs = 1200
+        tiltDriver.sensitivity = settings.tiltSensitivity
+        odometry.trackWidthMm = settings.trackWidthMm
+        sound.setEnabled(settings.soundEnabled)
+        // all stored properties are set — wiring the escape-hatch closure now
+        camera.configProvider = { [weak self] in
+            guard let self else { return (enabled: false, host: "") }
+            let host = self.settings.cameraHost.isEmpty ? self.settings.host : self.settings.cameraHost
+            return (enabled: self.settings.cameraEnabled, host: host)
+        }
         log("INFO", "S3 Remote 就绪")
     }
 
@@ -196,6 +313,10 @@ public final class AppState {
         tcSblVer = ""
         outV = 0
         outW = 0
+        sequencer.abort()
+        tiltAxes = (0, 0)
+        speedFilter.reset()
+        displaySpeedMmS = 0
         log("WARN", "连接断开：\(reason) — 车辆由 TC275 心跳看门狗停车")
     }
 
@@ -234,9 +355,21 @@ public final class AppState {
 
     func applyTelemetry(_ t: Telemetry) {
         lossCounter.onTelemetry(seq: t.seq)
+        let dtMs = nowMs - teleAtMs
+        // trail: a stream gap means the car moved while we were blind —
+        // restart the trace instead of drawing a jump line
+        if teleAtMs > 0, dtMs > 2000 { odometry.reset() }
+        odometry.onTelemetry(vL: Double(t.vMeasL), vR: Double(t.vMeasR),
+                             dtMs: teleAtMs > 0 ? dtMs : 20)
+        if recordsStore.observe(speedKmh: abs(Double(t.vMeasL) + Double(t.vMeasR)) / 2 * 0.0036,
+                                 sessionMeters: Double(t.odoSessionMm) / 1000) {
+            // tracker persists to the injected defaults itself
+        }
         telemetry = t
         teleAtMs = nowMs
-        let display = batteryFilter.apply(pct: Int(t.batteryPct), mv: Int(t.batteryMv), nowMs: nowMs)
+        displaySpeedMmS = speedFilter.apply(Double(t.vMeasL + t.vMeasR) / 2, nowMs: nowMs)
+        let display = batteryFilter.apply(pct: Int(t.batteryPct), mv: Int(t.batteryMv),
+                                          uptimeMs: t.uptimeMs, nowMs: nowMs)
         if let mv = display.mv { batteryDisplayMv = mv }
         if let pct = display.pct { batteryDisplayPct = pct }
     }
@@ -269,12 +402,14 @@ public final class AppState {
     // ---- control actions (UI entry points, mirror scr_ctrl API) ----------------
 
     public func stopPressed() {
+        abortStunt(reason: "STOP")
         let cmd = controller.stopClick()
         link?.sendDrive(cmd) // immediate, does not wait for the next tick
         log("WARN", "STOP — 已发送 DRIVE(0,0) 并锁存")
     }
 
     public func emergencyTriggered() {
+        abortStunt(reason: "紧急停止")
         let cmd = controller.emergency()
         link?.sendEmergencyStop()
         link?.sendDrive(cmd)
@@ -287,8 +422,10 @@ public final class AppState {
         log("INFO", "急停解除 — 车辆保持停止，触摸摇杆恢复")
     }
 
-    /// Joystick touch = re-take control; clears the STOP latch (spec 19/105).
+    /// Joystick touch = re-take control; clears the STOP latch (spec 19/105)
+    /// and aborts any running stunt (manual takeover always wins).
     public func joystickTouch() {
+        abortStunt(reason: "摇杆接管")
         if controller.stopLatch {
             log("INFO", "触摸摇杆 — STOP 锁存解除")
         }
@@ -296,6 +433,13 @@ public final class AppState {
     }
 
     public func joystickMoved(v: Double, w: Double) {
+        if sequencer.active {
+            // A live stunt owns the axes. Zero writes are UI resets (the drive
+            // joystick zeroes itself when the stunt disables it, tab switches),
+            // not a takeover — only a real push takes over.
+            if v == 0 && w == 0 { return }
+            abortStunt(reason: "摇杆接管")
+        }
         controller.joyV = v
         controller.joyW = w
     }
@@ -306,11 +450,186 @@ public final class AppState {
         log("INFO", "模式 \(m.label) — 限幅 \(m.pct)%")
     }
 
+    // ---- play actions ------------------------------------------------------------
+
+    /// Tap a stunt to run; tapping the running one aborts it. Stunts ride the
+    /// joystick axes path, so every latch/limit/watchdog still applies.
+    public func startStunt(_ stunt: Stunt) {
+        guard connState == .connected, ctrlRole else {
+            log("WARN", "特技需已连接且取得控制权")
+            return
+        }
+        guard !emergActive else {
+            log("WARN", "急停锁存中 — 请先解除急停")
+            return
+        }
+        if sequencer.stunt == stunt {
+            abortStunt(reason: "再次点击")
+            return
+        }
+        controller.joystickTouch() // explicit re-take: clears a STOP latch
+        sequencer.start(stunt)
+        sound.blip()
+        log("INFO", "特技「\(stunt.name)」开始")
+    }
+
+    public func abortStunt(reason: String) {
+        guard sequencer.active else { return }
+        sequencer.abort()
+        controller.joyV = 0
+        controller.joyW = 0
+        log("WARN", "特技中止（\(reason)）")
+    }
+
+    public func setTiltEnabled(_ on: Bool) {
+        guard on != tiltEnabled else { return }
+        tiltEnabled = on
+        tiltAxes = (0, 0)
+        if on {
+            let src = motion ?? MotionSource()
+            motion = src
+            src.start { [weak self] gx, gy, gz in self?.applyGravity(gx: gx, gy: gy, gz: gz) }
+            log("INFO", "体感驾驶开启 — 前倾加速，左右倾斜转向")
+        } else {
+            motion?.stop()
+            log("INFO", "体感驾驶关闭")
+        }
+    }
+
+    public func calibrateTilt() {
+        guard let g = gravity else {
+            log("WARN", "体感尚未就绪 — 稍候再校准")
+            return
+        }
+        tiltDriver.calibrate(gx: g.x, gz: g.z)
+        log("INFO", "体感已按当前姿态校准")
+    }
+
+    func applyGravity(gx: Double, gy: Double, gz: Double) {
+        gravity = (gx, gy, gz)
+        guard tiltEnabled else { return }
+        // No stunt abort here: controlTick gives stunt axes priority over tilt,
+        // so a stunt keeps playing and tilt resumes when it ends.
+        tiltAxes = tiltDriver.axes(gx: gx, gz: gz)
+    }
+
+    public func clearTrail() {
+        odometry.reset()
+    }
+
+    public func setTrackWidthMm(_ mm: Double) {
+        settings.trackWidthMm = mm
+        odometry.trackWidthMm = mm
+    }
+
+    public func setTiltSensitivity(_ s: Double) {
+        settings.tiltSensitivity = s
+        tiltDriver.sensitivity = s
+    }
+
+    public func setSoundEnabled(_ on: Bool) {
+        settings.soundEnabled = on
+        sound.setEnabled(on)
+    }
+
+    /// Pairing token writes go through here: runtime copy in settings (used
+    /// by the WS URL), persistent copy in the Keychain. Empty = reset pairing.
+    public func setToken(_ token: String) {
+        settings.token = token
+        if token.isEmpty {
+            tokenStore.remove()
+        } else {
+            tokenStore.set(token)
+        }
+    }
+
+    // ---- camera plane -------------------------------------------------------------
+
+    /// Single ownership point: stream runs only while the drive tab is up,
+    /// camera is enabled, and the app is active — otherwise the gateway's
+    /// one-viewer slot is handed back.
+    public func syncCamera(activeTab: Int) {
+        let shouldRun = settings.cameraEnabled && activeTab == Tab.drive.rawValue
+        if shouldRun {
+            camera.start()
+        } else {
+            camera.stop()
+        }
+    }
+
+    // ---- onboarding -----------------------------------------------------------------
+
+    public func dismissOnboarding() {
+        OnboardingState.markSeen(defaults)
+        showOnboarding = false
+    }
+
+    public func replayOnboarding() {
+        showOnboarding = true
+    }
+
+    public func hornPressed() {
+        sound.horn()
+        Haptics.light()
+    }
+
+    // ---- lap timer / records ------------------------------------------------------
+
+    public func lapStart() {
+        lapTimer.start(nowMs: nowMs)
+        Haptics.medium()
+        log("INFO", "圈速计时开始")
+    }
+
+    public func lapSplit() {
+        guard let s = lapTimer.lap(nowMs: nowMs) else { return }
+        if recordsStore.noteLap(seconds: s) { // persists internally
+            Haptics.success()
+            log("INFO", String(format: "新纪录单圈 %.2f s", s))
+        } else {
+            Haptics.medium()
+            log("INFO", String(format: "单圈 %.2f s", s))
+        }
+    }
+
+    public func lapStop() {
+        guard let total = lapTimer.stop(nowMs: nowMs) else { return }
+        Haptics.light()
+        log("INFO", String(format: "计时结束，总时 %.2f s", total))
+    }
+
+    public func lapReset() {
+        lapTimer.reset()
+    }
+
+    public func clearRecords() {
+        recordsStore.clear() // persists
+        log("INFO", "纪录已清空")
+    }
+
     // ---- 30 Hz beat: drive + safety watch (called by LinkEngine) -----------------
 
     func controlTick() {
         nowMs = now()
         let connected = connState == .connected
+
+        // Stunt safety: any closed gate kills the macro within one tick.
+        if sequencer.active,
+           !connected || !ctrlRole || controller.emergLatch || controller.stopLatch {
+            abortStunt(reason: !connected ? "连接断开" : "安全锁存")
+        }
+
+        // Axis priority: stunt macro > tilt steering > joystick (last writer
+        // wins in DriveController; only one of the three is user-driven).
+        if sequencer.active {
+            let axes = sequencer.tick(dtMs: 1000 / Double(LinkEngine.controlRateHz))
+            controller.joyV = axes.v
+            controller.joyW = axes.w
+        } else if tiltEnabled {
+            controller.joyV = tiltAxes.v
+            controller.joyW = tiltAxes.w
+        }
+
         if let cmd = controller.tick(connUp: connected, ctrlRole: ctrlRole) {
             link?.sendDrive(cmd)
             outV = cmd.v
@@ -319,7 +638,23 @@ public final class AppState {
             outV = 0
             outW = 0
         }
+
+        // engine hum follows the actually-sent output
+        let moving = controller.gateOpen && (abs(Int(outV)) > 2 || abs(Int(outW)) > 20)
+        sound.update(active: connected && ctrlRole && moving,
+                     speedNorm: abs(Double(outV)) / DriveController.fullV)
+
         safetyTick()
+    }
+
+    /// ScenePhase → background: anything autonomous stops here. The vehicle
+    /// itself is protected by its own heartbeats either way.
+    public func handleBackground() {
+        abortStunt(reason: "退到后台")
+        if tiltEnabled { setTiltEnabled(false) }
+        joystickMoved(v: 0, w: 0)
+        sound.update(active: false, speedNorm: 0)
+        camera.stop() // hand back the single-viewer slot
     }
 
     private func safetyTick() {
@@ -369,7 +704,7 @@ public final class AppState {
             kinds.insert(.radioLost)
         } else if faultActive, let code = telemetry?.faultCode {
             newAlert = Alert(kind: .vehicleFault, level: .warning,
-                             detail: String(format: "0x%04X", code))
+                             detail: FaultText.describe(code)) // 中文 + 未知码保留 hex
             kinds.insert(.vehicleFault)
         } else if let b = batteryKind {
             newAlert = Alert(kind: b,
@@ -379,7 +714,11 @@ public final class AppState {
         }
         ackDismissed.formIntersection(kinds)
         if let a = newAlert, ackDismissed.contains(a.kind) { newAlert = nil }
+        let previousKind = alert?.kind
         alert = newAlert
+        if let a = newAlert, a.kind != previousKind {
+            announcer.alertAppeared(a) // VoiceOver: full-screen alerts are announced
+        }
     }
 
     public func ackAlert() {

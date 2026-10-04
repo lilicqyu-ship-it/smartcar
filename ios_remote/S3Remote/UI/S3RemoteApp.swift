@@ -1,5 +1,12 @@
 import SwiftUI
 
+/// Tab indices — single source of truth (also used by the `--tab` dev hook
+/// and HomeView's pairing-guide jump).
+enum Tab: Int {
+    case drive = 0, play, vehicle, topology, link, settings
+    static let all: [Tab] = [.drive, .play, .vehicle, .topology, .link, .settings]
+}
+
 @main
 struct S3RemoteApp: App {
     @State private var app = AppState()
@@ -24,41 +31,62 @@ struct S3RemoteApp: App {
 
 struct RootView: View {
     @Environment(AppState.self) private var app
-    // dev/screenshot hook: `--tab 0..4` picks the initial tab
+    @Environment(\.scenePhase) private var scenePhase
+    // dev/screenshot hook: `--tab 0..5` picks the initial tab
     @State private var selection = RootView.initialTab
 
     static let initialTab: Int = {
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: "--tab"), i + 1 < args.count,
-              let n = Int(args[i + 1]), (0...4).contains(n) else { return 0 }
+              let n = Int(args[i + 1]), (0...5).contains(n) else { return 0 }
         return n
     }()
 
     var body: some View {
+        @Bindable var app = app
         ZStack {
             TabView(selection: $selection) {
                 HomeView(selection: $selection)
                     .tabItem { Label("驾驶", systemImage: "gamecontroller.fill") }
-                    .tag(0)
+                    .tag(Tab.drive.rawValue)
+                PlayView()
+                    .tabItem { Label("玩法", systemImage: "party.popper.fill") }
+                    .tag(Tab.play.rawValue)
                 VehicleView()
                     .tabItem { Label("车辆", systemImage: "car.fill") }
-                    .tag(1)
+                    .tag(Tab.vehicle.rawValue)
                 TopologyView()
                     .tabItem { Label("拓扑", systemImage: "network") }
-                    .tag(2)
+                    .tag(Tab.topology.rawValue)
                 DiagView()
                     .tabItem { Label("连接", systemImage: "waveform.path.ecg") }
-                    .tag(3)
+                    .tag(Tab.link.rawValue)
                 SettingsView()
                     .tabItem { Label("设置", systemImage: "gearshape.fill") }
-                    .tag(4)
+                    .tag(Tab.settings.rawValue)
             }
             AlertOverlayView()
 
         }
         .tint(Theme.accent)
+        .animation(.easeInOut(duration: 0.25), value: app.alert)
+        .sheet(isPresented: $app.showOnboarding) {
+            OnboardingView()
+                .presentationDetents([.large])
+        }
+        .task(id: selection) { app.syncCamera(activeTab: selection) }
         .onChange(of: selection) { oldValue, newValue in
-            if oldValue == 0 && newValue != 0 { app.joystickMoved(v: 0, w: 0) }
+            if oldValue == Tab.drive.rawValue && newValue != Tab.drive.rawValue { app.joystickMoved(v: 0, w: 0) }
+        }
+        .onChange(of: app.settings.cameraEnabled) { _, _ in
+            app.syncCamera(activeTab: selection)
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase != .active {
+                app.handleBackground()
+            } else {
+                app.syncCamera(activeTab: selection)
+            }
         }
     }
 }

@@ -3,7 +3,9 @@
  * scenarios (esp32c6_car commit cee1189): median spike absorption, EMA
  * golden sequence, ≤2 Hz gate, 20 mV downward hysteresis, 1.5 s percent
  * drop confirmation, single-dip rejection, gap reset, not-ready samples.
- * EMA numbers hand-computed with the same exp(-dt/500) formula.
+ * Extended for charge recovery: sustained-rise latching (percent ≥+2 % for
+ * 10 s, voltage 50 mV upward deadband) and vehicle-reboot reset. EMA numbers
+ * hand-computed with the same exp(-dt/500) formula.
  */
 
 import XCTest
@@ -11,17 +13,20 @@ import XCTest
 
 final class BatteryDisplayFilterTests: XCTestCase {
     private var now = 1_000_000.0
+    private var uptime: UInt32 = 1_000_000
     private var filter = BatteryDisplayFilter()
 
     override func setUp() {
         super.setUp()
         now = 1_000_000.0
+        uptime = 1_000_000
         filter = BatteryDisplayFilter()
     }
 
-    private func feed(pct: Int, mv: Int, stepMs: Double = 0) -> (mv: Int?, pct: Int?) {
+    private func feed(pct: Int, mv: Int, stepMs: Double = 0, uptimeMs: UInt32? = nil) -> (mv: Int?, pct: Int?) {
         now += stepMs
-        return filter.apply(pct: pct, mv: mv, nowMs: now)
+        uptime = uptimeMs ?? uptime &+ UInt32(stepMs)
+        return filter.apply(pct: pct, mv: mv, uptimeMs: uptime, nowMs: now)
     }
 
     // ---- not-ready samples ---------------------------------------------------
@@ -84,16 +89,18 @@ final class BatteryDisplayFilterTests: XCTestCase {
         XCTAssertEqual(feed(pct: 80, mv: 7800, stepMs: 300).mv, 7870)
     }
 
-    func testVoltageNeverRisesWithinSession() {
-        _ = feed(pct: 80, mv: 8000)
-        XCTAssertNil(feed(pct: 80, mv: 7900, stepMs: 500).mv) // [7900,8000] upper-median = 8000
-        XCTAssertEqual(feed(pct: 80, mv: 7900, stepMs: 500).mv, 7940)
-        XCTAssertEqual(feed(pct: 80, mv: 7900, stepMs: 500).mv, 7910)
-        // real recovery: the display holds the latched lower value
-        for _ in 0..<6 {
-            XCTAssertNil(feed(pct: 80, mv: 8500, stepMs: 500).mv)
+    /// Charging raises the pack voltage well above the latched value: with the
+    /// 50 mV upward deadband the display must follow sustained recovery.
+    func testVoltageFollowsChargingRecovery() {
+        for _ in 0..<5 { _ = feed(pct: 40, mv: 7400, stepMs: 100) }
+        XCTAssertEqual(filter.voltageShownMv, 7400)
+        // charger connected: sustained +400 mV — the display climbs back up
+        var sawRise = false
+        for _ in 0..<20 {
+            if feed(pct: 60, mv: 7800, stepMs: 500).mv != nil { sawRise = true }
         }
-        XCTAssertEqual(filter.voltageShownMv, 7910)
+        XCTAssertTrue(sawRise, "sustained charge voltage must raise the display")
+        XCTAssertGreaterThan(filter.voltageShownMv!, 7400 + BatteryDisplayFilter.riseDeadbandMv)
     }
 
     // ---- percent plane ----------------------------------------------------------
@@ -142,5 +149,63 @@ final class BatteryDisplayFilterTests: XCTestCase {
         now += 1100 // telemetry gap > 1 s: candidate dropped, shown kept
         XCTAssertNil(feed(pct: 80, mv: 8000).pct)
         XCTAssertEqual(filter.percentShown, 80)
+    }
+
+    // ---- charge recovery (the reason for the rise plane) ------------------------
+
+    /// Charging with the car powered on: sustained +2 % or more walks the
+    /// display up in confirmed steps, eventually to 100 %.
+    func testPercentRisesAfterCharging() {
+        XCTAssertEqual(feed(pct: 60, mv: 7600).pct, 60)
+        // charger attached, pack climbs 60 → 95 over "minutes"
+        var latched: Int?
+        for _ in 0..<80 {
+            if let published = feed(pct: 95, mv: 8300, stepMs: 500).pct { latched = published }
+        }
+        XCTAssertEqual(filter.percentShown, 95)
+        XCTAssertEqual(latched, 95, "the confirm step must publish once")
+        // keep charging: after another sustained stretch it reaches full
+        for _ in 0..<40 { _ = feed(pct: 100, mv: 8400, stepMs: 500) }
+        XCTAssertEqual(filter.percentShown, 100)
+    }
+
+    /// A brief voltage bounce (load released → percent estimate pops up for a
+    /// few seconds) must NOT drag the display up — 10 s confirmation gate.
+    func testPercentBriefRiseBlipNotLatched() {
+        XCTAssertEqual(feed(pct: 60, mv: 7600).pct, 60)
+        // ~6 s at +10 % — under the 10 s confirm window
+        for _ in 0..<12 { XCTAssertNil(feed(pct: 70, mv: 7900, stepMs: 500).pct) }
+        XCTAssertEqual(filter.percentShown, 60)
+        // back to normal: nothing latched from the blip
+        for _ in 0..<10 { _ = feed(pct: 61, mv: 7620, stepMs: 500) }
+        XCTAssertEqual(filter.percentShown, 60)
+    }
+
+    /// Sub-hysteresis rises (median within shown..<shown+2 %) never arm a rise.
+    func testPercentRiseBelowHysteresisIgnored() {
+        XCTAssertEqual(feed(pct: 60, mv: 7600).pct, 60)
+        for _ in 0..<40 { XCTAssertNil(feed(pct: 61, mv: 7620, stepMs: 500).pct) }
+        XCTAssertEqual(filter.percentShown, 60)
+    }
+
+    // ---- vehicle restart ------------------------------------------------------------
+
+    /// Power-off → charge → power-on: uptime regresses → both planes reset and
+    /// re-seed from the current frame (display must snap to the truth, not stay
+    /// latched at the old drained value).
+    func testRebootResetsAndReseeds() {
+        // drain first: display latched to a low value
+        XCTAssertEqual(feed(pct: 60, mv: 7600).pct, 60)
+        for _ in 0..<12 { _ = feed(pct: 55, mv: 7500, stepMs: 200) }
+        XCTAssertLessThanOrEqual(filter.percentShown!, 60)
+        // overnight charge, power cycled: uptime restarts from ~3 s
+        let first = feed(pct: 100, mv: 8400, stepMs: 200, uptimeMs: 3_000)
+        XCTAssertEqual(first.pct, 100) // immediate re-seed
+        XCTAssertEqual(first.mv, 8400)
+        XCTAssertEqual(filter.percentShown, 100)
+        XCTAssertEqual(filter.voltageShownMv, 8400)
+        // subsequent frames behave normally (no repeated resets)
+        XCTAssertNil(feed(pct: 100, mv: 8400, stepMs: 200).pct)
+        XCTAssertEqual(filter.percentShown, 100)
     }
 }

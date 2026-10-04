@@ -112,8 +112,8 @@ struct VehicleView: View {
 
     private var statusCard: some View {
         Panel { VStack(spacing: 10) {
-            kv("任务状态", liveTelemetry.map { "0x\(String($0.state, radix: 16))" } ?? "--")
-            kv("故障码", faultText)
+            kv("任务状态", liveTelemetry.map { FaultText.robotState($0.state) } ?? "--")
+            kv("车辆状态", faultDisplay)
             kv("运行时间", liveTelemetry.map { formatUptime($0.uptimeMs) } ?? "--")
             kv("链路 RTT (车端)", liveTelemetry.map { "\($0.linkRttMs) ms" } ?? "--")
             kv("链路误码", liveTelemetry.map { String(format: "%.1f %%", Double($0.linkErrRate) / 10) } ?? "--")
@@ -124,9 +124,10 @@ struct VehicleView: View {
         } }
     }
 
-    private var faultText: String {
+    /// Chinese fault text, hex kept for unknown codes (FaultText mapping).
+    private var faultDisplay: String {
         guard let code = liveTelemetry?.faultCode else { return "--" }
-        return code == 0 ? "无" : String(format: "0x%04X", code)
+        return code == 0 ? "正常" : FaultText.describe(code)
     }
 
     private func formatUptime(_ ms: UInt32) -> String {

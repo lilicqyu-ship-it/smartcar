@@ -5,6 +5,7 @@
  */
 
 import SwiftUI
+import UIKit // UIPasteboard for the event-log copy button
 
 struct DiagView: View {
     @Environment(AppState.self) private var app
@@ -144,9 +145,32 @@ struct DiagView: View {
 
     private var eventLogPanel: some View {
         Panel { VStack(alignment: .leading, spacing: 9) {
-            Label("事件日志", systemImage: "list.bullet.rectangle")
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(Theme.dim)
+            HStack {
+                Label("事件日志", systemImage: "list.bullet.rectangle")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Theme.dim)
+                Spacer()
+                let export = EventExport.text(app.events, host: app.settings.host)
+                ShareLink(item: export) {
+                    Image(systemName: "square.and.arrow.up")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 30, height: 30)
+                        .background(Theme.bgLift, in: RoundedRectangle(cornerRadius: 8))
+                }.accessibilityLabel("分享事件日志")
+                Button {
+                    UIPasteboard.general.string = export
+                    Haptics.success()
+                } label: {
+                    Image(systemName: "doc.on.doc")
+                        .font(.system(size: 13, weight: .semibold))
+                        .frame(width: 30, height: 30)
+                        .background(Theme.bgLift, in: RoundedRectangle(cornerRadius: 8))
+                }.accessibilityLabel("复制事件日志到剪贴板")
+            }
+            if app.events.isEmpty {
+                Text("暂无事件 — 连接后这里会滚动记录。")
+                    .font(.caption).foregroundStyle(Theme.dim)
+            }
             ForEach(app.events.prefix(50)) { e in
                 HStack(alignment: .top, spacing: 8) {
                     Circle()
