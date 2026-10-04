@@ -4,7 +4,7 @@
 |---|---|
 | 文档编号 | 33 |
 | 域 | TC275 侧（3x） |
-| 版本 | V1.6（2026-10-04，STBY 受控化随 23 号 V1.23 / 21 号 V1.15）：第 9 节电机速查新增 STBY 条目——**P22.2（X1-16）→ D24A J4-2，GPIO 受控**，`bsp/motor.c` 的 `MOTOR_setEnabled()` + `MOTOR_init()` 末步使能，一根线管四路；写清"急停/故障路径目前不调用它"这条现状与接线前提（跳线帽必须拔掉）。V1.5（2026-10-03，IMU 驱动落地随 35 号 V1.0）：第 2 节代码地图加 `bsp/imu`；第 4 节块表补 `XcoreImu` 行；第 7 节验证加 `test_imu` 命令（55 断言）、`test_xcore` 1095→1109；第 9 节硬件速查补 IMU 段（QSPI1/INT1/优先级 11·14·15·24）。V1.4（2026-10-03，命令队列抗突发随 22 号 V1.8）：第 3 节数据流图与第 4 节块表的命令队列改 **16 深 + `SET_SPEED` 走 `XCORE_cmdPushLatest` 新者胜**；第 7 节新增 `test_xcore` 可粘贴命令（1095 断言）并把覆盖盲区改为"已有覆盖"口径；CI（`tc275-car.yml`）同步加跑。V1.3（2026-09-30，编码器刻度修正随 34 V1.4）：第 9 节编码器 260 线→**13 PPR**（52 计数/电机转、1061.27 计数/轮转、0.1421 mm/计数），默认轮径 65→**48**（`CALIB_WHEELDIA_DEF` 同批）。V1.2（2026-09-27，随 34 号 V1.3 闭环使能门同步）：第 2 节代码地图 `rt/motor_algo` 条目补门；第 5.2 节"方向不对"条目补门上电行为；第 6 节安全机制新增**闭环使能门**（src=0 记录强制开环等价，34 §13）。V1.1（2026-09-27，随 34 号标定/DPT 落地同步）：第 2 节代码地图加 `mw/calib/`；第 4 节 xcore 块表补 CalibResult/Jog/RecordLive/EVT 出站队列四行 + "用版本计数不要用 valid 位"规约；第 5.1 节写清 DPT op 家族（0x70~0x74）与 EVT 0x22/0x23 的组帧侧；第 5.2 节改为"标定参数是运行时变量、换轮径走 0x73"；第 6 节加 DFlash 写入的安全姿态；第 7 节单测命令加入 `mw/calib/calib_record.c`（2948 断言）并扩写覆盖盲区；第 8 节红线增至 10 条（新增"只有 CPU0 能写 DFlash"）。V1.0 = 2026-09-27 首版 |
+| 版本 | V1.7（2026-10-04，日志泵去阻塞随 APPFW 1.3.1）：`XCORE_logService` 从"每调用阻塞排一行"改为**非阻塞字节泵**（`bsp/uart` 新增 `UART_printTry`，`\n`→CRLF 成对入队）——旧实现最坏 256 B@115200 ≈ 22 ms，天然超过 CPU0 的 10 ms 控制周期（P0）；现在控制任务只把字节排进驱动 256 B 软件 TX FIFO（TX ISR 线速后台移出），FIFO 满即停、下周期续排，积压仍按线速清空、满环丢整行不变；`test_xcore` 契约同步改写（1109→1386 断言）。V1.6（2026-10-04，STBY 受控化随 23 号 V1.23 / 21 号 V1.15）：第 9 节电机速查新增 STBY 条目——**P22.2（X1-16）→ D24A J4-2，GPIO 受控**，`bsp/motor.c` 的 `MOTOR_setEnabled()` + `MOTOR_init()` 末步使能，一根线管四路；写清"急停/故障路径目前不调用它"这条现状与接线前提（跳线帽必须拔掉）。V1.5（2026-10-03，IMU 驱动落地随 35 号 V1.0）：第 2 节代码地图加 `bsp/imu`；第 4 节块表补 `XcoreImu` 行；第 7 节验证加 `test_imu` 命令（55 断言）、`test_xcore` 1095→1109；第 9 节硬件速查补 IMU 段（QSPI1/INT1/优先级 11·14·15·24）。V1.4（2026-10-03，命令队列抗突发随 22 号 V1.8）：第 3 节数据流图与第 4 节块表的命令队列改 **16 深 + `SET_SPEED` 走 `XCORE_cmdPushLatest` 新者胜**；第 7 节新增 `test_xcore` 可粘贴命令（1095 断言）并把覆盖盲区改为"已有覆盖"口径；CI（`tc275-car.yml`）同步加跑。V1.3（2026-09-30，编码器刻度修正随 34 V1.4）：第 9 节编码器 260 线→**13 PPR**（52 计数/电机转、1061.27 计数/轮转、0.1421 mm/计数），默认轮径 65→**48**（`CALIB_WHEELDIA_DEF` 同批）。V1.2（2026-09-27，随 34 号 V1.3 闭环使能门同步）：第 2 节代码地图 `rt/motor_algo` 条目补门；第 5.2 节"方向不对"条目补门上电行为；第 6 节安全机制新增**闭环使能门**（src=0 记录强制开环等价，34 §13）。V1.1（2026-09-27，随 34 号标定/DPT 落地同步）：第 2 节代码地图加 `mw/calib/`；第 4 节 xcore 块表补 CalibResult/Jog/RecordLive/EVT 出站队列四行 + "用版本计数不要用 valid 位"规约；第 5.1 节写清 DPT op 家族（0x70~0x74）与 EVT 0x22/0x23 的组帧侧；第 5.2 节改为"标定参数是运行时变量、换轮径走 0x73"；第 6 节加 DFlash 写入的安全姿态；第 7 节单测命令加入 `mw/calib/calib_record.c`（2948 断言）并扩写覆盖盲区；第 8 节红线增至 10 条（新增"只有 CPU0 能写 DFlash"）。V1.0 = 2026-09-27 首版 |
 | 代码基线 | `main`（默认构建 `USE_SPI_LINK`，含 servo 闭环 + CPU 看门狗 + 0x70 方向标定） |
 | 读者 | **AI 编码助手**（Kiro / Claude / Copilot 等）在本仓库作业前必读 |
 | 上级索引 | [00-index.md](../00-index.md) |
@@ -122,7 +122,7 @@ rt/motor_algo.c (CPU1 1kHz)：
 | RecordLive（带 `version`） | CPU0 → CPU1/CPU2 | 当前生效标定记录（invert/满量程/轮径）；CPU1 按 `version` 边沿应用，CPU2 取 `vTarget` |
 | EVT 出站队列(8×≤32B) | CPU0 → CPU2 | 产测事件 0x22/0x23 的出帧口；CPU2 `link_sendPendingEvents()` 弹出，满则丢弃 |
 | XcoreImu（带 `seq`） | CPU1 → CPU0/CPU2 | IMU 采样信箱（`bsp/imu` 每 5 ms 发布一次）：mg / mdps / 0.01 °C 单位域 + `alive`/`drdyCount`/`errCount`；`seq` 由 `XCORE_imuPublish` 内部递增，消费者看它判新鲜度（35 §5） |
-| 日志环(2KB) | CPU1/CPU2 写 / CPU0 落地 | 无 printf 的核靠这个把行喂给 CPU0 的 UART |
+| 日志环(2KB) | CPU1/CPU2 写 / CPU0 落地 | 无 printf 的核靠这个把行喂给 CPU0 的 UART；CPU0 用**非阻塞字节泵**落地（满环丢整行，TX FIFO 满则下周期续排，绝不阻塞控制任务） |
 
 **AI 作业规约（xcore）：**
 1. 新增跨核数据 → 在 `xcore.h` 加块 + `xcore.c` 加 lock/unlock 访问器 + `XCORE_init` 里清零。**不要**让别的核直接摸这个静态变量。
@@ -191,8 +191,9 @@ gcc -std=c99 -Wall -Wextra -Werror -O2 -I . -I test/host/stub \
 gcc -std=c99 -Wall -Wextra -Werror -O2 -I . -I test/host/stub \
     test/host/test_imu.c -o test/host/out/test_imu && test/host/out/test_imu
 
-# xcore 命令队列/日志环纪律（FIFO、容量、SET_SPEED 新者胜塌缩、每调用一行排空、
-# IMU 信箱 seq；1109 断言。注意 stub 目录必须排在 -I 首位——bsp/uart.h 与
+# xcore 命令队列/日志环纪律（FIFO、容量、SET_SPEED 新者胜塌缩、日志非阻塞字节泵
+# （TX FIFO 满即停、跨调用续排、字节序/CRLF 不变）、IMU 信箱 seq；1386 断言。注意
+# stub 目录必须排在 -I 首位——bsp/uart.h 与
 # IfxCpu.h 用的是 host 替身，不是 iLLD 原件）
 gcc -std=c99 -Wall -Wextra -Werror -O2 -I test/host/stub -I . \
     test/host/test_xcore.c mw/xcore/xcore.c \
@@ -204,7 +205,7 @@ python3 test/host/test_calib_store.py
 
 **固件构建**：只能在 AURIX Development Studio（TASKING 编译器）里构建 `TriCore Debug (TASKING)`，**主机/CI 无法编译固件**（专有编译器）。AI 不要假装能在命令行编出固件；能做的是保证主机单测通过 + 代码符合 iLLD/MISRA 习惯。
 
-**覆盖盲区（诚实告知）**：`link.c`/`motor_algo`/`encoder`/`robot.c`/`imu.c` 无单测（依赖 iLLD/FreeRTOS/硬件），改这些只能靠代码审查 + 台架（IMU 的换算半截在 `bsp/imu.h` 纯函数里、有 `test_imu`；驱动主体无）。改动这类文件时，AI 应在回复里明确说明"此改动未被单测覆盖，需台架验证"。**同类盲区**：xcore 新块（CalibResult/Jog/RecordLive/EVT 队列/XcoreImu 的跨核半截）、`0x71` jog 时序、**DFlash 擦写与回读**——只有 `mw/calib/calib_record.c` 的纯编解码有单测，**存储与跨核那半截没有**。**已有覆盖**：命令队列/日志环的入队出队纪律（FIFO、容量、新者胜、每调用一行排空）自 2026-10-03 起有 `test_xcore.c`（锁与核间原子性仍只有目标机上有，主机替身是空锁）。
+**覆盖盲区（诚实告知）**：`link.c`/`motor_algo`/`encoder`/`robot.c`/`imu.c` 无单测（依赖 iLLD/FreeRTOS/硬件），改这些只能靠代码审查 + 台架（IMU 的换算半截在 `bsp/imu.h` 纯函数里、有 `test_imu`；驱动主体无）。改动这类文件时，AI 应在回复里明确说明"此改动未被单测覆盖，需台架验证"。**同类盲区**：xcore 新块（CalibResult/Jog/RecordLive/EVT 队列/XcoreImu 的跨核半截）、`0x71` jog 时序、**DFlash 擦写与回读**——只有 `mw/calib/calib_record.c` 的纯编解码有单测，**存储与跨核那半截没有**。**已有覆盖**：命令队列/日志环的入队出队纪律（FIFO、容量、新者胜、日志非阻塞字节泵：受 256 B 软件 TX FIFO 限界的每次调用、跨调用续排、CRLF 成对入队）自 2026-10-03 起有 `test_xcore.c`（锁与核间原子性仍只有目标机上有，主机替身是空锁）。
 
 ---
 

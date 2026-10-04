@@ -3,7 +3,7 @@ name: CI (tc275_car)
 # Host 侧验证。TASKING 固件编译无法在托管 runner 上进行（专有编译器），
 # CI 覆盖 gcc 能证明的部分: SF 帧编解码、38 字节遥测布局对 C6 侧解码器的
 # 交叉校验、电池 VIN 换算链（bsp/adc.h 纯函数）、xcore 命令队列/日志环
-# 纪律（FIFO/容量/SET_SPEED 新者胜塌缩/每调用一行排空）、链路时序图的
+# 纪律（FIFO/容量/SET_SPEED 新者胜塌缩/日志非阻塞字节泵）、链路时序图的
 # JSON 源。
 # monorepo: esp32c6_car 就在仓内——遥测交叉校验直接编译仓内 C6 源码，
 # 跨工程字节布局是"编译期锁定"而非复制（doc 22 E13/R12）；C6 侧契约变更

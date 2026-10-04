@@ -38,6 +38,19 @@ static struct {
 static struct { sint16 target; } g_left,g_right;
 static boolean g_servoLogAsked;
 static void drain(void) { int i; for(i=0;i<10;i++) XCORE_logService(); }
+/* xcore.c drains the log ring through the non-blocking byte pump
+ * (UART_printTry) since the UART FIFO change; reassemble lines on '\n' so
+ * the line-counting assertions below keep reading like a terminal. */
+static char curLine[300]; static int curLen;
+uint32 UART_printTry(const char *d, uint32 n) {
+    uint32 i;
+    for(i=0;i<n;i++){
+        char c=d[i];
+        if(c=='\n'){ if(lines<64){ curLine[curLen]=0; strcpy(uart[lines++],curLine); } curLen=0; }
+        else if(c!='\r' && curLen<299){ curLine[curLen++]=c; }
+    }
+    return n;
+}
 '''
 checks = r'''
 int main(void) {

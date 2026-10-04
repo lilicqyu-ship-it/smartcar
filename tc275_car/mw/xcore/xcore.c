@@ -770,39 +770,28 @@ void XCORE_logFields(const char *tag, const XcoreLogField *fields, uint8 count)
 
 void XCORE_logService(void)
 {
-    char line[XCORE_LOG_LINE_MAX + 1];
-
-    /* Exactly one line per call. This runs inside CPU0's 10 ms control task,
-     * and UART_println blocks on the ASCLIN0 FIFO at line rate (~87 us/byte
-     * at 115200): draining the whole ring in one go parked the task for the
-     * ~180 ms a full 2 KB backlog takes to shift out, which starved the
-     * command queue drain in the same loop and turned any log burst into a
-     * control stall. One line bounds the block at one line's transmit time
-     * (worst case XCORE_LOG_LINE_MAX bytes ~= 22 ms) while still draining
-     * 100 lines/s - 25x the steady-state producer rate of ~4 lines/s
-     * (LINKDBG 2/s + SPD 1/s + SRV 1/s). A larger backlog then takes seconds
-     * to clear, but it clears without ever touching the control period's
-     * budget, and producers drop whole lines on a full ring by design. */
-    if (g_logRd != g_logWr)
+    /* Non-blocking pump: move as many bytes as the UART's software TX FIFO
+     * takes, never waiting on the line. This runs inside CPU0's 10 ms control
+     * task next to the watchdog feed, and the previous one-blocking-write
+     * drain parked that task for up to one line's transmit time (~22 ms for
+     * 256 B at 115200, more than two control periods) whenever the ASCLIN0
+     * FIFO backed up - exactly the stall the one-line-per-call limit was
+     * meant to prevent, just smaller. Here the task only queues bytes into
+     * the 256 B driver FIFO, which the TX ISR drains at line rate in the
+     * background; a full FIFO ends the call at once and the byte is retried
+     * next period. A backlog still clears only at the line rate
+     * (~11.5 KB/s ~= 45 lines of 256 B per second), but that wait now happens
+     * in the hardware shift register instead of the control task, and
+     * producers keep dropping whole lines on a full ring by design. */
+    while (g_logRd != g_logWr)
     {
-        uint32 idx = 0;
+        char c = g_logRing[g_logRd % XCORE_LOG_RING_SIZE];
 
-        while ((g_logRd != g_logWr) && (idx < XCORE_LOG_LINE_MAX))
+        if (UART_printTry(&c, 1) == 0)
         {
-            char c = g_logRing[g_logRd % XCORE_LOG_RING_SIZE];
-
-            g_logRd++;
-            if (c == '\n')
-            {
-                break;
-            }
-            line[idx++] = c;
+            break;      /* TX FIFO full: byte stays queued, retried next call */
         }
-        line[idx] = '\0';
-        if (idx > 0)
-        {
-            UART_println(line);
-        }
+        g_logRd++;
     }
 }
 

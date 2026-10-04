@@ -187,6 +187,55 @@ int main(void)
         FUSION_step(&s, &in);
     }
     assert(s.out.reason == FUSION_ENCODER_LOST);
+    /* Sensors dead while CPU1 keeps publishing (doc 51): the seq check alone
+     * sees a fresh publisher - xcore bumps it every 1 ms - so per-side edge
+     * health must latch ENCODER_LOST after the grace window. */
+    setup(4000);
+    in.request[0] = in.request[1] = 500;
+    in.wheelMmS[0] = in.wheelMmS[1] = 300;
+    tick(1);
+    assert(s.out.flags & FUSION_ENCODER_OK);
+    in.encEdgeAgeMs[0] = 65535;
+    in.encEdgeAgeMs[1] = 65535;
+    for (i = 0; i < 49; i++)
+        tick(1); /* 490 ms edge-silent under throttle: still within grace */
+    assert(s.out.flags & FUSION_ENCODER_OK);
+    tick(1); /* 500 ms: the commanded-but-silent sides count as dead */
+    assert(!(s.out.flags & FUSION_ENCODER_OK));
+    assert(s.out.reason == FUSION_ENCODER_LOST && s.out.brake && s.latched);
+    /* One side dies, the opposite keeps turning (the masked-failure case the
+     * merged alive flag could never see). The speed anchor must come from
+     * the live side only, not average in the dead side's fake 0. */
+    setup(4000);
+    in.request[0] = in.request[1] = 500;
+    in.wheelMmS[0] = in.wheelMmS[1] = 300;
+    tick(1);
+    in.encEdgeAgeMs[0] = 65535; /* left pair dies */
+    in.wheelMmS[0] = 0;         /* ...and reads 0 mm/s */
+    tick(1);
+    assert(s.out.speedMmS == 300);
+    for (i = 0; i < 50; i++)
+        tick(1);
+    assert(s.out.reason == FUSION_ENCODER_LOST && s.out.brake && s.latched);
+    /* Health is only demanded while a side is asked to drive: idle with
+     * stale edges never latches, and pushing off from standstill starts the
+     * grace window instead of an immediate lockout. */
+    setup(4000);
+    in.encEdgeAgeMs[0] = 65535;
+    in.encEdgeAgeMs[1] = 65535;
+    for (i = 0; i < 30; i++)
+        tick(1);
+    assert((s.out.flags & FUSION_ENCODER_OK) && !s.out.brake);
+    in.request[0] = in.request[1] = 500;
+    in.wheelMmS[0] = in.wheelMmS[1] = 0;
+    for (i = 0; i < 40; i++)
+        tick(1); /* wheels still spinning up at 400 ms: no lockout */
+    assert(!s.out.brake && s.out.reason != FUSION_ENCODER_LOST);
+    in.encEdgeAgeMs[0] = in.encEdgeAgeMs[1] = 0; /* edges arrive */
+    in.wheelMmS[0] = in.wheelMmS[1] = 300;
+    for (i = 0; i < 60; i++)
+        tick(1);
+    assert(!s.out.brake && (s.out.flags & FUSION_ENCODER_OK));
     /* Delay and distance must monotonically reduce the velocity envelope. */
     setup(800);
     tick(1);

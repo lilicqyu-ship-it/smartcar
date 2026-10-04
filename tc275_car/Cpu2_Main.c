@@ -237,7 +237,9 @@ static void link_speedPrint(void)
 
     XCORE_LOG_FIELDS("[WHEELS]", XL_U("uptime_ms", STIME_nowMs()),
         XL_I("left_mm_s", vals[0]), XL_I("right_mm_s", vals[1]),
-        XL_U("session_odo_mm", vals[2]), XL_U("recent_encoder_edges", vals[3]));
+        XL_U("session_odo_mm", vals[2]), XL_U("recent_encoder_edges", vals[3]),
+        XL_U("left_edge_age_ms", enc.edgeAgeMs[0]),
+        XL_U("right_edge_age_ms", enc.edgeAgeMs[1]));
 }
 
 extern IfxCpu_syncEvent cpuSyncEvent;

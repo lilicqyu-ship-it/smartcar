@@ -96,6 +96,52 @@ void UART_println(const char *str)
     UART_putchar('\n');
 }
 
+/* Non-blocking console write for the log pump: queues whole source bytes
+ * into the driver's software TX FIFO, from where the TX ISR shifts them out
+ * at line rate in the background. Returns the number of SOURCE bytes
+ * accepted; a byte the FIFO could not take is left with the caller. '\n'
+ * expands to CRLF, and only when both bytes fit, so a newline is never
+ * consumed with half of it queued - the byte order on the wire stays exactly
+ * the ring order across partial pumps. */
+uint32 UART_printTry(const char *data, uint32 len)
+{
+    uint32 accepted = 0;
+
+    while (accepted < len)
+    {
+        char   c    = data[accepted];
+        uint32 need = (c == '\n') ? 2u : 1u;    /* CRLF takes two slots */
+
+        if ((uint32)IfxAsclin_Asc_getWriteCount(&g_asclin) < need)
+        {
+            break;                              /* software TX FIFO full */
+        }
+
+        if (c == '\n')
+        {
+            uint8     crlf[2] = { (uint8)'\r', (uint8)'\n' };
+            Ifx_SizeT count   = 2;
+
+            if (IfxAsclin_Asc_write(&g_asclin, crlf, &count, TIME_NULL) == FALSE)
+            {
+                break;
+            }
+        }
+        else
+        {
+            Ifx_SizeT count = 1;
+
+            if (IfxAsclin_Asc_write(&g_asclin, &c, &count, TIME_NULL) == FALSE)
+            {
+                break;
+            }
+        }
+        accepted++;
+    }
+
+    return accepted;
+}
+
 void UART_echoTask(void)
 {
     if (IfxAsclin_Asc_getReadCount(&g_asclin) > 0)

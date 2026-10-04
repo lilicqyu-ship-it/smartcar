@@ -74,6 +74,11 @@ static volatile uint32 g_lastEdgeMs[ENCODER_COUNT];
 /* published snapshot (ENCODER_task single writer) */
 static sint32   g_speedMmS[2];
 static uint32  g_odometerMm[2];
+/* Movement indicator ("any side produced an edge within the window"), NOT
+ * per-side health: a dead side hides behind a moving opposite side, and a
+ * parked robot reads FALSE with perfectly healthy sensors. Per-side health
+ * is the edge-age primitive below (doc 51); consumers combine it with the
+ * side command. */
 static boolean g_alive;
 
 static boolean pinLevel(uint8 ch)
@@ -327,6 +332,34 @@ boolean ENCODER_isAlive(void)
     return g_alive;
 }
 
+/* Health primitive behind the snapshot's edgeAgeMs[2]: ms since the side's
+ * most recent edge, saturated. lastEdgeMs==0 means no edge since boot (STIME
+ * starts at 0) and reads 0xFFFF. g_lastEdgeMs is written by the ISRs on this
+ * core; a torn read is impossible on 32-bit aligned loads, and being one ms
+ * stale is irrelevant against the 100 ms freshness threshold. */
+static uint16 enc_sideEdgeAgeMs(uint8 side, uint32 now)
+{
+    uint8  a    = (uint8)(side * 2u);
+    uint32 last = g_lastEdgeMs[a] > g_lastEdgeMs[a + 1u] ? g_lastEdgeMs[a]
+                                                         : g_lastEdgeMs[a + 1u];
+    uint32 age;
+
+    if (last == 0u)
+    {
+        return 0xFFFFu;
+    }
+    age = now - last;
+    return (age > 0xFFFFu) ? 0xFFFFu : (uint16)age;
+}
+
+void ENCODER_getEdgeAgeMs(uint16 age[2])
+{
+    uint32 now = STIME_nowMs();
+
+    age[0] = enc_sideEdgeAgeMs(0u, now);
+    age[1] = enc_sideEdgeAgeMs(1u, now);
+}
+
 /* Bench direction calibration entry (doc 23 section 8.4 step 2). sign is
  * clamped to +-1; 0 is refused - "no direction" is not a calibration, it is
  * the bug this call exists to fix. Called from the motor_algo calibration
@@ -387,11 +420,16 @@ static sint16 enc_satS16(sint32 v)
 }
 
 /* Publish both unit domains in one snapshot: percent*10 for the demo status
- * overlay (Cpu0_Main) and physical mm/s + per-side odometer for the SF
- * telemetry fields vMeasL/R and odoSession (SDD §6.3, fed by Cpu2_Main). */
+ * overlay (Cpu0) and physical mm/s + per-side odometer for the SF
+ * telemetry fields vMeasL/R and odoSession (SDD §6.3, fed by Cpu2_Main).
+ * edgeAgeMs is the per-side health primitive (doc 51); alive stays the
+ * coarse "recently moved" bit for the status echo. */
 void ENCODER_publish(void)
 {
     XcoreEncoder enc;
+    uint16       edgeAge[2];
+
+    ENCODER_getEdgeAgeMs(edgeAge);
 
     enc.pctLeft  = (sint16)((g_speedMmS[0] * 1000) / g_fullScaleMmS);
     enc.pctRight = (sint16)((g_speedMmS[1] * 1000) / g_fullScaleMmS);
@@ -406,6 +444,8 @@ void ENCODER_publish(void)
     enc.odoLeftMm     = g_odometerMm[0];
     enc.odoRightMm    = g_odometerMm[1];
     enc.alive         = g_alive;
+    enc.edgeAgeMs[0]  = edgeAge[0];
+    enc.edgeAgeMs[1]  = edgeAge[1];
     ENCODER_getRawCounts(enc.raw);
 
     XCORE_encoderPublish(&enc);

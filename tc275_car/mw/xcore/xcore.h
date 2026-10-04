@@ -34,8 +34,11 @@ void XCORE_motorStatusGet(sint16 *left, sint16 *right);
 /* Measured wheel speeds (CPU1 encoder -> telemetry). One snapshot, two unit
  * domains: pct*10 (-1000..+1000) for the demo status overlay, physical mm/s
  * and per-side odometer for the SF telemetry (SDD §6.3 vMeasL/R, odoSession).
- * alive = encoder edges seen within the alive window. CPU1 publishes; CPU0
- * and CPU2 read. */
+ * alive = "any side produced an edge within the alive window" - a movement
+ * indicator, not per-side health (a dead side hides behind a moving opposite
+ * side, a parked robot reads FALSE with healthy sensors). edgeAgeMs is the
+ * per-side health primitive (doc 51); consumers combine it with the side
+ * command. CPU1 publishes; CPU0 and CPU2 read. */
 typedef struct
 {
     uint32 seq;              /* publication freshness, including stationary */
@@ -46,6 +49,8 @@ typedef struct
     uint32  odoLeftMm;        /* per-side absolute distance since boot, mm  */
     uint32  odoRightMm;
     boolean alive;
+    uint16  edgeAgeMs[2];     /* left/right: ms since the side's last edge,
+                               * saturated 0xFFFF (= none since boot)       */
     sint32  raw[4];           /* E1..E4 (= MOTOR_A..D) post-invert x4 counts,
                                * cumulative since boot; jog count EVT 0x26  */
 } XcoreEncoder;
@@ -196,7 +201,8 @@ boolean XCORE_cmdPushLatest(const XcoreCmdMsg *msg);
 /* Log bridge: CPU1/CPU2 write lines into a shared ring, CPU0 drains to UART */
 void XCORE_log(const char *s);            /* append without newline */
 void XCORE_logln(const char *s);          /* append one line */
-void XCORE_logService(void);              /* CPU0 only: print pending lines */
+void XCORE_logService(void);              /* CPU0 only: non-blocking byte pump
+                                           * into the UART software TX FIFO */
 
 /* Structured diagnostics: named units, exact u32/i32, hex registers and text.
  * Formatting occurs outside the mutex. Long records split at FIELD boundaries,

@@ -3,9 +3,11 @@
  *
  * mw/xcore/xcore.c runs on all three cores behind a hardware spinlock, but
  * the discipline inside the lock is plain index arithmetic: FIFO order, queue
- * capacity, newest-wins coalescing and the one-line-per-call log drain. Those
- * are exactly the parts the 2026-10-03 "LINK cmdq full" field failure lived
- * in, so they get compiled and asserted here instead of trusted.
+ * capacity, newest-wins coalescing and the bounded non-blocking log pump.
+ * Those are exactly the parts the 2026-10-03 "LINK cmdq full" field failure
+ * lived in - plus the 2026-10-04 finding that the old one-line-per-call drain
+ * still parked the 10 ms control task for up to one line's transmit time -
+ * so they get compiled and asserted here instead of trusted.
  *
  * The hardware stand-ins are minimal on purpose (stub/IfxCpu.h makes the
  * mutex vacuous - single-threaded host - and the UART capture below replaces
@@ -54,18 +56,114 @@ static int g_failed;
 /* ---- UART capture: what CPU0 would have shipped to ASCLIN0 -------------- */
 
 #define TEST_LINE_MAX  260              /* mirrors xcore.c's XCORE_LOG_LINE_MAX */
+#define TEST_TX_FIFO   256              /* mirrors ASC_TX_BUFFER_SIZE in bsp/uart.c */
 
 static char g_uartLines[64][TEST_LINE_MAX];
 static int  g_uartCount;
 
-void UART_println(const char *str)
+/* Simulated ASCLIN0 in three layers, mirroring the target data path:
+ * UART_printTry queues bytes (CRLF-expanded) into the driver's software TX
+ * FIFO without ever waiting; test_uartDrain plays the TX ISR moving FIFO
+ * bytes onto the wire; test_uartCollect re-splits the wire stream into
+ * terminal lines on '\n'. A wire byte order violation or a split CRLF pair
+ * shows up here exactly as it would on a terminal. */
+static uint8 g_txFifo[TEST_TX_FIFO];
+static int   g_txUsed;
+static char  g_wire[16384];
+static int   g_wireLen;
+
+uint32 UART_printTry(const char *data, uint32 len)
 {
-    if (g_uartCount < (int)(sizeof(g_uartLines) / sizeof(g_uartLines[0])))
+    uint32 accepted = 0;
+
+    while (accepted < len)
     {
-        strncpy(g_uartLines[g_uartCount], str, sizeof(g_uartLines[0]) - 1u);
-        g_uartLines[g_uartCount][sizeof(g_uartLines[0]) - 1u] = '\0';
-        g_uartCount++;
+        char   c    = data[accepted];
+        uint32 need = (c == '\n') ? 2u : 1u;    /* '\n' goes out as CRLF */
+
+        if ((uint32)(TEST_TX_FIFO - g_txUsed) < need)
+        {
+            break;                      /* both bytes or none, like the real one */
+        }
+        if (c == '\n')
+        {
+            g_txFifo[g_txUsed++] = (uint8)'\r';
+        }
+        g_txFifo[g_txUsed++] = (uint8)c;
+        accepted++;
     }
+
+    return accepted;
+}
+
+static void test_uartReset(void)
+{
+    g_txUsed = 0;
+    g_wireLen = 0;
+    g_uartCount = 0;
+    memset(g_txFifo, 0, sizeof(g_txFifo));
+    memset(g_wire, 0, sizeof(g_wire));
+    memset(g_uartLines, 0, sizeof(g_uartLines));
+}
+
+/* TX ISR stand-in: shift n FIFO bytes onto the wire. */
+static void test_uartDrain(int n)
+{
+    while ((n > 0) && (g_txUsed > 0))
+    {
+        g_wire[g_wireLen++] = (char)g_txFifo[0];
+        memmove(g_txFifo, g_txFifo + 1, (size_t)(g_txUsed - 1));
+        g_txUsed--;
+        n--;
+    }
+}
+
+static void test_uartDrainAll(void)
+{
+    test_uartDrain(g_txUsed);
+}
+
+/* Terminal stand-in: re-split the wire stream into lines ('\r' stripped,
+ * like a terminal that shows the text but not the control bytes). */
+static void test_uartCollect(void)
+{
+    int start = 0;
+    int i;
+
+    g_uartCount = 0;
+    for (i = 0; i <= g_wireLen; i++)
+    {
+        if ((i == g_wireLen) || (g_wire[i] == '\n'))
+        {
+            int end = i;
+
+            if ((end > start) && (g_wire[end - 1] == '\r'))
+            {
+                end--;                  /* CRLF: drop the CR like a terminal */
+            }
+            if ((end > start) &&
+                (g_uartCount < (int)(sizeof(g_uartLines) / sizeof(g_uartLines[0]))))
+            {
+                int len = end - start;
+
+                strncpy(g_uartLines[g_uartCount], &g_wire[start],
+                        (size_t)len);
+                g_uartLines[g_uartCount][len] = '\0';
+                g_uartCount++;
+            }
+            start = i + 1;
+        }
+    }
+}
+
+/* "FIFO always keeps up" view: service, shift everything out, re-split.
+ * Matches how the real system looks whenever the producers stay below the
+ * 115200 baud line rate between two control ticks. */
+static void test_serviceFast(void)
+{
+    XCORE_logService();
+    test_uartDrainAll();
+    test_uartCollect();
 }
 
 /* ---- helpers --------------------------------------------------------------- */
@@ -241,33 +339,142 @@ static void test_cmdpush_latest_no_match_appends(void)
     CHECK_EQ(m.data[0], 7);
 }
 
-/* ---- log ring: one line per service call -----------------------------------
+/* ---- log pump: bounded, non-blocking, order-preserving ----------------------
  *
- * XCORE_logService runs in CPU0's 10 ms control task; draining the whole ring
- * in one call used to park that task for the transmit time of 2 KB (~180 ms
- * at 115200) and starve the command queue drain in the same loop. */
-static void test_logservice_one_line_per_call(void)
+ * XCORE_logService runs in CPU0's 10 ms control task next to the watchdog
+ * feed. The old one-line-per-call drain blocked that task for up to one
+ * line's transmit time (~22 ms for 256 B at 115200 - more than two control
+ * periods) whenever the ASCLIN0 FIFO was full. The pump must therefore only
+ * ever queue bytes the software TX FIFO accepts immediately, and resume
+ * exactly where it stopped on a later call. */
+static void test_logservice_pump_bounded_by_fifo(void)
+{
+    char filler[400];
+    int  guard;
+
+    XCORE_init();
+    test_uartReset();
+    memset(filler, 'x', sizeof(filler));
+
+    /* Software TX FIFO filled from elsewhere (echo task style): the pump
+     * must move nothing and - the point of the fix - not wait for the line. */
+    CHECK_EQ(UART_printTry(filler, sizeof(filler)), (uint32)TEST_TX_FIFO);
+    XCORE_logln("hello");
+    XCORE_logService();
+    CHECK_EQ(g_txUsed, TEST_TX_FIFO);           /* FIFO untouched          */
+
+    /* One free slot: exactly one byte moves per call, never a spin. */
+    test_uartDrain(1);
+    XCORE_logService();
+    CHECK_EQ(g_txUsed, TEST_TX_FIFO);           /* 'h' refilled the slot   */
+
+    /* Draining in bursts clears the rest without ever exceeding the FIFO. */
+    while (g_txUsed > 0)
+    {
+        test_uartDrain(3);
+        XCORE_logService();
+        CHECK(g_txUsed <= TEST_TX_FIFO);
+    }
+    for (guard = 0; guard < 10; guard++)
+    {
+        XCORE_logService();                     /* ring dry: no movement   */
+        CHECK_EQ(g_txUsed, 0);
+    }
+    test_uartCollect();
+    /* The unterminated filler run and "hello" form one physical line that
+     * the trailing CRLF closes: 256 intact filler bytes, then hello. */
+    CHECK_EQ(g_uartCount, 1);
+    CHECK_EQ(strlen(g_uartLines[0]), (size_t)(TEST_TX_FIFO + 5));
+    CHECK(strncmp(g_uartLines[0], "xxxx", 4) == 0);
+    CHECK(strcmp(&g_uartLines[0][TEST_TX_FIFO], "hello") == 0);
+    CHECK(strcmp(&g_wire[TEST_TX_FIFO], "hello\r\n") == 0);
+}
+
+static void test_logservice_pump_resumes_in_order(void)
+{
+    char line[16];
+    char expect[16];
+    int  i;
+
+    XCORE_init();
+    test_uartReset();
+
+    for (i = 0; i < 40; i++)                    /* 40 x "line 000\n" = 320 B:
+                                                 * more than the 256 B FIFO */
+    {
+        sprintf(line, "line %03d", i);
+        XCORE_logln(line);
+    }
+
+    /* One call may only queue what the FIFO accepts; "line %03d\n" is 9 B
+     * per line so no CRLF sits on the 256 B boundary: exactly full. */
+    XCORE_logService();
+    CHECK_EQ(g_txUsed, TEST_TX_FIFO);
+
+    while (g_txUsed > 0)
+    {
+        test_uartDrain(7);                      /* small "line rate" bursts */
+        XCORE_logService();
+    }
+    test_uartCollect();
+
+    CHECK_EQ(g_wireLen, 40 * (8 + 2));          /* 8 chars + CRLF per line  */
+    CHECK_EQ(g_uartCount, 40);
+    for (i = 0; i < 40; i++)
+    {
+        sprintf(expect, "line %03d", i);
+        CHECK(strcmp(g_uartLines[i], expect) == 0);
+    }
+}
+
+static void test_logservice_pump_newline_never_split(void)
+{
+    char filler[255];
+
+    XCORE_init();
+    test_uartReset();
+    memset(filler, 'x', sizeof(filler));
+
+    /* One free slot and a '\n' at the ring head: CRLF needs two slots, so
+     * the newline must stay queued - neither consumed as a lone CR nor
+     * passed over - or the terminal would see broken framing. */
+    CHECK_EQ(UART_printTry(filler, sizeof(filler)), (uint32)sizeof(filler));
+    XCORE_logln("");                        /* ring: "\n" only           */
+    XCORE_logService();
+    CHECK_EQ(g_txUsed, (int)sizeof(filler));/* nothing consumed          */
+
+    test_uartDrain(1);
+    XCORE_logService();                     /* both bytes fit now        */
+    CHECK_EQ(g_txUsed, TEST_TX_FIFO);
+    test_uartDrainAll();
+    CHECK((g_wireLen == (int)sizeof(filler) + 2) &&
+          (g_wire[g_wireLen - 2] == '\r') &&
+          (g_wire[g_wireLen - 1] == '\n'));
+    test_uartCollect();
+    CHECK_EQ(g_uartCount, 1);               /* CRLF closed the filler    */
+    CHECK_EQ(strlen(g_uartLines[0]), sizeof(filler));
+}
+
+/* Whole backlog with the FIFO keeping up: everything drains in one call,
+ * lines in FIFO order, wire bytes exactly ring order. */
+static void test_logservice_drains_all_when_fifo_keeps_up(void)
 {
     XCORE_init();
-    g_uartCount = 0;
+    test_uartReset();
 
     XCORE_logln("line one");
     XCORE_logln("line two");
     XCORE_logln("line three");
 
-    XCORE_logService();
-    CHECK_EQ(g_uartCount, 1);                       /* one line, first out  */
+    test_serviceFast();
+    CHECK_EQ(g_uartCount, 3);
     CHECK(strcmp(g_uartLines[0], "line one") == 0);
-
-    XCORE_logService();
-    CHECK_EQ(g_uartCount, 2);
     CHECK(strcmp(g_uartLines[1], "line two") == 0);
+    CHECK(strcmp(g_uartLines[2], "line three") == 0);
 
-    XCORE_logService();
+    test_serviceFast();                         /* ring empty: no output   */
     CHECK_EQ(g_uartCount, 3);
-
-    XCORE_logService();                             /* ring empty: no print */
-    CHECK_EQ(g_uartCount, 3);
+    CHECK_EQ(g_txUsed, 0);
 }
 
 static void test_logu_line_format(void)
@@ -275,12 +482,12 @@ static void test_logu_line_format(void)
     uint32 vals[2];
 
     XCORE_init();
-    g_uartCount = 0;
+    test_uartReset();
 
     vals[0] = 1u;
     vals[1] = 42u;
     XCORE_logu("LINK cmdq full x", vals, 2u);
-    XCORE_logService();
+    test_serviceFast();
 
     CHECK_EQ(g_uartCount, 1);
     CHECK(strcmp(g_uartLines[0], "LINK cmdq full x 1 42") == 0);
@@ -341,8 +548,11 @@ static void test_sensor_snapshots(void)
     XCORE_init();
     memset(&tof, 0, sizeof(tof)); memset(&out, 0, sizeof(out));
     memset(&enc, 0, sizeof(enc));
+    enc.alive = 1; enc.edgeAgeMs[0] = 7u; enc.edgeAgeMs[1] = 65535u;
     XCORE_encoderPublish(&enc); XCORE_encoderRead(&enc);
     CHECK_EQ(enc.seq, 1u);
+    CHECK_EQ(enc.edgeAgeMs[0], 7u);                 /* health rides along   */
+    CHECK_EQ(enc.edgeAgeMs[1], 65535u);
     XCORE_encoderPublish(&enc); XCORE_encoderRead(&enc);
     CHECK_EQ(enc.seq, 2u);
     tof.seq=9; tof.stampMs=123; tof.zones=64; tof.alive=1;
@@ -367,24 +577,24 @@ static void test_named_logs(void)
     XcoreLogField many[20];
     char longText[180];
     int i, found = 0;
-    XCORE_init(); g_uartCount = 0;
+    XCORE_init(); test_uartReset();
     XCORE_LOG_FIELDS("[TEST]", XL_U("total", 0xFFFFFFFFu),
         XL_I("signed", (-2147483647 - 1)), XL_H("register", 0xFFFFFFFFu),
         XL_S("state", "ready"), XL_S("missing", NULL_PTR));
-    XCORE_logService();
+    test_serviceFast();
     CHECK_EQ(g_uartCount, 1);
     CHECK(strcmp(g_uartLines[0], "[TEST] total=4294967295 signed=-2147483648 register=0xFFFFFFFF state=ready missing=unknown") == 0);
     memset(longText, 'x', sizeof(longText)); longText[179] = 0;
     XCORE_LOG_FIELDS("[LONG]", XL_S("text", longText), XL_U("after", 123));
-    XCORE_logService();
+    test_serviceFast();
     CHECK(strstr(g_uartLines[1], "... after=123") != NULL);
     for (i = 0; i < 20; i++) {
         many[i].name = "counter_total"; many[i].number = 4294967295u;
         many[i].text = NULL_PTR; many[i].kind = 0u;
     }
-    g_uartCount = 0;
+    test_uartReset();
     XCORE_logFields("[SPLIT]", many, 20u);
-    for (i=0; i<10; i++) XCORE_logService();
+    for (i=0; i<10; i++) test_serviceFast();
     CHECK(g_uartCount >= 2);
     for (i=0; i<g_uartCount; i++) {
         const char *cursor = g_uartLines[i];
@@ -465,7 +675,10 @@ int main(void)
     test_cmdpush_latest_keeps_order_of_others();
     test_cmdpush_latest_burst_collapses();
     test_cmdpush_latest_no_match_appends();
-    test_logservice_one_line_per_call();
+    test_logservice_pump_bounded_by_fifo();
+    test_logservice_pump_resumes_in_order();
+    test_logservice_pump_newline_never_split();
+    test_logservice_drains_all_when_fifo_keeps_up();
     test_logu_line_format();
     test_imu_block();
     test_sensor_snapshots();

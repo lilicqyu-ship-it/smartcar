@@ -193,16 +193,23 @@ static void MOTOR_ALGO_controlStep(void)
     g_right.target = MOTOR_ALGO_stepToward(g_right.target, g_right.cmd);
 
     /* ENCODER_task() ran at the top of MOTOR_ALGO_task, so this snapshot is
-     * from this very cycle. measValid=FALSE (encoder not alive OR the
-     * direction record still src=0) selects the open-loop fallback inside
-     * SERVO_update - duty = target, integral dropped - not an error. */
+     * from this very cycle. measValid=FALSE (the side's sensors silent while
+     * it is commanded, OR the direction record still src=0) selects the
+     * open-loop fallback inside SERVO_update - duty = target, integral
+     * dropped - not an error. The check is per side (doc 51): the merged
+     * alive flag let a moving opposite side mask a dead one, and the servo
+     * then integrated against that side's fake 0 mm/s. A side with no
+     * command has nothing to measure, so cmd==0 always passes. */
     XCORE_encoderRead(&enc);
 
     {
-        boolean measOk = (enc.alive && g_closedLoopOk) ? TRUE : FALSE;
+        boolean measOkL = g_closedLoopOk &&
+            ((enc.edgeAgeMs[0] <= ENCODER_EDGE_FRESH_MS) || (g_left.cmd == 0));
+        boolean measOkR = g_closedLoopOk &&
+            ((enc.edgeAgeMs[1] <= ENCODER_EDGE_FRESH_MS) || (g_right.cmd == 0));
 
-        dutyL = SERVO_update(0u, g_left.target, enc.pctLeft, measOk);
-        dutyR = SERVO_update(1u, g_right.target, enc.pctRight, measOk);
+        dutyL = SERVO_update(0u, g_left.target, enc.pctLeft, measOkL);
+        dutyR = SERVO_update(1u, g_right.target, enc.pctRight, measOkR);
     }
 
     MOTOR_ALGO_apply(dutyL, dutyR);

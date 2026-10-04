@@ -7,6 +7,10 @@
 
 ## [未发布]
 
+### 控制周期修复（1.3.1）
+- **P0**：CPU0 10 ms 控制任务内同步排 UART 日志，最坏 256 B@115200 ≈ 22 ms，天然超过控制周期。`XCORE_logService` 改为非阻塞字节泵：新增 `bsp/uart UART_printTry`（TIME_NULL 写 + 空闲水位检查，`\n`→CRLF 成对入队），控制任务只把日志环字节排进 ASCLIN0 驱动 256 B 软件 TX FIFO，TX ISR 按线速后台移出；FIFO 满即停、下周期续排，跨调用字节序与 CRLF 帧化不变。积压仍按线速清空、满环丢整行计数不变；不再阻塞控制任务/喂狗节奏。
+- `test_xcore` 契约同步改写（主机模拟 TX FIFO + 线流重组：1109→1386 断言）；`test_log_policy` 落地替身随行。TASKING Debug 构建通过（uart.o/xcore.o 重编 + 重链）。
+
 ### 诊断事务（1.3.0）
 - 新增 DIAG 0x53/sub 0x60：会话租约、请求 ID 去重、ACK/RESULT、终态保留/查询、取消与明确错误码；定长布局见共享契约。
 - 新增 IMU/ToF 有限时采集、IMU 六面原始数据入口（尚不评定精度）、ToF 单区域参考板工程检查；测量与通信完整性结论分开。

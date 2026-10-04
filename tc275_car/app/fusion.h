@@ -14,6 +14,11 @@
 #define FUSION_NEUTRAL_REQUIRED 64u
 #define FUSION_TOF_LIMITED 128u /* fresh sparse frame: manual low-speed allowance */
 #define FUSION_SPARSE_MM_S 150u
+/* Per-side encoder health (doc 51). A side's edge age at or under the fresh
+ * threshold is live feedback; a side asked to drive may stay silent for the
+ * grace window (wheel spin-up from standstill) before it counts as dead. */
+#define FUSION_ENC_EDGE_FRESH_MS 100u
+#define FUSION_ENC_GRACE_MS 500u
 /* Reasons are independent of the existing robot emergency-stop fault. */
 enum
 {
@@ -38,6 +43,9 @@ typedef struct
     uint8_t imuAlive, wheelsCalibrated;
     int16_t accMg[3], wheelMmS[2], request[2], fullScaleMmS;
     int32_t gyroMdps[3], counts[4];
+    uint16_t encEdgeAgeMs[2]; /* per side ms since last edge, 0xFFFF = none;
+                                 encoderSeq alone only proves the CPU1
+                                 publisher task, not the sensors (doc 51) */
     FusionTof tof;
 } FusionInput;
 typedef struct
@@ -62,6 +70,7 @@ typedef struct
     FusionOutput out;
     uint32_t lastMs, imuSeq, imuMs, encSeq, encMs, tofSeq, stillMs, overspeedMs;
     int32_t counts[4];
+    uint16_t encAbsentMs[2]; /* ms a commanded side has been edge-silent */
     float bias[3], velocity, heading, roll, pitch, holdHeading, yawRate;
     uint16_t biasSamples;
     uint8_t started, imuSeen, encSeen, countsSeen, latched, clearFrames, holding, slip, overspeedSeen;

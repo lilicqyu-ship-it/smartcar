@@ -51,10 +51,10 @@ uint8_t FUSION_calibrate(Fusion *s, const int8_t a[3], uint16_t track)
     s->holding = 0;
     return 1;
 }
-static void motion(Fusion *s, const FusionInput *in, float dt)
+static void motion(Fusion *s, const FusionInput *in, float dt, uint32_t elapsedMs)
 {
     unsigned i;
-    int still = 1, freshImu, freshEnc;
+    int still = 1, freshImu, freshEnc, encOk, encBoth, liveSides;
     float acc[3], g[3], norm = 0, gyroMax = 0, meas;
     if (in->encoderSeq && (!s->encSeen || in->encoderSeq != s->encSeq))
     {
@@ -63,10 +63,51 @@ static void motion(Fusion *s, const FusionInput *in, float dt)
         s->encSeen = 1;
     }
     freshEnc = s->encSeen && (uint32_t)(in->nowMs - s->encMs) <= 50u;
-    if (freshEnc)
+    /* Seq freshness only proves the CPU1 publisher task is alive - xcore
+     * bumps it on every 1 ms publish even with all four Hall sensors dead.
+     * Sensor health is judged per side from the edge age: a side must keep
+     * producing edges while it is asked to drive, with a grace window for
+     * the spin-up from standstill (the old single merged alive flag never
+     * reached fusion at all and could not see a dead side behind a moving
+     * opposite side, doc 51). Releasing the stick resets the window, so an
+     * idle robot never latches. */
+    for (i = 0; i < 2; i++)
+    {
+        if (in->request[i] == 0)
+            s->encAbsentMs[i] = 0;
+        else if (freshEnc && in->encEdgeAgeMs[i] <= FUSION_ENC_EDGE_FRESH_MS)
+            s->encAbsentMs[i] = 0;
+        else
+            s->encAbsentMs[i] += elapsedMs;
+    }
+    encOk = freshEnc && s->encAbsentMs[0] < FUSION_ENC_GRACE_MS &&
+            s->encAbsentMs[1] < FUSION_ENC_GRACE_MS;
+    if (encOk)
         s->out.flags |= FUSION_ENCODER_OK;
-    meas = freshEnc ? (in->wheelMmS[0] + in->wheelMmS[1]) * 0.5f : 0;
+    /* Speed anchor from the sides with live edges only: a dead side reads
+     * 0 mm/s and would otherwise halve the reported speed. */
+    meas = 0;
+    liveSides = 0;
+    if (freshEnc)
+    {
+        if (in->encEdgeAgeMs[0] <= FUSION_ENC_EDGE_FRESH_MS)
+        {
+            meas += in->wheelMmS[0];
+            liveSides++;
+        }
+        if (in->encEdgeAgeMs[1] <= FUSION_ENC_EDGE_FRESH_MS)
+        {
+            meas += in->wheelMmS[1];
+            liveSides++;
+        }
+        if (liveSides > 0)
+            meas /= (float)liveSides;
+    }
     s->velocity = meas; /* encoder anchor; IMU acceleration never free-integrates */
+    /* Both sides live is the precondition for consuming the differential
+     * wheel speed: one dead side fakes a huge or zero wheel yaw. */
+    encBoth = freshEnc && in->encEdgeAgeMs[0] <= FUSION_ENC_EDGE_FRESH_MS &&
+              in->encEdgeAgeMs[1] <= FUSION_ENC_EDGE_FRESH_MS;
     for (i = 0; i < 4; i++)
     {
         if (!s->countsSeen || in->counts[i] != s->counts[i])
@@ -125,7 +166,7 @@ static void motion(Fusion *s, const FusionInput *in, float dt)
                 s->pitch += k * wrap(atan2f(-x, sqrtf(y * y + z * z)) * DEG - s->pitch);
             }
             s->slip = 0;
-            if (freshEnc && in->wheelsCalibrated && s->biasSamples >= 100)
+            if (encBoth && in->wheelsCalibrated && s->biasSamples >= 100)
             {
                 if (fabsf(wheelYaw - gz) > 30)
                     s->slip = 1;
@@ -170,7 +211,7 @@ void FUSION_step(Fusion *s, const FusionInput *in)
         s->stillMs = in->nowMs;
     s->started = 1;
     s->lastMs = in->nowMs;
-    motion(s, in, dt);
+    motion(s, in, dt, elapsed);
     o->tofAgeMs = (uint16_t)(age > 65535u ? 65535u : age);
     if (in->tof.alive && in->tof.seq && age <= 250u && (n == 16u || n == 64u))
     {

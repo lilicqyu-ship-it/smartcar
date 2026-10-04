@@ -35,6 +35,14 @@
 #define ENCODER_SIDE_RIGHT_0       2u
 #define ENCODER_SIDE_RIGHT_1       3u
 
+/* Per-side health threshold on the published edge ages: an age at or under
+ * this still counts as live feedback. One wheel edge is ~0.007 counts per
+ * ms per mm/s, so a side creeping at ~1.5 mm/s edges every ~100 ms; anything
+ * slower is indistinguishable from standstill anyway. Consumers must demand
+ * edges only from a side that is being driven - a parked side has nothing
+ * to produce (doc 51). */
+#define ENCODER_EDGE_FRESH_MS      100u
+
 void    ENCODER_init(void);                   /* CPU1, after MOTOR_init (GTM CLK0) */
 void    ENCODER_task(void);                   /* CPU1 1 kHz step: window, publish  */
 void    ENCODER_publish(void);                /* push snapshot through xcore       */
@@ -42,6 +50,10 @@ void    ENCODER_getSpeedsMmS(sint32 v[2]);     /* left/right side, mm/s         
 void    ENCODER_getRawCounts(sint32 c[4]);     /* E1..E4 signed x4 counts           */
 void    ENCODER_getOdometer(uint32 m[2]);     /* left/right side, mm               */
 boolean ENCODER_isAlive(void);                /* edges seen within the alive window */
+void    ENCODER_getEdgeAgeMs(uint16 age[2]);  /* left/right side, ms since last
+                                                * edge, saturated 0xFFFF (= none
+                                                * since boot); per-side health
+                                                * primitive, doc 51                */
 
 /* Direction calibration of one wheel's count sign (doc 23 section 8.4):
  * +1 = counts increase when the wheel turns "chassis forward". Runtime-
