@@ -1,5 +1,5 @@
-#include "bsp/tof.h"
-#include "bsp/stime.h"
+#include "tof.h"
+#include "stime.h"
 
 #include "I2c/Std/IfxI2c.h"
 #include "IfxCpu.h"
@@ -12,7 +12,7 @@
  * section 3), so the only portable form is one the preprocessor resolves from
  * the including file's own directory. api.h pulls its own platform.h from that
  * same directory - the one file there this repository owns. */
-#include "../Libraries/ST/vl53l5cx/vl53l5cx_api.h"
+#include "vl53l5cx_api.h"
 
 #include "FreeRTOS.h"
 #include "task.h"

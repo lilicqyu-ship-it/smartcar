@@ -70,10 +70,14 @@ static void motion(Fusion *s, const FusionInput *in, float dt, uint32_t elapsedM
      * the spin-up from standstill (the old single merged alive flag never
      * reached fusion at all and could not see a dead side behind a moving
      * opposite side, doc 51). Releasing the stick resets the window, so an
-     * idle robot never latches. */
+     * idle robot never latches. A latched protective stop has zeroed the
+     * command itself: wheels at rest are then the expected consequence, not
+     * a sensor fault, so the hold must not accrue toward ENCODER_LOST and
+     * relabel the stop reason after 500 ms - the guard re-arms from zero
+     * when the stop lifts. */
     for (i = 0; i < 2; i++)
     {
-        if (in->request[i] == 0)
+        if (in->request[i] == 0 || s->latched)
             s->encAbsentMs[i] = 0;
         else if (freshEnc && in->encEdgeAgeMs[i] <= FUSION_ENC_EDGE_FRESH_MS)
             s->encAbsentMs[i] = 0;
@@ -202,7 +206,7 @@ void FUSION_step(Fusion *s, const FusionInput *in)
     uint32_t elapsed = s->started ? (uint32_t)(in->nowMs - s->lastMs) : 10u;
     uint32_t age = (uint32_t)(in->nowMs - in->tof.stampMs);
     int l = clamp(in->request[0]), r = clamp(in->request[1]), peak, cap = 0, hard = 0, forward;
-    int overspeed, crawl;
+    int overspeed;
     int fs = in->fullScaleMmS >= 100 && in->fullScaleMmS <= 5000 ? in->fullScaleMmS : 1000;
     float dt = (float)(elapsed > 50u ? 10u : elapsed) * 0.001f;
     memset(o, 0, sizeof(*o));
@@ -232,8 +236,6 @@ void FUSION_step(Fusion *s, const FusionInput *in)
             if (!o->nearestMm || d < o->nearestMm)
                 o->nearestMm = (uint16_t)d;
         }
-        /* Sparse returns remain unknown space. Manual mode permits only a
-         * bounded crawl while the physical sensor keeps publishing frames. */
         if (valid >= n / 2u && o->sectorMm[1])
             o->flags |= FUSION_TOF_OK;
         else
@@ -249,20 +251,51 @@ void FUSION_step(Fusion *s, const FusionInput *in)
         cap = (int)(sqrtf(a * a * t * t + 2 * a * clearance) - a * t);
         if (cap > fs)
             cap = fs;
+        /* Sparse returns remain unknown space: manual mode permits only a
+         * bounded crawl while the physical sensor keeps publishing frames -
+         * but the collapse toward it must follow braking physics. A sparse
+         * frame is often just a zone-count dip (far zones flap between a
+         * target and no target) with an unchanged scene: pinching the cap
+         * from ~900 to 150 in one step put a moving robot above the envelope
+         * and the overspeed guard latched a full stop on every push (bench
+         * 2026-10). Decay instead from the last healthy cap at the configured
+         * decel: a transient dip only eases the envelope, a persistent sparse
+         * view still reaches the crawl within about a second of real braking,
+         * and a genuinely closer target keeps binding through its own
+         * distance envelope below. */
         if (o->flags & FUSION_TOF_LIMITED)
         {
-            if (!o->nearestMm || cap > (int)FUSION_SPARSE_MM_S)
-                cap = FUSION_SPARSE_MM_S;
+            uint32_t since = (uint32_t)(in->nowMs - s->capContMs);
+            int contCap;
+            if (since > 20000u)
+                since = 20000u;
+            contCap = (int)s->capContMmS -
+                      (int)(since * (uint32_t)s->cfg.decelMmS2 / 1000u);
+            if (contCap < (int)FUSION_SPARSE_MM_S)
+                contCap = (int)FUSION_SPARSE_MM_S;
+            if (!o->nearestMm || cap > contCap)
+                cap = contCap;
         }
     }
     o->capMmS = (uint16_t)cap;
+    /* A healthy frame re-anchors the continuity envelope the sparse path
+     * decays from: the granted cap is the speed the guard vouches to stop
+     * from within the margin, so it is the right floor to hand time to. */
+    if (o->flags & FUSION_TOF_OK)
+    {
+        s->capContMmS = (uint16_t)cap;
+        s->capContMs = in->nowMs;
+    }
     forward = l > 0 || r > 0;
-    overspeed = in->wheelMmS[0] > cap + 30 || in->wheelMmS[1] > cap + 30;
-    crawl = (o->flags & FUSION_TOF_LIMITED) && cap == (int)FUSION_SPARSE_MM_S;
-    /* Encoder quantisation and PI startup transients are not a new obstacle.
-     * Only the sparse, full crawl allowance tolerates a short excursion.
-     * A real distance envelope shrink and any close target still brake now. */
-    if (!forward || !crawl || !overspeed)
+    overspeed = in->wheelMmS[0] > cap + (int)FUSION_OVERSPEED_HYST_MM_S ||
+                in->wheelMmS[1] > cap + (int)FUSION_OVERSPEED_HYST_MM_S;
+    /* Encoder quantisation and PI startup transients are not a new obstacle:
+     * the per-side window mean ripples tens of mm/s and a sparse-frame flap
+     * can pinch the envelope far below the current speed with an unchanged
+     * scene, so the excursion must clear the hysteresis and hold the window
+     * before it counts. A real shrinking safety envelope violates it for far
+     * longer - CPU1 ordinary slew cannot enforce one. */
+    if (!forward || !overspeed)
         s->overspeedSeen = 0;
     else if (!s->overspeedSeen)
     {
@@ -304,7 +337,8 @@ void FUSION_step(Fusion *s, const FusionInput *in)
             o->reason = FUSION_OBSTACLE;
             hard = 1;
         }
-        else if (overspeed && (!crawl || (uint32_t)(in->nowMs - s->overspeedMs) >= 100u))
+        else if (overspeed &&
+                 (uint32_t)(in->nowMs - s->overspeedMs) >= FUSION_OVERSPEED_HOLD_MS)
         {
             /* CPU1 ordinary slew cannot enforce a shrinking safety envelope. */
             o->reason = FUSION_OBSTACLE;

@@ -40,7 +40,7 @@
  * 8x8, which is the right trade while the wiring is still unverified. Set to 1
  * for the 8x8 pass. One switch moves the sensor resolution and the zone-count
  * bound of the getters together, so the two can never disagree. */
-#define TOF_CFG_8X8             0
+#define TOF_CFG_8X8             1
 
 #if (TOF_CFG_8X8 != 0)
 #define TOF_ZONE_COUNT          64u     /* VL53L5CX_RESOLUTION_8X8 (api.h:44) */

@@ -19,6 +19,15 @@
  * grace window (wheel spin-up from standstill) before it counts as dead. */
 #define FUSION_ENC_EDGE_FRESH_MS 100u
 #define FUSION_ENC_GRACE_MS 500u
+/* Forward-envelope excursion guard. The per-side speed feeding the check is
+ * an 8 ms window mean with tens of mm/s of quantisation ripple, and a sparse
+ * frame flap can pinch the envelope far below the current speed without any
+ * physical change - so an excursion must clear the hysteresis and hold for
+ * the window before it latches a stop. A genuine shrinking envelope violates
+ * it for far longer (1.2.4 introduced the hold for the sparse crawl only;
+ * it now covers every mode). */
+#define FUSION_OVERSPEED_HYST_MM_S 100u
+#define FUSION_OVERSPEED_HOLD_MS 100u
 /* Reasons are independent of the existing robot emergency-stop fault. */
 enum
 {
@@ -69,8 +78,12 @@ typedef struct
     FusionConfig cfg;
     FusionOutput out;
     uint32_t lastMs, imuSeq, imuMs, encSeq, encMs, tofSeq, stillMs, overspeedMs;
+    uint32_t capContMs;    /* stamp of the healthy frame that anchored capContMmS */
     int32_t counts[4];
     uint16_t encAbsentMs[2]; /* ms a commanded side has been edge-silent */
+    uint16_t capContMmS;   /* last healthy-frame envelope; the sparse crawl
+                              decays down from here at cfg.decelMmS2 instead
+                              of pinching the cap in one step */
     float bias[3], velocity, heading, roll, pitch, holdHeading, yawRate;
     uint16_t biasSamples;
     uint8_t started, imuSeen, encSeen, countsSeen, latched, clearFrames, holding, slip, overspeedSeen;

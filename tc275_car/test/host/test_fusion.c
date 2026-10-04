@@ -76,9 +76,23 @@ int main(void)
     assert(s.out.reason == FUSION_SLOW && s.out.effective[0] > 0 && s.out.effective[0] < 800);
     assert(abs(s.out.effective[0] - 2 * s.out.effective[1]) <= 1);
     cap = s.out.capMmS;
+    /* A single-step excursion is quantisation ripple, not an obstacle: it
+     * must clear the hysteresis AND hold the window before it latches. */
     in.wheelMmS[0] = (int16_t)(cap + 40);
     tick(1);
-    assert(s.out.brake);
+    assert(!s.out.brake && !s.latched);
+    in.wheelMmS[0] = (int16_t)(cap + FUSION_OVERSPEED_HYST_MM_S - 1);
+    for (i = 0; i < 15; i++)
+        tick(1);
+    assert(!s.out.brake && !s.latched); /* below the hysteresis, however long */
+    in.wheelMmS[0] = (int16_t)(cap + FUSION_OVERSPEED_HYST_MM_S + 1);
+    for (i = 0; i < 9; i++)
+    {
+        tick(1);
+        assert(!s.out.brake); /* 90 ms: still inside the hold window */
+    }
+    tick(1);
+    assert(s.out.brake && s.latched); /* sustained genuine excursion stops */
     setup(4000);
     in.request[0] = in.request[1] = 500;
     tick(1);
