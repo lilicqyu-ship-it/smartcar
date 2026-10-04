@@ -115,6 +115,7 @@ static void test_admission(void)
     CHECK(DT_submit(&s,save,16,&in)); drain(); CHECK(s.jobs[s.active].start==100);
     request(DT_CAPTURE,3); q[10]=1; q[11]=50; DT_put16(q+12,100);
     CHECK(DT_submit(&s,q,16,&in)); drain(); CHECK(lastCode(3)==DT_BUSY);
+    CHECK(DT_submit(&s,q,16,&in)); drain(); CHECK(lastCode(3)==DT_BUSY);
     reset(); s.ctrlCount=6; s.controls[0].kind=DT_ACK;
     request(DT_CAPS,2); CHECK(!DT_submit(&s,q,16,&in)); CHECK(s.highWater==1);
 }

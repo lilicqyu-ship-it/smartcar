@@ -51,7 +51,6 @@
 #define IMU_XFER_TIMEOUT_MS     5u
 
 /* task cadence: IMU_task runs at 1 kHz, the read every 5th tick */
-#define IMU_TASK_DIV_MS         5u
 /* dead-sensor recovery: re-probe rate while !alive, and how many consecutive
  * failed reads drop alive (5 ms apart -> 100 ms of bus failure) */
 #define IMU_REPROBE_MS          1000u

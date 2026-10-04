@@ -179,7 +179,7 @@ uint8_t DT_submit(DT_Engine *s,const uint8_t *q,uint8_t len,const DT_Input *in)
 {
     uint32_t session;
     uint16_t id;
-    uint8_t op,code=DT_OK;
+    uint8_t op,code=DT_OK,i,isJob=0u;
     DT_Record r,last;
     DT_Cached *cached;
     if(!q || len<10u || q[0]!=DT_SUB) return 1u;
@@ -204,7 +204,8 @@ uint8_t DT_submit(DT_Engine *s,const uint8_t *q,uint8_t len,const DT_Input *in)
         if(cached->requestLen!=len || memcmp(cached->requestBytes,q,16u)) error(s,q,DT_ID_CONFLICT,in->nowMs);
         else {
             DT_Job *j=jobById(s,id,in->nowMs);
-            if(op>=DT_CAPTURE && !j) error(s,q,DT_EXPIRED,in->nowMs);
+            for(i=0u;i<DT_JOB_CACHE;i++) if(cached==&s->jobs[i].cache) isJob=1u;
+            if(isJob && !j) error(s,q,DT_EXPIRED,in->nowMs);
             else {
                 replay(s,cached);
                 if(op==DT_STATUS && q[12]) {
@@ -279,12 +280,14 @@ uint8_t DT_submit(DT_Engine *s,const uint8_t *q,uint8_t len,const DT_Input *in)
         b[0]=10u; b[1]=20u; b[2]=25u; b[3]=50u; b[4]=100u; tlv(&r,5u,b,5u);
         b[0]=s->tofZones==64u?8u:4u; b[1]=s->tofHz; tlv(&r,6u,b,2u);
         b[0]=1u; DT_put16(b+1,1u); tlv(&r,7u,b,3u);
+        tlv(&r,25u,in->imuInfo,8u);
         last.seq=1u; remember(s,q,len,&r,&last);
     } else if(code==DT_OK && op==DT_STATUS) {
         DT_Job *j=q[12]?jobById(s,DT_u16(q+10),in->nowMs):
                      (s->active==NO_JOB?NULL:&s->jobs[s->active]);
         record(&r,session,id,0u,DT_STATUS_RECORD,DT_OK,in->nowMs);
         summary(&r,j,in); t32(&r,18u,in->imuSeq); t32(&r,19u,in->tof.seq);
+        tlv(&r,25u,in->imuInfo,8u);
         if(j) t16(&r,17u,DT_u16(j->cache.requestBytes+8));
         last.seq=1u; remember(s,q,len,&r,&last);
         /* Query of a finished task also replays the immutable original RESULT

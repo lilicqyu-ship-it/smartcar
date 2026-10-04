@@ -318,7 +318,7 @@ static void MOTOR_ALGO_calibStep(void)
 
                 MOTOR_ALGO_calibPublish(CALIB_STATUS_DONE);
                 g_calib.active = FALSE;
-        XCORE_benchSetActive(FALSE);
+                XCORE_benchSetActive(FALSE);
                 g_calib.phase  = CALIB_IDLE;
                 MOTOR_stopAll();
             }

@@ -97,6 +97,7 @@
 #define IMU_CFG_ODR             IMU_ODR_240HZ
 #define IMU_CFG_XL_FS           IMU_XL_FS_4G
 #define IMU_CFG_GY_FS           IMU_GY_FS_500DPS
+#define IMU_TASK_DIV_MS         5u /* nominal publication period, exposed in CAPS */
 
 /* ---- sensitivity, fixed point (official driver constants, exact):
  * accel mg/LSB = {0.061, 0.122, 0.244, 0.488}  -> num/1000

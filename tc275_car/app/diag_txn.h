@@ -12,6 +12,7 @@ typedef struct {
     int16_t accMg[3], tempCentiC;
     int32_t gyroMdps[3];
     uint8_t imuAlive, linkUp, stationary;
+    uint8_t imuInfo[8]; /* expected/observed WHOAMI, ODR/FS codes, axis flag, period */
     FusionTof tof;
 } DT_Input;
 typedef struct {

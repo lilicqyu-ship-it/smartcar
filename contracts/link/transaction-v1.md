@@ -1,6 +1,6 @@
 # TC275 ↔ C6 事务与传感器验收协议
 
-版本：设计基线 1.0，2026-10-04。状态：**协议设计，尚未在固件或 iOS 中实现**。
+版本：设计基线 1.0，2026-10-04。状态：**TC275 v1.3.0 已实现；C6/iOS 接入尚未实现，端到端门禁未通过**。
 本文件是 21 号软件设计基线新增事务层的跨工程契约；现行 SPI 电气、SF 编解码及驾驶语义仍由 22 号文档和源码定义。
 验收入口为 **iOS Remote → 已鉴权 C6 WebSocket → SPI → TC275**。串口仅用于开发日志。
 
@@ -137,10 +137,17 @@ TLV 不可重复；越界/固定 tag 长度错误则整个记录无效。已知�
 | 0x13 | tof_source_seq:u32 | STATUS 可选 |
 | 0x14 | driver_errors:{imu:u32,tof:u32} | STATUS/RESULT 必需 |
 | 0x15 | completed_record_seq:u16 | RESULT 必需，终态自身的逻辑序号，用于核对之前记录完整性 |
+| 0x16 | reference:{reference_mm:u16,tolerance_mm:u16,zone:u8,policy_id:u8} | ToF 检查 RESULT 必需 |
+| 0x17 | tof_statistics:{total:u32,valid:u32,mean_mm:i32,std_mm:u32} | ToF 检查 RESULT 必需；显示值取整数，阈值比较不取整 |
+| 0x18 | imu_face:u8 | IMU static RESULT 必需 |
+| 0x19 | imu_info:{expected_who:u8,observed_who:u8,odr_code:u8,xl_fs_code:u8,gy_fs_code:u8,body_axis_calibrated:u8,nominal_publish_ms:u16} | CAPS/STATUS 必需；LSM6DSV16BX 配置码，当前车体轴未标定 |
 
 CAPS 未报告的功能不得调用；健康位表示检测状态，不能直接当作精度合格。
-future tags 0x16～0xEF 为统一登记区，0xF0～0xFF 为厂商试验区，不进入量产验收必需字段。
-检查统计与阈值表在后续验收判据契约中登记；当前协议只冻结传输/任务结构，不能凭健康位输出精度 PASS。
+future tags 0x1A～0xEF 为统一登记区，0xF0～0xFF 为厂商试验区，不进入量产验收必需字段。
+TC275 v1.3.0：IMU static 只支持 policy_id=0（采集、未评定），非零判据拒绝；CAPS 的 policy 1/version 1 只属于 ToF reference。
+ToF policy 1 要求静止参考板、指定单区域至少 5 个有效帧、有效率至少 80%、均值偏差与总体标准差都不超过请求容差。
+统计使用 status=5、targets>0、distance>0；丢片/新鲜度不满足、驱动错误增加或样本不足不能 PASS。
+完整实现与实测边界见 [39](../../tc275_car/doc/30-tc275/39-diagnostic-transactions.md)。健康位不能直接当作精度 PASS。
 
 ## 6. 错误码与状态机
 
@@ -231,7 +238,7 @@ hex 长度须为实际载荷长度的两倍，上限 64 字符；没有接收者
 
 ## 10. 实施与验收门禁
 
-本批仅完成设计，不烧录、不变更驾驶控制、也不声称 iOS 验收功能已完成。
+TC275 编码阶段已落地；本批不变更驾驶控制，不声称 C6/iOS 验收功能或端到端门禁已完成。
 实施顺序：共享 codec/常量和双端黄金向量 → 会话/队列/回执 → 传感器任务 → C6 完整转发 → iOS 验收页面及报告。
 每一步均同步文档和副本校验；未知操作必须有明确拒绝，未知事件必须可完整传输。
 

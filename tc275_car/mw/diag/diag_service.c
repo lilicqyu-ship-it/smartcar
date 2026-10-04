@@ -5,6 +5,7 @@
 #include "mw/app_version.h"
 #include "bsp/stime.h"
 #include "bsp/tof.h"
+#include "bsp/imu.h" /* constants/helpers only; hardware remains CPU1-owned */
 #include <string.h>
 
 /* Static RAM, not the 10 ms task's stack. No allocation or sensor HW access. */
@@ -22,6 +23,10 @@ static void snapshot(void)
     XCORE_imuRead(&imu); XCORE_tofRead(&g_input.tof);
     g_input.imuSeq=imu.seq; g_input.imuStampMs=imu.stampMs;
     g_input.imuAlive=imu.alive; g_input.imuErrors=imu.errCount;
+    g_input.imuInfo[0]=IMU_WHO_AM_I_VAL; g_input.imuInfo[1]=imu.whoAmI;
+    g_input.imuInfo[2]=IMU_CFG_ODR; g_input.imuInfo[3]=IMU_CFG_XL_FS;
+    g_input.imuInfo[4]=IMU_CFG_GY_FS; g_input.imuInfo[5]=0u; /* body axes not calibrated yet */
+    DT_put16(g_input.imuInfo+6,IMU_TASK_DIV_MS);
     g_input.tempCentiC=imu.tempCentiC;
     memcpy(g_input.accMg,imu.accMilliG,sizeof(g_input.accMg));
     memcpy(g_input.gyroMdps,imu.gyroMilliDps,sizeof(g_input.gyroMdps));

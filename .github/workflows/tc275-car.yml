@@ -70,6 +70,10 @@ jobs:
               test/host/test_diag_txn.c app/diag_txn.c mw/sf/sf_frame.c \
               -o test/host/out/test_diag_txn
           test/host/out/test_diag_txn
+          python3 test/host/test_diag_link.py
+          gcc -std=c99 -Wall -Wextra -Werror -O2 -I test/host/stub -I . \
+              test/host/test_diag_service.c app/diag_txn.c -o test/host/out/test_diag_service
+          test/host/out/test_diag_service
 
       - name: ToF I2C request ordering and recovery model
         run: |

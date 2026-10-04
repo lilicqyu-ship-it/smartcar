@@ -4,7 +4,7 @@
 |---|---|
 | 文档编号 | 33 |
 | 域 | TC275 侧（3x） |
-| 版本 | V1.5（2026-10-03，IMU 驱动落地随 35 号 V1.0）：第 2 节代码地图加 `bsp/imu`；第 4 节块表补 `XcoreImu` 行；第 7 节验证加 `test_imu` 命令（55 断言）、`test_xcore` 1095→1109；第 9 节硬件速查补 IMU 段（QSPI1/INT1/优先级 11·14·15·24）。V1.4（2026-10-03，命令队列抗突发随 22 号 V1.8）：第 3 节数据流图与第 4 节块表的命令队列改 **16 深 + `SET_SPEED` 走 `XCORE_cmdPushLatest` 新者胜**；第 7 节新增 `test_xcore` 可粘贴命令（1095 断言）并把覆盖盲区改为"已有覆盖"口径；CI（`tc275-car.yml`）同步加跑。V1.3（2026-09-30，编码器刻度修正随 34 V1.4）：第 9 节编码器 260 线→**13 PPR**（52 计数/电机转、1061.27 计数/轮转、0.1421 mm/计数），默认轮径 65→**48**（`CALIB_WHEELDIA_DEF` 同批）。V1.2（2026-09-27，随 34 号 V1.3 闭环使能门同步）：第 2 节代码地图 `rt/motor_algo` 条目补门；第 5.2 节"方向不对"条目补门上电行为；第 6 节安全机制新增**闭环使能门**（src=0 记录强制开环等价，34 §13）。V1.1（2026-09-27，随 34 号标定/DPT 落地同步）：第 2 节代码地图加 `mw/calib/`；第 4 节 xcore 块表补 CalibResult/Jog/RecordLive/EVT 出站队列四行 + "用版本计数不要用 valid 位"规约；第 5.1 节写清 DPT op 家族（0x70~0x74）与 EVT 0x22/0x23 的组帧侧；第 5.2 节改为"标定参数是运行时变量、换轮径走 0x73"；第 6 节加 DFlash 写入的安全姿态；第 7 节单测命令加入 `mw/calib/calib_record.c`（2948 断言）并扩写覆盖盲区；第 8 节红线增至 10 条（新增"只有 CPU0 能写 DFlash"）。V1.0 = 2026-09-27 首版 |
+| 版本 | V1.6（2026-10-04，STBY 受控化随 23 号 V1.23 / 21 号 V1.15）：第 9 节电机速查新增 STBY 条目——**P22.2（X1-16）→ D24A J4-2，GPIO 受控**，`bsp/motor.c` 的 `MOTOR_setEnabled()` + `MOTOR_init()` 末步使能，一根线管四路；写清"急停/故障路径目前不调用它"这条现状与接线前提（跳线帽必须拔掉）。V1.5（2026-10-03，IMU 驱动落地随 35 号 V1.0）：第 2 节代码地图加 `bsp/imu`；第 4 节块表补 `XcoreImu` 行；第 7 节验证加 `test_imu` 命令（55 断言）、`test_xcore` 1095→1109；第 9 节硬件速查补 IMU 段（QSPI1/INT1/优先级 11·14·15·24）。V1.4（2026-10-03，命令队列抗突发随 22 号 V1.8）：第 3 节数据流图与第 4 节块表的命令队列改 **16 深 + `SET_SPEED` 走 `XCORE_cmdPushLatest` 新者胜**；第 7 节新增 `test_xcore` 可粘贴命令（1095 断言）并把覆盖盲区改为"已有覆盖"口径；CI（`tc275-car.yml`）同步加跑。V1.3（2026-09-30，编码器刻度修正随 34 V1.4）：第 9 节编码器 260 线→**13 PPR**（52 计数/电机转、1061.27 计数/轮转、0.1421 mm/计数），默认轮径 65→**48**（`CALIB_WHEELDIA_DEF` 同批）。V1.2（2026-09-27，随 34 号 V1.3 闭环使能门同步）：第 2 节代码地图 `rt/motor_algo` 条目补门；第 5.2 节"方向不对"条目补门上电行为；第 6 节安全机制新增**闭环使能门**（src=0 记录强制开环等价，34 §13）。V1.1（2026-09-27，随 34 号标定/DPT 落地同步）：第 2 节代码地图加 `mw/calib/`；第 4 节 xcore 块表补 CalibResult/Jog/RecordLive/EVT 出站队列四行 + "用版本计数不要用 valid 位"规约；第 5.1 节写清 DPT op 家族（0x70~0x74）与 EVT 0x22/0x23 的组帧侧；第 5.2 节改为"标定参数是运行时变量、换轮径走 0x73"；第 6 节加 DFlash 写入的安全姿态；第 7 节单测命令加入 `mw/calib/calib_record.c`（2948 断言）并扩写覆盖盲区；第 8 节红线增至 10 条（新增"只有 CPU0 能写 DFlash"）。V1.0 = 2026-09-27 首版 |
 | 代码基线 | `main`（默认构建 `USE_SPI_LINK`，含 servo 闭环 + CPU 看门狗 + 0x70 方向标定） |
 | 读者 | **AI 编码助手**（Kiro / Claude / Copilot 等）在本仓库作业前必读 |
 | 上级索引 | [00-index.md](../00-index.md) |
@@ -54,7 +54,7 @@ tc275_car/
 ├── mw/sf/sf_telemetry.c/.h 38 字节遥测定长布局编解码
 ├── mw/calib/calib_record.c/.h ★标定记录 20B blob + EVT 0x22/0x23 编解码（纯 C99，主机可测）
 ├── mw/calib/calib_store.c/.h  CPU0 专属：DFlash0 扇区 15 单槽持久化 + 静止后才写 + 结果转 EVT
-├── bsp/motor.c/.h        GTM ATOM 20kHz PWM × 4 + TB6612 方向 GPIO（CPU1）
+├── bsp/motor.c/.h        GTM ATOM 20kHz PWM × 4 + TB6612 方向 GPIO + STBY 使能 P22.2（CPU1）
 ├── bsp/imu.c/.h          LSM6DSV16BX 六轴 IMU：QSPI1 主机（SPI 模式 3，1 MHz 档位）
 │                         + ERU INT1 计数 + 1 kHz 采样/失联 1 Hz 重探（CPU1；
 │                         设计真源 [35](35-imu-driver.md)，接线真源 23 §10）
@@ -240,6 +240,7 @@ python3 test/host/test_calib_store.py
 - 左侧=A+B（TB6612#1=U8），右侧=C+D（TB6612#2=U2），每侧两电机同命令。
 - **驱动板 D24A（REV1.0）板内电路**：12V VIN 经 KEY 开关 → `TB6288GSP`(U1) 降 5V → `RT9013-33`(U4) 降 3.3V；`P_EN`(NTC 过温) + 过流网络门控输出使能。**逻辑电全板载自产**，别从 kit/外部灌 5V/3V3；编码器 3V3 参考就是这块 LDO（禁接 5V，超 TC275 IO 耐压）；动力走 TB6612 VM（带 220µF 储能），不经 3V3。完整板内框图/器件清单见 **`23-wiring.md §3.1`**，对外脚位见 §3/§4。
 - **两个易踩的板载复用**（`23-wiring.md §4`）：P00.0(电机C PWM) 兼板载 CAN 收发器 TXD——运行时别接外部 CAN；P00.6(电机C 方向2) 兼板载 LED2，翻转时 LED 闪属正常。
+- **STBY 总使能 = P22.2（X1-16）→ D24A J4-2，GPIO 受控**（`bsp/motor.c` 的 `MOTOR_STBY_PORT/PIN` + `MOTOR_setEnabled(boolean)`，属主 CPU1）：两片 TB6612 的 STBY 在板内是**同一网络**，一根线管四路，J6 无独立 STBY。`MOTOR_init()` 把拉高 STBY 放在**最后一步**（此时 8 根 IN/PWM 已置低、duty=0），所以"CPU1 还没跑到 BSP init"＝驱动未解锁；`MOTOR_setEnabled(FALSE)` 会先 `MOTOR_stopAll()` 再拉低。**急停/堵转/欠压路径目前不调用它**（现急停是 IN1=IN2=H 短接刹车，拉低 STBY 会退化成高阻滑行、刹车距离变长——语义待裁决，`21 §5.2`）。接线侧前提：**J4-1↔J4-2 跳线帽必须拔掉**，否则 GPIO 白接（`23 §3.2` V1.23）。
 
 **编码器（MG310 内置 13 PPR 霍尔 AB，×4 = 52 计数/电机转，减速比 1:20.409 → ≈1061.27 计数/轮转，48 mm 胎 = 0.1421 mm/计数）：**
 - 8 路信号 P33.0~P33.7 ↔ X2-28~35，GTM TIM0 八通道双边沿中断（CPU1），软件 ×4 正交。
