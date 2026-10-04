@@ -50,44 +50,121 @@ def eim_json_candidates():
     return sorted(home.glob(".espressif/tools/eim_idf.json"))
 
 
+def _ver_token(path):
+    """The version tag inside a path: the deepest part that carries one, so
+    python/v6.1/venv/..., esp/v6.1/esp-idf and Microsoft.v6.1.ps1 all compare."""
+    hits = [p for p in Path(path).parts if re.search(r"\d+\.\d+", p)]
+    return hits[-1] if hits else Path(path).name
+
+
+def _ver_of(path):
+    """Compare/sort key for an install path: ((6, 1), 1, '') for the v6.1
+    release, ((6, 1), 0, 'beta1') for a prerelease of it - the release must
+    outrank the betas it was cut from, and the numeric series must compare as
+    numbers (v6.10 > v6.9).  Paths with no version sort first."""
+    token = _ver_token(path)
+    # A prerelease tag carries digits (beta1, rc2), so the trailing
+    # PowerShell_profile.ps1 of an EIM script name is not read as one.
+    m = re.search(r"(\d+(?:\.\d+)+)(?:[-_.]([A-Za-z]*\d+[A-Za-z0-9]*))?", token)
+    if not m:
+        return ((0,), 0, token.lower())
+    pre = (m.group(2) or "").lower()
+    return (tuple(int(x) for x in m.group(1).split(".")), 0 if pre else 1, pre)
+
+
+def _newest(paths):
+    """Highest ESP-IDF version of `paths`, empty Path when there are none."""
+    paths = list(paths)
+    return max(paths, key=_ver_of) if paths else Path()
+
+
+def _for_version(paths, want):
+    """The candidate whose version equals `want`'s, else the same numeric
+    series (a beta when only its prerelease is installed), else the newest.
+    Keeps the python/IDF/activation triple consistent on a mixed machine."""
+    w = _ver_of(want)
+    paths = list(paths)
+    for cands in ([p for p in paths if _ver_of(p) == w],
+                  [p for p in paths if _ver_of(p)[0] == w[0]]):
+        if cands:
+            return _newest(cands)
+    return _newest(paths)
+
+
+def _win_tools():
+    return Path(os.environ.get("IDF_TOOLS_PATH", r"C:\Espressif\tools"))
+
+
 def _posix_idf_fallbacks():
     """(venv python, idf, activation script) from ~/.espressif EIM layout,
-    newest version last-wins.  Empty Paths when nothing matches."""
+    newest version wins.  Empty Paths when nothing matches."""
     home = Path.home()
-    pys = sorted(home.glob(".espressif/tools/python/*/venv/bin/python"))
-    idfs = sorted(home.glob(".espressif/v*/esp-idf"))
-    acts = sorted(home.glob(".espressif/tools/activate_idf_v*.sh"))
-    return (pys[-1] if pys else Path(),
-            idfs[-1] if idfs else Path(),
-            acts[-1] if acts else Path())
+    idf = _newest(home.glob(".espressif/v*/esp-idf"))
+    if not idf.parts:
+        return (Path(), Path(), Path())
+    return (_for_version(home.glob(".espressif/tools/python/*/venv/bin/python"), idf),
+            idf,
+            _for_version(home.glob(".espressif/tools/activate_idf_v*.sh"), idf))
+
+
+def _win_idf_fallbacks():
+    """Same for the Windows EIM layout, covering both install shapes:
+    C:\\esp\\v<ver>\\esp-idf and C:\\Espressif\\frameworks\\esp-idf-v<ver>."""
+    tools = _win_tools()
+    idf = _newest(list(Path(r"C:\esp").glob("v*/esp-idf"))
+                  + list(Path(r"C:\Espressif\frameworks").glob("esp-idf-v*")))
+    if not idf.parts:
+        return (Path(), Path(), Path())
+    return (_for_version(tools.glob("python/*/venv/Scripts/python.exe"), idf),
+            idf,
+            _act_for(idf))
+
+
+def _act_for(idf):
+    """Windows activation script for an IDF install, from the EIM tools dir."""
+    return _for_version(_win_tools().glob("Microsoft.v*.PowerShell_profile.ps1"), idf)
+
+
+def _eim_install(meta):
+    """(venv python, IDF_PATH, activation script) of the install EIM selected,
+    else the first listed that is still on disk - an upgrade can leave the
+    manifest naming a version whose directory was already replaced."""
+    try:
+        doc = json.loads(meta.read_text(encoding="utf-8-sig"))
+        insts = doc.get("idfInstalled") or []
+    except (OSError, ValueError, AttributeError):
+        return None
+    selected = [i for i in insts if i.get("id") == doc.get("idfSelectedId")]
+    for inst in selected + insts:
+        py, idf = Path(inst.get("python") or ""), Path(inst.get("path") or "")
+        if py.is_file() and idf.is_dir():
+            act = Path(inst.get("activationScript") or "")
+            # A stale manifest script name still points at the right version
+            # dir; fall back to the on-disk profile when EIM moved it.
+            if os.name == "nt" and not act.is_file():
+                act = _act_for(idf)
+            return (py, idf, act)
+    return None
 
 
 def find_idf_env():
     """(venv python, IDF_PATH, activation script) from EIM metadata, env vars,
-    then per-OS defaults."""
+    then a newest-installed-wins scan of the per-OS EIM layout."""
     for meta in eim_json_candidates():
-        if meta.exists():
-            try:
-                inst = json.loads(meta.read_text(encoding="utf-8"))["idfInstalled"][0]
-                return (Path(inst["python"]), Path(inst["path"]),
-                        Path(inst.get("activationScript", "")))
-            except (json.JSONDecodeError, KeyError, IndexError, TypeError):
-                pass
-    venv = os.environ.get("IDF_PYTHON_ENV_PATH")
-    idf = os.environ.get("IDF_PATH")
+        if meta.is_file():
+            hit = _eim_install(meta)
+            if hit:
+                return hit
+            break
+    venv, idf = os.environ.get("IDF_PYTHON_ENV_PATH"), os.environ.get("IDF_PATH")
     if venv and idf:
-        if sys.platform == "win32":
-            return (Path(venv) / "Scripts" / "python.exe", Path(idf),
-                    Path(r"C:\Espressif\tools\Microsoft.v6.1-beta1.PowerShell_profile.ps1"))
-        return (Path(venv) / "bin" / "python", Path(idf), Path())
-    if sys.platform == "win32":
-        return (
-            Path(r"C:\Espressif\tools\python\v6.1-beta1\venv\Scripts\python.exe"),
-            Path(r"C:\esp\v6.1-beta1\esp-idf"),
-            Path(r"C:\Espressif\tools\Microsoft.v6.1-beta1.PowerShell_profile.ps1"),
-        )
-    py, idf, act = _posix_idf_fallbacks()
-    return (py, idf, act)
+        py = Path(venv) / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+        # POSIX needs no script (the env is already active); Windows gets the
+        # toolchain PATH from it, so pick the one matching this IDF version.
+        return (py, Path(idf), _act_for(Path(idf)) if os.name == "nt" else Path())
+    if os.name == "nt":
+        return _win_idf_fallbacks()
+    return _posix_idf_fallbacks()
 
 
 try:
@@ -210,32 +287,58 @@ def ensure_port_free(port):
         # missing device etc.: let esptool report the details
 
 
-def run_build():
-    """Compile via idf.py.  The toolchain PATH lives in the EIM activation
-    script on both platforms: on Windows the build runs inside an activated
-    PowerShell, on macOS/Linux the POSIX activation script is sourced in sh."""
+def run_idf(*args):
+    """Run one idf.py command in the discovered IDF environment and return its
+    exit code.  The toolchain PATH lives in the EIM activation script on both
+    platforms: Windows runs the command inside an activated PowerShell; on
+    macOS/Linux that script is sourced in sh only for its exports - it also
+    defines idf.py as a shell *function*, which /bin/sh (POSIX mode) rejects
+    because of the dot in the name, so idf.py is called explicitly there."""
     py, idf, act = find_idf_env()
-    if not (idf / "tools" / "idf.py").exists():
+    if not (idf / "tools" / "idf.py").is_file():
         sys.exit(f"IDF not found at {idf}")
-    if os.name == "nt" and act.exists():
+    joined = " ".join(str(a) for a in args)
+    if os.name == "nt" and act.is_file():
         ps = (f"Remove-Item Env:MSYSTEM -ErrorAction SilentlyContinue; "
-              f". '{act}'; Set-Location '{PROJECT}'; idf.py build")
-        r = run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
-                 "-Command", ps])
-    elif act.exists():
-        # The EIM script defines idf.py as a shell *function*, which macOS
-        # /bin/sh (POSIX mode) rejects for the dot in the name and falls back
-        # to aliases - dead in a non-interactive shell.  Source it only for
-        # its exports (toolchain PATH, IDF_PATH) and call idf.py explicitly.
-        sh_cmd = (f". '{act}' >/dev/null 2>&1; cd '{PROJECT}' && "
-                  f"'{py}' '{idf}/tools/idf.py' build")
-        r = run(["sh", "-c", sh_cmd])
-    else:
-        env = dict(os.environ)
-        env.pop("MSYSTEM", None)   # idf.py refuses to run under MSys
-        print("[c6] EIM activation script not found - relying on IDF_PATH/PATH")
-        r = run([py, idf / "tools" / "idf.py", "build"], cwd=PROJECT, env=env)
-    if r.returncode != 0:
+              f". '{act}'; Set-Location '{PROJECT}'; idf.py {joined}; "
+              f"exit $LASTEXITCODE")
+        return run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+                    "-Command", ps]).returncode
+    if act.is_file():
+        return run(["sh", "-c", f". '{act}' >/dev/null 2>&1; cd '{PROJECT}' && "
+                               f"'{py}' '{idf}/tools/idf.py' {joined}"]).returncode
+    env = dict(os.environ)
+    env.pop("MSYSTEM", None)   # idf.py refuses to run under MSys
+    print("[c6] EIM activation script not found - relying on IDF_PATH/PATH")
+    return run([py, idf / "tools" / "idf.py", *args],
+               cwd=PROJECT, env=env).returncode
+
+
+def stale_build_idf(idf):
+    """The IDF install build/config.env says the build dir was configured
+    with, or None when there is no build dir or it already matches `idf`.
+    An ESP-IDF upgrade leaves build/ pinned to the old install, and idf.py
+    then refuses every command until it is reconfigured."""
+    try:
+        recorded = Path(json.loads(
+            (BUILD / "config.env").read_text(encoding="utf-8-sig")
+        )["IDF_PATH"])
+    except (OSError, ValueError, KeyError):
+        return None
+    return None if os.path.normcase(str(recorded)) == os.path.normcase(str(idf)) \
+        else recorded
+
+
+def run_build():
+    """Compile via idf.py, reconfiguring first when an IDF upgrade made the
+    existing build dir unusable (stale_build_idf)."""
+    old = stale_build_idf(find_idf_env()[1])
+    if old is not None:
+        print(f"[c6] build dir was configured with {old} - running idf.py "
+              "fullclean before the build")
+        if run_idf("fullclean"):
+            sys.exit("fullclean failed")
+    if run_idf("build"):
         sys.exit("build failed")
 
 

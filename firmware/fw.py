@@ -223,38 +223,123 @@ def build_s3_gateway(_args):
     return run([sys.executable, ROOT / "s3-gateway" / "flash.py", "build"])
 
 
+def _idf_ver(path):
+    """ESP-IDF 安装路径的版本比较键：正式版排在其预发布版之上
+    （((6,1),1,'') > ((6,1),0,'beta1')），数字段按数值而非字典序
+    （v6.10 > v6.9）。EIM 脚本名尾部的 PowerShell_profile 不当作预发布标签。"""
+    parts = [p for p in Path(path).parts if re.search(r"\d+\.\d+", p)]
+    token = parts[-1] if parts else Path(path).name
+    m = re.search(r"(\d+(?:\.\d+)+)(?:[-_.]([A-Za-z]*\d+[A-Za-z0-9]*))?", token)
+    if not m:
+        return ((0,), 0, token.lower())
+    pre = (m.group(2) or "").lower()
+    return (tuple(int(x) for x in m.group(1).split(".")), 0 if pre else 1, pre)
+
+
+def _pick(paths):
+    """版本最高的一条，空集合给 Path()。"""
+    paths = list(paths)
+    return max(paths, key=_idf_ver) if paths else Path()
+
+
+def _pair(paths, want):
+    """与 want 同版本的候选：先精确同号，再同数字系列（只装了某版本的 beta
+    时），最后全部；都取版本最高的一条。混装机器上据此凑出配套三件套。"""
+    paths = list(paths)
+    w = _idf_ver(want)
+    for cands in ([p for p in paths if _idf_ver(p) == w],
+                  [p for p in paths if _idf_ver(p)[0] == w[0]]):
+        if cands:
+            return _pick(cands)
+    return _pick(paths)
+
+
+def _win_eim_fallback():
+    """EIM 清单读不到时按 Windows 安装布局扫盘：两套目录形状都覆盖
+    （C:\\esp\\v<ver>\\esp-idf 与 C:\\Espressif\\frameworks\\esp-idf-v<ver>），
+    取版本最高的安装；python 与激活脚本按它的版本配对。
+    FW_IDF_PROFILE 始终优先。"""
+    tools = Path(os.environ.get("IDF_TOOLS_PATH", r"C:\Espressif\tools"))
+    idf = _pick(list(Path(r"C:\esp").glob("v*/esp-idf"))
+                + list(Path(r"C:\Espressif\frameworks").glob("esp-idf-v*")))
+    pys = tools.glob("python/*/venv/Scripts/python.exe")
+    acts = tools.glob("Microsoft.v*.PowerShell_profile.ps1")
+    if idf.parts:
+        py, act = _pair(pys, idf), _pair(acts, idf)
+    else:
+        py, act = _pick(pys), _pick(acts)
+    # 没发现任何 profile 时给空 Path，让 esp_idf_cmd 报"未发现激活脚本"，
+    # 而不是把当前目录当脚本 dot-source。
+    profile = os.environ.get("FW_IDF_PROFILE") or str(act)
+    return (py, idf, Path(profile) if profile else Path())
+
+
 def find_idf_env():
-    """(venv python, IDF_PATH, 激活脚本) — 与 esp32c6_car/flash.py 同一套发现逻辑。"""
+    """(venv python, IDF_PATH, 激活脚本) — 与 esp32c6_car/flash.py 同一套发现逻辑：
+    EIM 清单里选中的安装优先，且必须还在磁盘上（升级后清单可能指向已被替换的
+    版本目录），否则按各 OS 的 EIM 目录布局取版本最高的一套。"""
     cands = [Path(r"C:\Espressif\tools\eim_idf.json")] if sys.platform == "win32" \
         else sorted(Path.home().glob(".espressif/tools/eim_idf.json"))
     for meta in cands:
-        if meta.exists():
-            try:
-                inst = json.loads(meta.read_text(encoding="utf-8"))["idfInstalled"][0]
-                return Path(inst["python"]), Path(inst["path"]), Path(inst.get("activationScript", ""))
-            except (json.JSONDecodeError, KeyError, IndexError, TypeError):
-                pass
-    home = Path.home()
+        if not meta.is_file():
+            continue
+        try:
+            doc = json.loads(meta.read_text(encoding="utf-8-sig"))
+            insts = doc.get("idfInstalled") or []
+        except (OSError, ValueError, AttributeError):
+            continue
+        selected = [i for i in insts if i.get("id") == doc.get("idfSelectedId")]
+        for inst in selected + insts:
+            py, idf_path = (Path(inst.get("python") or ""),
+                            Path(inst.get("path") or ""))
+            if py.is_file() and idf_path.is_dir():
+                return (py, idf_path,
+                        Path(inst.get("activationScript") or ""))
     if sys.platform == "win32":
-        return (Path(r"C:\Espressif\tools\python\v6.1-beta1\venv\Scripts\python.exe"),
-                Path(r"C:\esp\v6.1-beta1\esp-idf"),
-                Path(os.environ.get("FW_IDF_PROFILE",
-                                    r"C:\Espressif\tools\Microsoft.v6.1-beta1.PowerShell_profile.ps1")))
-    pys = sorted(home.glob(".espressif/tools/python/*/venv/bin/python"))
-    acts = sorted(home.glob(".espressif/tools/activate_idf_v*.sh"))
-    return (pys[-1] if pys else Path(), Path(), acts[-1] if acts else Path())
+        return _win_eim_fallback()
+    home = Path.home()
+    idf_path = _pick(home.glob(".espressif/v*/esp-idf"))
+    pys = home.glob(".espressif/tools/python/*/venv/bin/python")
+    acts = home.glob(".espressif/tools/activate_idf_v*.sh")
+    if not idf_path.parts:
+        return (_pick(pys), idf_path, _pick(acts))
+    return (_pair(pys, idf_path), idf_path, _pair(acts, idf_path))
+
+
+def stale_build_idf(repo, idf_path):
+    """build/config.env 记的 IDF_PATH 与当前要用的安装不一致时返回旧路径。
+    ESP-IDF 升级后 build 目录会钉在旧版本上，此后任何 idf.py 命令都直接失败，
+    必须先 fullclean 重新配置。"""
+    if not idf_path.parts:
+        return None
+    try:
+        recorded = Path(json.loads(
+            (repo / "build" / "config.env").read_text(encoding="utf-8-sig")
+        )["IDF_PATH"])
+    except (OSError, ValueError, KeyError):
+        return None
+    return None if os.path.normcase(str(recorded)) == os.path.normcase(str(idf_path)) \
+        else recorded
 
 
 def esp_idf_cmd(repo, idf_args):
-    """在激活的 ESP-IDF 环境里执行一条 idf.py 命令，返回 returncode。"""
+    """在激活的 ESP-IDF 环境里执行一条 idf.py 命令，返回 returncode。
+    build 目录被旧 IDF 安装钉住时（升级后的典型症状：连 build 都报错）先
+    fullclean 重新配置，再执行原命令。"""
     py, idf_path, act = find_idf_env()
+    old = stale_build_idf(repo, idf_path)
+    if old is not None and "fullclean" not in idf_args:
+        info(f"{repo.name}: build 目录由 {old} 配置，当前 IDF 为 {idf_path}，"
+             "先 idf.py fullclean（清空 build/ 与托管组件，重编时按需再下载）")
+        if esp_idf_cmd(repo, ["fullclean"]):
+            return 1
     if sys.platform == "win32":
         # flash.bat 同款：dot-source EIM 的 PowerShell profile；MSYSTEM 会干扰
         # idf.py（Git Bash 里发起时），先清掉。
-        profile = os.environ.get("FW_IDF_PROFILE", str(act))
-        if not Path(profile).exists():
-            die(f"ESP-IDF 激活脚本不存在: {profile}（用 FW_IDF_PROFILE 覆盖，"
-                f"或先装 EIM/ESP-IDF v6.1）")
+        profile = os.environ.get("FW_IDF_PROFILE") or str(act)
+        if not profile or not Path(profile).is_file():
+            die(f"ESP-IDF 激活脚本不存在: {profile or '未发现'}（用 FW_IDF_PROFILE "
+                f"覆盖，或先用 EIM 装 ESP-IDF）")
         env = {k: v for k, v in os.environ.items() if k != "MSYSTEM"}
         # 末尾 exit $LASTEXITCODE：powershell 不回传原生命令退出码，不加会假成功
         ps = (f". '{profile}'; Set-Location '{repo}'; idf.py "
@@ -262,7 +347,7 @@ def esp_idf_cmd(repo, idf_args):
               + "; exit $LASTEXITCODE")
         return run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
                     "-Command", ps], env=env)
-    if not (py.exists() and idf_path.exists() and act.exists()):
+    if not (py.is_file() and idf_path.is_dir() and act.is_file()):
         die("未从 ~/.espressif 发现 EIM 安装的 ESP-IDF（activate_idf_v*.sh），"
             "检查安装或用 IDF_PATH/IDF_PYTHON_ENV_PATH 环境变量")
     env = dict(os.environ, IDF_PATH=str(idf_path))
