@@ -69,6 +69,22 @@ final class LinkMessageTests: XCTestCase {
         XCTAssertEqual(parse(#"{"t":"pong"}"#), .pong)
     }
 
+    func testFusionLimitedCoverageWarning() {
+        guard case .fusion(let status) = parse(#"{"t":"fusion","reason":1,"flags":166,"distance":1280,"cap":150}"#) else {
+            return XCTFail("missing driving guard")
+        }
+        XCTAssertEqual(status.warning, "测距覆盖不足 · 前进限速 0.54 km/h")
+        XCTAssertNil(parse(#"{"t":"fusion","reason":1,"flags":166,"distance":1280}"#))
+        XCTAssertNil(parse(#"{"t":"fusion","reason":1,"flags":166,"distance":1280,"cap":-1}"#))
+        XCTAssertEqual(FusionStatus(reason: 2, flags: 192, distance: 100, cap: 0).warning,
+                       "前向保护停车 · 松开油门后再试")
+        XCTAssertEqual(FusionStatus(reason: 3, flags: 6, distance: 0, cap: 0).warning,
+                       "前方测距已失效，前进暂停")
+        XCTAssertEqual(FusionStatus(reason: 4, flags: 192, distance: 0, cap: 0).warning,
+                       "倾斜保护停车，请扶正车辆")
+        XCTAssertNil(FusionStatus(reason: 0, flags: 7, distance: 1000, cap: 600).warning)
+    }
+
     func testErrAuth() {
         XCTAssertEqual(parse(#"{"t":"err","e":"auth"}"#), .errAuth)
         XCTAssertNil(parse(#"{"t":"err","e":"other"}"#))

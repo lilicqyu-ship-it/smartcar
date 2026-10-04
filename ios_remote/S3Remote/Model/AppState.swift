@@ -138,6 +138,22 @@ public final class AppState {
     public private(set) var telemetry: Telemetry?
     public private(set) var teleAtMs: Double = 0
     public private(set) var nowMs: Double = 0
+    public private(set) var fusion: FusionStatus?
+    private var fusionAtMs: Double = 0
+
+    public var fusionWarning: String? {
+        guard connState == .connected && tcUp else { return nil }
+        guard let fusion else { return "等待驾驶辅助状态" }
+        guard nowMs - fusionAtMs < 1000 else { return "驾驶辅助状态已过期" }
+        return fusion.warning
+    }
+
+    func applyFusion(_ status: FusionStatus) {
+        let oldWarning = fusion?.warning
+        fusion = status
+        fusionAtMs = now()
+        if let warning = status.warning, warning != oldWarning { log("WARN", warning) }
+    }
 
     // battery display debounce (C6 cee1189 strategy: median + EMA + latches);
     // alarms/colors keep using the real telemetry above
@@ -308,6 +324,7 @@ public final class AppState {
         connState = .disconnected
         ctrlRole = false
         tcUp = false
+        fusion = nil
         rssiDbm = nil
         tcAppVer = ""
         tcSblVer = ""

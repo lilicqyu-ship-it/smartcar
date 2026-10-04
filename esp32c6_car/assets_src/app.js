@@ -134,6 +134,10 @@ function onFusion(m) {
   if ((m.flags & 64) && !m.reason) $("assist_state").textContent = "前向保护保持锁定";
   if ((m.flags & 64) && m.reason !== 4) $("assist_state").textContent += " · 松开前进后再试";
   $("assist_detail").textContent = (m.flags & 1) ? `前方 ${m.distance} mm · 前进上限 ${(m.cap / 1000).toFixed(2)} m/s · 倒车可退出` : "等待有效测距 · 前进受限 · 倒车限速退出";
+  if ((m.flags & 128) && m.cap > 0 && !(m.flags & 64) && m.reason < 2) {
+    $("assist_state").textContent = "测距覆盖不足，低速遥控中";
+    $("assist_detail").textContent = `前进上限 ${(m.cap * 0.0036).toFixed(2)} km/h · 注意观察前方`;
+  }
   $("assist_attitude").textContent = (m.flags & 8) ? ((m.flags & 2) ? `横滚 ${(m.roll / 100).toFixed(1)}° · 俯仰 ${(m.pitch / 100).toFixed(1)}°${(m.flags & 16) ? " · 检测到轮速与陀螺仪不一致" : ""}` : "IMU 数据已失效，直行辅助暂停") : "IMU 安装方向待标定 · 姿态和直行辅助未启用";
 }
 setInterval(() => {

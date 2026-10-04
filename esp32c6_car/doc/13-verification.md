@@ -131,5 +131,8 @@ pong/err、`?token=` 握手、`/api/pair`、DRIVE 0x50@30 Hz 心跳、TELEMETRY 
 - `test/host/test_ws_hello.py`：生产函数的在线广播先于 hello、真实离线、未注册提供者三种路径通过；模拟 iOS applyHello 后在线状态不被固定 down 覆盖。
 - `test/host/test_diag.py`：生产 /api/diag 格式化函数输出可解析 JSON，link 状态保留、imu 字段删除；嵌入诊断页 JS 通过 Node --check，ADXL345 UI 删除。两个脚本已纳入 host Makefile check。
 - C6 SF 编解码原有 8 项测试（含 1000 万字节随机输入）全部通过；沿用原 Makefile 警告策略，旧测试第 272 行存在带符号比较编译警告。
-- ESP-IDF 6.1 完整构建通过，v1.1.2 应用大小 0x10da90；ADXL345 组件和生成 Kconfig 引用均移除。
+- ESP-IDF 6.1 完整构建通过，v1.1.2 最终应用大小 0x10dab0；ADXL345 组件和生成 Kconfig 引用均移除。
 - v1.1.1 中间镜像曾采集双串口 45 秒：C6 up=1，收发持续增长、crc/format/sequence 计数全 0；TC275 ready，主机 SPI 超时/硬件/事务错误全 0；TC275 旧 CRC/SEQ/队列满是跨 C6 烧录保留的累计值，不能称为当前新错。最终 v1.1.2 实机结果另附。
+- 最终 v1.1.2 通过 COM8 烧录，镜像哈希校验通过；双串口再采集 45 秒。C6 四次 10 秒摘要均 up=1，rx_frames_total 从 1116 增至 2778，tx_enqueued_total 从 1506 增至 2921，CRC/格式/序列错误累计计数均为 0；没有 ADXL345 重试或 GPIO 自占用告警。
+- TC275 在采集开头出现一次 no SF_READY 的 down/up，随后状态摘要为 ready、1 MHz、error_bits=0，SPI 超时/硬件/事务错误累计均为 0。CRC=13、SEQ=22、队列满=5332 是该主机保留的累计值，本次只获得一个完整摘要，未据此宣称这些计数增量为零。原始记录：C6 build/com8-after-v112.log、TC275 build/diagnostics/com16-after-c6-v112.log。
+- 用户重新连接 iOS App 后确认“已恢复在线”。握手状态问题完成真机验证。

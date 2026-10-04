@@ -20,6 +20,27 @@ public enum PairState: String, Equatable, Sendable {
     case claimed
 }
 
+/// CPU0 driving guard, forwarded by C6 as the optional fusion JSON beacon.
+public struct FusionStatus: Equatable, Sendable {
+    public let reason: Int
+    public let flags: Int
+    public let distance: Int
+    public let cap: Int
+
+    public var warning: String? {
+        if reason == 4 { return "倾斜保护停车，请扶正车辆" }
+        if reason == 5 { return "车速反馈未就绪，前进暂停" }
+        if flags & 64 != 0 { return "前向保护停车 · 松开油门后再试" }
+        if flags & 129 == 0 { return "前方测距已失效，前进暂停" }
+        if cap == 0 { return "检测到近距离障碍，前进暂停" }
+        if flags & 128 != 0 {
+            return String(format: "测距覆盖不足 · 前进限速 %.2f km/h", Double(cap) * 0.0036)
+        }
+        if reason == 1 { return "接近障碍，已限制前进速度" }
+        return nil
+    }
+}
+
 public enum TextMessage: Equatable, Sendable {
     /// - Parameters:
     ///   - ctrlHeld: hello.ctrl — SOME session holds CTRL (not necessarily us).
@@ -31,6 +52,7 @@ public enum TextMessage: Equatable, Sendable {
     case tcVer(app: String, sbl: String)
     /// {"t":"rssi","dbm":N} — optional periodic signal-strength beacon.
     case rssi(dbm: Int)
+    case fusion(FusionStatus)
 
     public static func parse(_ data: Data) -> TextMessage? {
         guard
@@ -73,6 +95,13 @@ public enum TextMessage: Equatable, Sendable {
         case "rssi":
             guard let dbm = (obj["dbm"] as? NSNumber)?.intValue else { return nil }
             return .rssi(dbm: dbm)
+
+        case "fusion":
+            guard let reason = obj["reason"] as? Int, (0...5).contains(reason),
+                  let flags = obj["flags"] as? Int, (0...65535).contains(flags),
+                  let distance = obj["distance"] as? Int, (0...65535).contains(distance),
+                  let cap = obj["cap"] as? Int, (0...65535).contains(cap) else { return nil }
+            return .fusion(FusionStatus(reason: reason, flags: flags, distance: distance, cap: cap))
 
         default:
             return nil

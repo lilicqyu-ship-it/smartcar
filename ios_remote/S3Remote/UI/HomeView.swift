@@ -17,6 +17,14 @@ struct HomeView: View {
                         LogoGaugeView()
                     }
                     StatusDeck()
+                    if let warning = app.fusionWarning {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .font(.subheadline).foregroundStyle(Theme.warn)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(14)
+                            .background(Theme.warn.opacity(0.12), in: RoundedRectangle(cornerRadius: 16))
+                            .accessibilityLabel(warning)
+                    }
                     if app.settings.cameraEnabled {
                         CameraCard()
                     }

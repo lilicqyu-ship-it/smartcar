@@ -297,6 +297,8 @@ public final class LinkEngine: NSObject, URLSessionWebSocketDelegate {
             app.applyTcVer(app: a, sbl: b)
         case .rssi(let dbm):
             app.applyRssi(dbm)
+        case .fusion(let status):
+            app.applyFusion(status)
         }
     }
 
