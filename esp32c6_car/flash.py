@@ -207,7 +207,7 @@ def run_build():
         sys.exit(f"IDF not found at {idf}")
     if os.name == "nt" and act.exists():
         ps = (f"Remove-Item Env:MSYSTEM -ErrorAction SilentlyContinue; "
-              f". '{act}'; Set-Location '{PROJECT}'; idf.py build")
+              f". '{act}'; Set-Location '{PROJECT}'; idf.py build; exit $LASTEXITCODE")
         r = run(["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
                  "-Command", ps])
     elif act.exists():
