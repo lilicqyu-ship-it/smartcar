@@ -1,0 +1,6 @@
+# 生成物
+results/
+motor_algo_sim.slx
+slprj/
+*.asv
+tools/gen_golden

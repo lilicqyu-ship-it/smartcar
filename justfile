@@ -137,6 +137,46 @@ scons-sbl *args:
 clangd-db:
     @{{py}} scripts/gen-tc275-cdb.py
 
+# —— 电机算法 MATLAB 建模（matlab_motor_model/；详见其 README.md）——
+# TC275 CPU1 电机闭环的 MATLAB/Simulink 模型:控制律与固件 servo.c 逐位一致
+# （编译真 servo.c 出金标回放验证），被控对象为 MG310+TB6612 物理模型（占位
+# 参数待台架辨识）。图输出 matlab_motor_model/results/。
+# MATLAB 路径默认 macOS R2024a,别处安装时覆盖: just matlab=... matlab-validate
+matlab := if os() == "macos" { "/Applications/MATLAB_R2024a.app/bin/matlab" } else { "matlab" }
+
+# 改了 servo.h 增益/死区后:先 matlab-golden 再跑这个
+# 固件等价性验证:编译真 servo.c 的金标向量逐位回放 + 编码器测量链不变量
+matlab-validate:
+    @cd matlab_motor_model && {{matlab}} -batch "validate_fw_equivalence"
+
+# 主仿真:阶跃/斜坡/负载扰动/编码器断线/急停 五场景 + 图（results/a~e_*.png）
+matlab-sim:
+    @cd matlab_motor_model && {{matlab}} -batch "sim_closed_loop"
+
+# 低速分析:量化楼梯（8 ms 窗口分辨率）+ 静摩擦极限环（results/f~g_*.png）
+matlab-lowspeed:
+    @cd matlab_motor_model && {{matlab}} -batch "sim_low_speed_quantization"
+
+# Kp/Ki 网格扫描:阶跃/扰动指标分开排名,doc 21 SS15.3 台架整定的仿真预扫
+# 热图输出 results/h_tune_grid.png
+matlab-tune:
+    @cd matlab_motor_model && {{matlab}} -batch "tune_pid_grid"
+
+# 一键全套:等价性验证 → 主仿真 → 低速 → 整定扫描
+matlab-all: matlab-validate matlab-sim matlab-lowspeed matlab-tune
+
+# 重建 Simulink 模型 motor_algo_sim.slx 并与 .m 逐拍模型交叉验证(需 Simulink 许可证)
+# 交叉验证图 results/i_simulink_crosscheck.png
+matlab-simulink:
+    @cd matlab_motor_model && {{matlab}} -batch "build_simulink_model"
+
+# 注意 -ffp-contract=off 必须保留,否则 arm64 的 FMA 合约会让积分项末位漂移
+# 重新生成金标向量:改了 tc275_car/rt/servo.c/servo.h 或换编译器后重跑(需 cc/clang)
+matlab-golden:
+    @cd matlab_motor_model && cc -O2 -ffp-contract=off -I ../tc275_car -I tools/stub \
+        tools/gen_golden.c ../tc275_car/rt/servo.c -o tools/gen_golden \
+        && ./tools/gen_golden > tools/golden_servo.csv
+
 # 检查本机开发环境（git/just/gh/bash 版本、换行与长路径配置）
 doctor:
     @bash scripts/doctor.sh
