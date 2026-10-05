@@ -170,6 +170,12 @@ matlab-all: matlab-validate matlab-sim matlab-lowspeed matlab-tune
 matlab-simulink:
     @cd matlab_motor_model && {{matlab}} -batch "build_simulink_model"
 
+# 串口实时示波器:固件 BENCH on 的 100 Hz SRVB 流 → 四格波形(速度/duty/积分)
+# 端口省略时自动识别 usbserial/COM;启动 MATLAB 桌面并阻塞本终端,
+# 关闭图窗结束并自动存 results/live_serial_*.csv
+matlab-live port="":
+    @cd matlab_motor_model && {{matlab}} -r "try, live_serial_plot('{{port}}'); catch e, disp(getReport(e)); end"
+
 # 注意 -ffp-contract=off 必须保留,否则 arm64 的 FMA 合约会让积分项末位漂移
 # 重新生成金标向量:改了 tc275_car/rt/servo.c/servo.h 或换编译器后重跑(需 cc/clang)
 matlab-golden:

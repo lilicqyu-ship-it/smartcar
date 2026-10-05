@@ -8,6 +8,17 @@
 ## [未发布]
 
 ### 变更
+- **tc275_car 速度环串口实时整定链路（台架示波器）**：ASCLIN0 控制台新增行命令解析器
+  `app/console.c`（`BENCH on|off|?`/`HELP`，精确匹配、超长行整行丢弃），替代回环 echo
+  任务（`UART_echoTask`/`vUartEchoTask` 移除——回环检查由任意命令的应答行承担）；CPU0
+  经新跨核开关 `XCORE_benchLogSet/Active` 遥控 CPU1 的 `MOTOR_ALGO_diag`：开时以 100 Hz
+  推出紧凑 `SRVB` 行（`XCORE_logi` 空格格式：uptime + 左右目标/实测/duty/积分×10，约
+  60 B ≈ 6 KB/s @115200，低于线速，uptime 列可发现整行丢弃），无视空闲门以保持连续
+  时间轴，关时恢复原 5 s `[SERVO]` 行为（`test_log_policy` 同步扩 bench 断言；新主机
+  单测 `test_console`，CI 加跑）。MATLAB 侧 `matlab_motor_model/live_serial_plot.m`
+  （`just matlab-live`）实时绘制四格波形（左右速度目标/实测、duty、积分项），关窗自动
+  存 `results/live_serial_*.csv` 供离线对照 `tune_pid_grid` 预扫；PID 增益仍为编译期
+  常量（`servo.h`），金标流程不变
 - **tc275_car 看门狗假死根治（v1.1.2）**：TC27x 的 CPU 看门狗到期**只向本核发 NMI、不会自行复位**
   （TC27x UM §7.44），而 iLLD 默认的 NMI 陷阱钩子是空宏直接返回——v1.1.0 的"喂狗断流 → 复位回
   安全态"这条底线**从未真正闭合**，看门狗到期后核被 NMI 打死、复位永远不来，整车冻结（"假死"，

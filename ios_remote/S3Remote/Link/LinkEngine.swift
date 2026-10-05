@@ -178,6 +178,13 @@ public final class LinkEngine: NSObject, URLSessionWebSocketDelegate {
         sendFrame(ProtoFrame(cmd: Proto.Cmd.emergencyStop, seq: app.nextSeq()))
     }
 
+    /// DPT 台架命令（0x70~0x74 判向/点动/记录族）：载荷即命令体，op 字节由
+    /// C6 在 v2→SF 映射时前置（c6_link link.c）。受 CTRL 门控与 C6 SEQ 窗口
+    /// 约束，与驾驶帧共用同一条 30 Hz 通道。
+    public func sendDPT(_ cmd: UInt8, data: [UInt8] = []) {
+        sendFrame(ProtoFrame(cmd: cmd, seq: app.nextSeq(), data: data))
+    }
+
     public func sendFrame(_ frame: ProtoFrame) {
         guard app.connState == .connected, let task else { return }
         task.send(.data(frame.encode())) { [weak self] error in
@@ -299,6 +306,12 @@ public final class LinkEngine: NSObject, URLSessionWebSocketDelegate {
             app.applyRssi(dbm)
         case .fusion(let status):
             app.applyFusion(status)
+        case .cal(let result):
+            app.applyCalibResult(result)
+        case .rec(let record):
+            app.applyCalibRecord(record)
+        case .jogCnt(let on, let deltas):
+            app.applyJogCounts(on: on, deltas: deltas)
         }
     }
 

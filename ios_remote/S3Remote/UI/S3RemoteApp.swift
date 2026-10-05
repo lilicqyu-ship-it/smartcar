@@ -3,8 +3,8 @@ import SwiftUI
 /// Tab indices — single source of truth (also used by the `--tab` dev hook
 /// and HomeView's pairing-guide jump).
 enum Tab: Int {
-    case drive = 0, play, vehicle, topology, link, settings
-    static let all: [Tab] = [.drive, .play, .vehicle, .topology, .link, .settings]
+    case drive = 0, play, vehicle, calib, topology, link, settings
+    static let all: [Tab] = [.drive, .play, .vehicle, .calib, .topology, .link, .settings]
 }
 
 @main
@@ -32,13 +32,13 @@ struct S3RemoteApp: App {
 struct RootView: View {
     @Environment(AppState.self) private var app
     @Environment(\.scenePhase) private var scenePhase
-    // dev/screenshot hook: `--tab 0..5` picks the initial tab
+    // dev/screenshot hook: `--tab 0..6` picks the initial tab
     @State private var selection = RootView.initialTab
 
     static let initialTab: Int = {
         let args = ProcessInfo.processInfo.arguments
         guard let i = args.firstIndex(of: "--tab"), i + 1 < args.count,
-              let n = Int(args[i + 1]), (0...5).contains(n) else { return 0 }
+              let n = Int(args[i + 1]), (0...6).contains(n) else { return 0 }
         return n
     }()
 
@@ -55,6 +55,9 @@ struct RootView: View {
                 VehicleView()
                     .tabItem { Label("车辆", systemImage: "car.fill") }
                     .tag(Tab.vehicle.rawValue)
+                CalibView()
+                    .tabItem { Label("标定", systemImage: "wrench.and.screwdriver.fill") }
+                    .tag(Tab.calib.rawValue)
                 TopologyView()
                     .tabItem { Label("拓扑", systemImage: "network") }
                     .tag(Tab.topology.rawValue)
@@ -77,6 +80,7 @@ struct RootView: View {
         .task(id: selection) { app.syncCamera(activeTab: selection) }
         .onChange(of: selection) { oldValue, newValue in
             if oldValue == Tab.drive.rawValue && newValue != Tab.drive.rawValue { app.joystickMoved(v: 0, w: 0) }
+            if oldValue == Tab.calib.rawValue && newValue != Tab.calib.rawValue { app.calibLeave() }
         }
         .onChange(of: app.settings.cameraEnabled) { _, _ in
             app.syncCamera(activeTab: selection)

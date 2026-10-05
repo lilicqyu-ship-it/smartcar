@@ -26,6 +26,15 @@ public enum Proto {
         public static let pair: UInt8 = 0x51
         public static let cfg: UInt8 = 0x52
         public static let diag: UInt8 = 0x53
+
+        // DPT bench tool family (contracts/link/proto_frames.h §0x70-0x79):
+        // C6 maps the whole range onto SF CMD/CID_DPT with payload[0]=op, so
+        // the v2 payload here is the bare command body (no op byte).
+        public static let dptCalDir: UInt8 = 0x70   // 编码器判向标定, ∅ → EVT 0x22
+        public static let dptMotorJog: UInt8 = 0x71 // {motor u8, duty i16LE}
+        public static let dptRecGet: UInt8 = 0x72   // ∅ → EVT 0x23
+        public static let dptRecSet: UInt8 = 0x73   // 12 B {pos, invert, fs, wd}
+        public static let dptRecClear: UInt8 = 0x74 // ∅ → EVT 0x23
     }
 
     /// CRC16-CCITT-FALSE (proto_crc16).

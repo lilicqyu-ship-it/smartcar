@@ -145,13 +145,47 @@ static void MOTOR_ALGO_brakeAll(void)
 
 static boolean g_servoLogAsked;          /* 5-second bench line, only when active */
 
+/* Bench stream period: one compact SRVB line every 10 ms (100 Hz) while the
+ * ASCLIN0 console has BENCH on (app/console.c, MATLAB live_serial_plot.m).
+ * ~60 bytes/line -> ~6 KB/s against the ~11.5 KB/s the 115200 console can
+ * carry, leaving headroom for the regular log traffic; the uptime column
+ * lets the receiver see (and reject) whole lines the ring had to drop. */
+#define MOTOR_ALGO_BENCH_PERIOD_MS    10u
+
 /* One named SERVO line every 5 seconds while anything is moving: target, measured and
  * applied duty per side (percent*10), the figures the bench tune of doc 21
- * SS15.3 needs. Idle robot stays silent so the console does not spam. */
-static void MOTOR_ALGO_diag(XcoreEncoder *enc, sint16 dutyL, sint16 dutyR)
+ * SS15.3 needs. Idle robot stays silent so the console does not spam.
+ * BENCH on replaces this line with the 10 ms SRVB stream, which ignores the
+ * idle gate (a continuous timebase is the point of a plot) and folds in the
+ * per-side integral (x10, 0 during jog where the servo is not stepping). */
+static void MOTOR_ALGO_diag(XcoreEncoder *enc, sint16 dutyL, sint16 dutyR,
+                            float32 integL, float32 integR)
 {
     static uint32 nextLogMs;
+    static uint32 nextBenchMs;
     uint32        now = STIME_nowMs();
+
+    if (XCORE_benchLogActive())
+    {
+        if ((sint32)(now - nextBenchMs) >= 0)
+        {
+            sint32 vals[9];
+
+            vals[0] = (sint32)now;
+            vals[1] = g_left.target;
+            vals[2] = enc->pctLeft;
+            vals[3] = dutyL;
+            vals[4] = (sint32)(integL * 10.0f);
+            vals[5] = g_right.target;
+            vals[6] = enc->pctRight;
+            vals[7] = dutyR;
+            vals[8] = (sint32)(integR * 10.0f);
+            XCORE_logi("SRVB", vals, 9u);
+
+            nextBenchMs = now + MOTOR_ALGO_BENCH_PERIOD_MS;
+        }
+        return;
+    }
 
     if ((g_left.target == 0) && (g_right.target == 0) &&
         (dutyL == 0) && (dutyR == 0) &&
@@ -214,7 +248,7 @@ static void MOTOR_ALGO_controlStep(void)
 
     MOTOR_ALGO_apply(dutyL, dutyR);
     XCORE_motorStatusSet(dutyL, dutyR);
-    MOTOR_ALGO_diag(&enc, dutyL, dutyR);
+    MOTOR_ALGO_diag(&enc, dutyL, dutyR, SERVO_getIntegral(0u), SERVO_getIntegral(1u));
 }
 
 /* ---- direction calibration ------------------------------------------------- */
@@ -447,12 +481,14 @@ static boolean MOTOR_ALGO_jogStep(void)
                          (sint16)(jog.duty[2] + jog.duty[3]));
 
     /* SRV= stays available for the bench (doc 34 SS9.3): targets read 0, the
-     * duty column shows the jog values actually applied. */
+     * duty column shows the jog values actually applied. The servo is not
+     * stepping during a jog, so the integral columns report 0. */
     {
         XcoreEncoder enc;
 
         XCORE_encoderRead(&enc);
-        MOTOR_ALGO_diag(&enc, jog.duty[0] + jog.duty[1], jog.duty[2] + jog.duty[3]);
+        MOTOR_ALGO_diag(&enc, jog.duty[0] + jog.duty[1], jog.duty[2] + jog.duty[3],
+                        0.0f, 0.0f);
     }
     return TRUE;
 }

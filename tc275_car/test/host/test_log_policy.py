@@ -9,7 +9,7 @@ root = Path(__file__).resolve().parents[2]
 link = (root / "com/link.c").read_text(encoding="utf-8")
 link = link[link.index("void LINK_diagPrint(void)"):]
 motor = (root / "rt/motor_algo.c").read_text(encoding="utf-8")
-start = motor.index("static void MOTOR_ALGO_diag(")
+start = motor.index("#define MOTOR_ALGO_BENCH_PERIOD_MS")
 end = motor.index("\n}", start) + 2
 motor = motor[start:end]
 harness = r'''
@@ -71,15 +71,38 @@ int main(void) {
     now=30003u; g_health.spi.timeouts=2u; LINK_diagPrint(); drain(); assert(lines==baseline);
     now=35002u; LINK_diagPrint(); drain(); assert(lines==baseline+4); baseline=lines;
     now=65002u; LINK_diagPrint(); drain(); assert(lines==baseline+4);
-    XCORE_init(); lines=0; memset(&enc,0,sizeof(enc));
-    now=100u; enc.pctLeft=8; MOTOR_ALGO_diag(&enc,0,0); drain(); assert(lines==1);
-    now=101u; enc.pctLeft=0; MOTOR_ALGO_diag(&enc,0,0);
-    now=102u; enc.pctLeft=8; MOTOR_ALGO_diag(&enc,0,0); drain(); assert(lines==1);
-    now=5099u; MOTOR_ALGO_diag(&enc,0,0); drain(); assert(lines==1);
-    now=5100u; MOTOR_ALGO_diag(&enc,0,0); drain(); assert(lines==2);
-    now=10100u; enc.pctLeft=0; MOTOR_ALGO_diag(&enc,0,0); drain(); assert(lines==2);
-    now=10101u; enc.pctLeft=8; MOTOR_ALGO_diag(&enc,0,0); drain(); assert(lines==3);
-    puts("PASS: log policy disconnected sentinel, heartbeat, transitions, repeated faults, servo jitter");
+    XCORE_init(); lines=0; curLen=0; memset(&enc,0,sizeof(enc));
+    now=100u; enc.pctLeft=8; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f); drain(); assert(lines==1);
+    now=101u; enc.pctLeft=0; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f);
+    now=102u; enc.pctLeft=8; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f); drain(); assert(lines==1);
+    now=5099u; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f); drain(); assert(lines==1);
+    now=5100u; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f); drain(); assert(lines==2);
+    now=10100u; enc.pctLeft=0; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f); drain(); assert(lines==2);
+    now=10101u; enc.pctLeft=8; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f); drain(); assert(lines==3);
+    /* BENCH on: 10 ms SRVB stream, immune to the idle gate (a continuous
+     * timebase is the point of the MATLAB live plot), integral x10 encoded
+     * into the line. */
+    XCORE_init(); lines=0; curLen=0; memset(&enc,0,sizeof(enc));
+    XCORE_benchLogSet(TRUE);
+    now=20000u; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f); drain(); assert(lines==1);
+    /* XCORE_logi wire format: label, space, space-separated signed values. */
+    assert(strstr(uart[0],"SRVB ")==uart[0]);
+    { int a,b,c,d,e,f,g,h,i;
+      assert(sscanf(uart[0],"SRVB %d %d %d %d %d %d %d %d %d",
+                    &a,&b,&c,&d,&e,&f,&g,&h,&i)==9);
+      assert(a==20000); }
+    now=20005u; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f); drain(); assert(lines==1);
+    now=20010u; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f); drain(); assert(lines==2);
+    now=20020u; MOTOR_ALGO_diag(&enc,120,80,12.5f,-3.0f); drain(); assert(lines==3);
+    assert(strstr(uart[2]," 125 ")!=NULL);   /* 12.5 * 10 */
+    assert(strstr(uart[2],"-30")!=NULL);     /* -3.0 * 10 */
+    /* BENCH off: stream stops, the 5 s [SERVO] policy resumes exactly. */
+    XCORE_benchLogSet(FALSE);
+    now=20025u; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f); drain(); assert(lines==3);
+    now=25025u; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f); drain(); assert(lines==3);
+    now=25026u; enc.pctLeft=8; MOTOR_ALGO_diag(&enc,0,0,0.0f,0.0f); drain(); assert(lines==4);
+    assert(strstr(uart[3],"[SERVO]")==uart[3]);
+    puts("PASS: log policy disconnected sentinel, heartbeat, transitions, repeated faults, servo jitter, bench stream");
     return 0;
 }
 '''

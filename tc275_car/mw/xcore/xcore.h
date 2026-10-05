@@ -188,6 +188,13 @@ boolean XCORE_linkRead(uint32 *stampMs);              /* CPU0 */
 void XCORE_benchSetActive(boolean active); /* CPU1 calibration ownership */
 boolean XCORE_benchIsActive(void);
 
+/* Bench telemetry stream switch (app/console.c "BENCH on|off" over ASCLIN0):
+ * CPU0's console sets it, CPU1's MOTOR_ALGO_diag reads it every 1 kHz to
+ * decide between the 100 Hz SRVB bench stream and the 5 s [SERVO] line.
+ * Runtime only - boots FALSE, never persisted. */
+void XCORE_benchLogSet(boolean active);    /* CPU0 console only          */
+boolean XCORE_benchLogActive(void);        /* any core                   */
+
 /* Newest-wins variant of XCORE_cmdPush: if a message with the same cmd byte is
  * still queued, it is overwritten in place (the newest of them, so CPU0
  * applies this message's data last) and nothing is appended. Meant for

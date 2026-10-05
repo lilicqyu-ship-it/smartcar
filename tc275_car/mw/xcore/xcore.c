@@ -76,7 +76,7 @@ static XcoreCmdMsg g_diagQueue[4];
 static uint32 g_diagHead, g_diagTail;
 static XcoreEvtFrame g_dataQueue[XCORE_EVT_QUEUE_LEN];
 static uint32 g_dataHead, g_dataTail;
-static boolean g_linkUp, g_benchActive;
+static boolean g_linkUp, g_benchActive, g_benchLog;
 static uint32 g_linkStampMs;
 static XcoreEvtFrame g_evtQueue[XCORE_EVT_QUEUE_LEN];
 static uint32        g_evtHead;                /* writer: CPU0 */
@@ -152,7 +152,7 @@ void XCORE_init(void)
     memset(g_diagQueue, 0, sizeof(g_diagQueue));
     memset(g_dataQueue, 0, sizeof(g_dataQueue));
     g_diagHead = g_diagTail = g_dataHead = g_dataTail = 0u;
-    g_linkUp = g_benchActive = FALSE; g_linkStampMs = 0u;
+    g_linkUp = g_benchActive = g_benchLog = FALSE; g_linkStampMs = 0u;
     g_evtHead  = 0u;
     g_evtTail  = 0u;
     __dsync();
@@ -855,4 +855,13 @@ boolean XCORE_benchIsActive(void)
 {
     boolean active;
     XCORE_lock(); active=(boolean)(g_benchActive || g_calibReq); XCORE_unlock(); return active;
+}
+void XCORE_benchLogSet(boolean active)
+{
+    XCORE_lock(); g_benchLog=active; __dsync(); XCORE_unlock();
+}
+boolean XCORE_benchLogActive(void)
+{
+    boolean active;
+    XCORE_lock(); active=g_benchLog; XCORE_unlock(); return active;
 }

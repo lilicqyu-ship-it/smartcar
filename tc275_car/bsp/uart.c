@@ -142,18 +142,17 @@ uint32 UART_printTry(const char *data, uint32 len)
     return accepted;
 }
 
-void UART_echoTask(void)
+/* One RX byte for the console parser (app/console.c): FALSE when the driver's
+ * software RX FIFO is dry. Non-blocking, so the console task can poll. */
+boolean UART_readByte(uint8 *c)
 {
-    if (IfxAsclin_Asc_getReadCount(&g_asclin) > 0)
-    {
-        uint8      rx;
-        Ifx_SizeT  count = 1;
+    Ifx_SizeT count = 1;
 
-        if (IfxAsclin_Asc_read(&g_asclin, &rx, &count, TIME_NULL))
-        {
-            UART_putchar(rx);
-        }
+    if ((c == NULL_PTR) || (IfxAsclin_Asc_getReadCount(&g_asclin) <= 0))
+    {
+        return FALSE;
     }
+    return IfxAsclin_Asc_read(&g_asclin, c, &count, TIME_NULL);
 }
 
 /* Polled TX pump for the fatal-error path (Cpu0 stack-overflow hook),

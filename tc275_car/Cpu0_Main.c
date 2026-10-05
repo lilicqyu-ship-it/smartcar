@@ -44,6 +44,7 @@
 #include "mw/sf/sf_frame.h"
 #include "app/robot.h"
 #include "app/fusion.h"
+#include "app/console.h"
 #include <string.h>
 
 static Fusion g_driveFusion;
@@ -69,14 +70,19 @@ static void vBlinkyTask(void *pvParameters)
     }
 }
 
-/* Loopback echo test: any byte received on ASCLIN0 RX is echoed back on TX.
- * Type a character in the terminal; if it comes back, the whole USB-UART
- * path (P14.1 <-> FT2232 <-> COM port) works. */
-static void vUartEchoTask(void *pvParameters)
+/* ASCLIN0 console: drains the RX FIFO and dispatches one-line commands
+ * (app/console.h). "BENCH on" starts the 100 Hz SRVB speed-loop stream the
+ * MATLAB live plot consumes; every reply line doubles as the USB-UART
+ * loopback check the former echo task provided (type anything, get a line
+ * back - "ERR: HELP" for unknown input). */
+static void vConsoleTask(void *pvParameters)
 {
+    (void)pvParameters;
+
     while (1)
     {
-        UART_echoTask();
+        CONSOLE_task();
+        vTaskDelay(pdMS_TO_TICKS(2));
     }
 }
 
@@ -349,8 +355,8 @@ void core0_main(void)
     /* Create the LED blinky task */
     xTaskCreate(vBlinkyTask, "blinky", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
-    /* Create the loopback echo test task */
-    xTaskCreate(vUartEchoTask, "echo", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
+    /* Create the console task (ASCLIN0 line commands, BENCH stream switch) */
+    xTaskCreate(vConsoleTask, "console", configMINIMAL_STACK_SIZE, NULL, 1, NULL);
 
     /* Create the ToF task (I2C0 owner). Priority 1, under the robot task: see
      * vTofTask. Stack is four times minimal because the vendor driver's deepest

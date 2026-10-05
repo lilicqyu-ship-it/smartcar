@@ -89,6 +89,13 @@ jobs:
       - name: Developer log rate and format policy model
         run: python3 test/host/test_log_policy.py
 
+      - name: ASCLIN0 console parser and bench stream switch
+        run: |
+          gcc -std=c99 -Wall -Wextra -Werror -O2 -I test/host/stub -I . \
+              test/host/test_console.c app/console.c mw/xcore/xcore.c \
+              -o test/host/out/test_console
+          test/host/out/test_console
+
       - name: ADC battery conversion tests
         run: |
           gcc -std=c99 -Wall -Wextra -Werror -O2 -I . -I test/host/stub \

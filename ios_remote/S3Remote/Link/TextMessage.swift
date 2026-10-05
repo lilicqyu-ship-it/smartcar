@@ -53,6 +53,12 @@ public enum TextMessage: Equatable, Sendable {
     /// {"t":"rssi","dbm":N} — optional periodic signal-strength beacon.
     case rssi(dbm: Int)
     case fusion(FusionStatus)
+    /// {"t":"cal",...} — TC275 判向标定结果（EVT 0x22 经 C6 bridge 转发）
+    case cal(CalibResult)
+    /// {"t":"rec",...} — 当前生效标定记录（EVT 0x23）
+    case rec(CalibRecord)
+    /// {"t":"jogcnt",...} — 点动期间逐通道编码器计数增量（EVT 0x26，10 Hz）
+    case jogCnt(on: Bool, deltas: [Int])
 
     public static func parse(_ data: Data) -> TextMessage? {
         guard
@@ -103,8 +109,45 @@ public enum TextMessage: Equatable, Sendable {
                   let cap = obj["cap"] as? Int, (0...65535).contains(cap) else { return nil }
             return .fusion(FusionStatus(reason: reason, flags: flags, distance: distance, cap: cap))
 
+        case "cal":
+            // bridge_emit_cal: status 必有；saved V1.1 起才有（缺失=待确认）；
+            // invert/delta 恒 4 元素。畸形载荷整体丢弃，不造数。
+            guard let status = obj["status"] as? Int, (0...255).contains(status),
+                  let invert = intArray(obj["invert"], count: 4),
+                  let delta = intArray(obj["delta"], count: 4) else { return nil }
+            let saved = (obj["saved"] as? NSNumber).flatMap { n in
+                let v = n.intValue
+                return (0...2).contains(v) ? v : nil
+            }
+            return .cal(CalibResult(status: status, saved: saved, invert: invert, delta: delta))
+
+        case "rec":
+            // bridge_emit_rec: ver/src/pos/invert/fullScale/wheelDia/crcOk 全必填
+            guard let ver = obj["ver"] as? Int, (0...255).contains(ver),
+                  let src = obj["src"] as? Int, (0...255).contains(src),
+                  let pos = intArray(obj["pos"], count: 4),
+                  let invert = intArray(obj["invert"], count: 4),
+                  let fullScale = obj["fullScale"] as? Int,
+                  let wheelDia = obj["wheelDia"] as? Int,
+                  let crcOk = (obj["crcOk"] as? NSNumber)?.boolValue else { return nil }
+            return .rec(CalibRecord(ver: ver, src: src, pos: pos, invert: invert,
+                                    fullScaleMmS: fullScale, wheelDiaMm: wheelDia,
+                                    crcOk: crcOk))
+
+        case "jogcnt":
+            // bridge_emit_jogcnt: on 0/1，d = 4 × i32 LE
+            guard let on = (obj["on"] as? NSNumber)?.intValue, (0...1).contains(on),
+                  let deltas = intArray(obj["d"], count: 4) else { return nil }
+            return .jogCnt(on: on == 1, deltas: deltas)
+
         default:
             return nil
         }
+    }
+
+    /// JSON number array → [Int]，恰好 count 个元素才算有效。
+    private static func intArray(_ any: Any?, count: Int) -> [Int]? {
+        guard let nums = any as? [NSNumber], nums.count == count else { return nil }
+        return nums.map { $0.intValue }
     }
 }

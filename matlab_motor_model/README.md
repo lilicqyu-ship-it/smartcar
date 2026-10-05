@@ -47,6 +47,7 @@ cd matlab_motor_model
 | `sim_low_speed_quantization.m` | 低速量化楼梯 + 静摩擦极限环 | — |
 | `tune_pid_grid.m` | Kp/Ki 网格扫描(阶跃/扰动指标分开) | doc 21 SS15.3 台架整定 |
 | `build_simulink_model.m` | 程序化搭建 `motor_algo_sim.slx` 并交叉验证 | — |
+| `live_serial_plot.m` | 串口实时示波器:TC275 的 100 Hz SRVB 流 → 四格波形 | `app/console.c` / `MOTOR_ALGO_diag` |
 | `tools/gen_golden.c` | 编译真实 servo.c 生成金标 CSV | `tc275_car/rt/servo.c` |
 | `tools/stub/Ifx_Types.h` | 金标编译用的最小类型桩 | — |
 | `tools/golden_servo.csv` | 金标向量(118 行 SERVO_update + 5 行 stepToward) | — |
@@ -140,3 +141,23 @@ MATLAB Function 模块(控制律/被控对象/编码器链,代码与 .m 同源),
 - 未建模 CPU0 的 v/w → 左右混控、目标帧超时(150 ms)归零路径;
 - 编码器 ISR 的 4x 解码本身不建模,从整数计数楼梯开始;
 - 摩擦模型是粘性+库仑+静摩擦的常规近似,非辨识结果。
+
+## 8. 上车实测:串口实时示波器
+
+`live_serial_plot.m` 把模型预扫换成实车闭环观测:TC275 通过 ASCLIN0
+控制台收一行 `BENCH on`(115200,即 `just fw-flash tc275_car` 后的调试
+串口),CPU1 的 `MOTOR_ALGO_diag` 随即以 100 Hz 推出紧凑 SRVB 行
+(uptime + 左右目标/实测/duty/积分×10,全部 percent*10 域,~60 B/行
+≈ 6 KB/s,低于 115200 线速);`BENCH off` 恢复原来的 5 s `[SERVO]`
+慢速行。默认关闭、不持久化,不影响正常运行日志。
+
+```bash
+just matlab-live          # 或在 MATLAB 里 live_serial_plot / live_serial_plot("COM7")
+# 串口终端发 BENCH on,再经 jog(0x71)/遥控触发阶跃,窗口四格实时出波形
+# 关闭窗口自动存 results/live_serial_*.csv,uptime 列保留固件时间戳
+```
+
+典型用法:先用 `tune_pid_grid` 预扫出候选 (Kp, Ki) → 上车 `BENCH on`
+看阶跃超调/稳态抖动/编码器断线行为 → 与第 4 节仿真结论对照,确认占位
+参数偏差。日志环满载时固件会整行丢弃,断缝在波形上表现为 uptime 跳变。
+增益目前仍是编译期常量(`servo.h`),改后按第 1 节重出金标即可。

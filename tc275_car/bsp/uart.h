@@ -8,7 +8,7 @@ void UART_putchar(uint8 c);
 void UART_print(const char *str);
 void UART_println(const char *str);
 uint32 UART_printTry(const char *data, uint32 len);
-void UART_echoTask(void);
+boolean UART_readByte(uint8 *c);  /* one RX byte, FALSE when the FIFO is dry */
 void UART_flushPolling(void);   /* polled TX pump for fatal paths (no ISR) */
 
 #endif

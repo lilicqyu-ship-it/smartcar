@@ -186,6 +186,11 @@ public final class AppState {
     public private(set) var outV: Int16 = 0 // actually-sent values (spec 110)
     public private(set) var outW: Int16 = 0
 
+    // ---- bench calibration (TC275 DPT 0x70~0x74) ------------------------------
+    /// 判向标定/逐电机点动/记录读写会话；帧发送走 link.sendDPT，
+    /// JSON 回执（cal/rec/jogcnt）由 LinkEngine 路由到 apply*。
+    public private(set) var calib = CalibSession()
+
     public var emergActive: Bool { controller.emergLatch }
     public var stopLatched: Bool { controller.stopLatch }
 
@@ -332,6 +337,8 @@ public final class AppState {
         outW = 0
         sequencer.abort()
         tiltAxes = (0, 0)
+        calib.linkDown() // 车端因失联中止标定；本地清理点动与等待态
+        calib.setWheelsOffConfirmed(false) // 重新连接后需重新确认安全前提
         speedFilter.reset()
         displaySpeedMmS = 0
         log("WARN", "连接断开：\(reason) — 车辆由 TC275 心跳看门狗停车")
@@ -421,6 +428,9 @@ public final class AppState {
 
     public func stopPressed() {
         abortStunt(reason: "STOP")
+        if let f = calib.jogRelease() { // 点动中的轮立即归零（newest-wins）
+            link?.sendDPT(Proto.Cmd.dptMotorJog, data: f.payload)
+        }
         let cmd = controller.stopClick()
         link?.sendDrive(cmd) // immediate, does not wait for the next tick
         log("WARN", "STOP — 已发送 DRIVE(0,0) 并锁存")
@@ -428,6 +438,9 @@ public final class AppState {
 
     public func emergencyTriggered() {
         abortStunt(reason: "紧急停止")
+        if let f = calib.jogRelease() {
+            link?.sendDPT(Proto.Cmd.dptMotorJog, data: f.payload)
+        }
         let cmd = controller.emergency()
         link?.sendEmergencyStop()
         link?.sendDrive(cmd)
@@ -625,11 +638,147 @@ public final class AppState {
         log("INFO", "纪录已清空")
     }
 
+    // ---- bench calibration (TC275 DPT 0x70~0x74, doc 17 §2.3/§8/§9) ----------
+
+    /// 标定四项前提（缺几项显示在①标题右侧）：WS + CTRL + TC275 在线 + 离地确认。
+    public var calibPrereqMissing: [String] {
+        var missing: [String] = []
+        if connState != .connected { missing.append("未连接") }
+        if !ctrlRole { missing.append("无控制权") }
+        if !tcUp { missing.append("TC275 离线") }
+        if !calib.wheelsOffConfirmed { missing.append("未确认四轮离地") }
+        return missing
+    }
+
+    public var calibStartGateOpen: Bool {
+        calibPrereqMissing.isEmpty && !calib.windowOpen && !emergActive
+    }
+
+    /// 点动故障门禁（doc 17 §8.1 jogFaultGated）：只看新鲜遥测（1 s 内且
+    /// fault != 0）；台架上没跑起来（无遥测）时不锁死按钮。
+    public var jogFaultGated: Bool {
+        guard let t = telemetry, (nowMs - teleAtMs) < 1000 else { return false }
+        return SafetyMonitor.faultActive(t.faultCode)
+    }
+
+    public var jogGateOpen: Bool {
+        connState == .connected && ctrlRole && tcUp
+            && !emergActive && !stopLatched
+            && !calib.windowOpen && calib.jogChannel == nil
+            && !jogFaultGated
+    }
+
+    /// 四轮离地确认（①的安全前提）
+    public func setWheelsOffConfirmed(_ on: Bool) {
+        calib.setWheelsOffConfirmed(on)
+    }
+
+    /// 开始判向（0x70）：一次确认恰好一帧；运行窗口内按钮锁存。
+    public func startDirectionCalib() {
+        guard calibStartGateOpen else {
+            log("WARN", "标定前提未满足：\(calibPrereqMissing.joined(separator: "、"))")
+            return
+        }
+        calib.start(nowMs: nowMs)
+        link?.sendDPT(Proto.Cmd.dptCalDir)
+        log("WARN", "判向标定启动 — 车轮将逐个转动，保持四轮离地")
+    }
+
+    /// 按住即转（0x71 MOTOR_JOG，开环、不过伺服，受故障锁存门禁）
+    public func jogPress(channel: Int, forward: Bool) {
+        guard jogGateOpen else {
+            log("WARN", "点动被拒：\(jogFaultGated ? "故障锁存中" : "前提未满足（连接/控制权/在线）")")
+            return
+        }
+        if let f = calib.jogPress(channel: channel, forward: forward, nowMs: nowMs) {
+            link?.sendDPT(Proto.Cmd.dptMotorJog, data: f.payload)
+        }
+    }
+
+    public func jogRelease() {
+        if let f = calib.jogRelease() {
+            link?.sendDPT(Proto.Cmd.dptMotorJog, data: f.payload)
+        }
+    }
+
+    /// REC_GET：读回当前生效参数（进入标定页时自动发一次）
+    public func calibRecGet() {
+        guard connState == .connected, ctrlRole else { return }
+        link?.sendDPT(Proto.Cmd.dptRecGet)
+    }
+
+    /// REC_SET：参数生效 + TC275 写 DFlash；回执 0x23 是生效回显，
+    /// 最终写入以标定回执 saved / 串口为准（doc 17 §8.3）。
+    public func calibRecSet(pos: [Int], invert: [Int],
+                            fullScaleMmS: Int, wheelDiaMm: Int) {
+        guard connState == .connected, ctrlRole else {
+            log("WARN", "写参数需已连接且取得控制权")
+            return
+        }
+        guard CalibWire.recSetValid(pos: pos, invert: invert,
+                                    fullScaleMmS: fullScaleMmS, wheelDiaMm: wheelDiaMm) else {
+            log("WARN", "参数非法：fullScale 100..5000、轮径 30..200、位置需四值唯一")
+            return
+        }
+        link?.sendDPT(Proto.Cmd.dptRecSet,
+                      data: CalibWire.recSet(pos: pos, invert: invert,
+                                             fullScaleMmS: fullScaleMmS, wheelDiaMm: wheelDiaMm))
+        log("INFO", String(format: "REC_SET — fullScale %d mm/s · 轮径 %d mm",
+                           fullScaleMmS, wheelDiaMm))
+    }
+
+    /// REC_CLEAR：擦 DFlash 恢复默认，闭环使能门随之重新关闭（doc 34 §13）
+    public func calibRecClear() {
+        guard connState == .connected, ctrlRole else {
+            log("WARN", "恢复默认需已连接且取得控制权")
+            return
+        }
+        link?.sendDPT(Proto.Cmd.dptRecClear)
+        log("WARN", "REC_CLEAR — 擦除标定记录，系统回到默认值（开环等价）")
+    }
+
+    /// 标定页 STOP：点动归零 + 驾驶零目标锁存。永远可用（doc 17 §2.3 互锁 5）。
+    public func calibStop() {
+        jogRelease()
+        stopPressed()
+    }
+
+    /// 离开标定页/切走 Tab：先停点动再关链路语义（doc 17「驾驶台返回」）
+    public func calibLeave() {
+        jogRelease()
+    }
+
+    // ---- calibration receive path (called by LinkEngine) ------------------------
+
+    func applyCalibResult(_ r: CalibResult) {
+        calib.receive(result: r, nowMs: nowMs)
+        switch r.status {
+        case 0:
+            log("INFO", "判向标定完成 — \(r.savedText)；invert=\(r.invert.map { $0 > 0 ? "+1" : "-1" }.joined(separator: " "))")
+            Haptics.medium()
+        case 1:
+            log("WARN", "判向标定中止（急停）")
+        case 2:
+            log("WARN", "判向标定忙 — 已有标定进行中")
+        default:
+            break
+        }
+    }
+
+    func applyCalibRecord(_ r: CalibRecord) {
+        calib.receive(record: r)
+    }
+
+    func applyJogCounts(on: Bool, deltas: [Int]) {
+        calib.receiveJogCount(on: on, deltas: deltas)
+    }
+
     // ---- 30 Hz beat: drive + safety watch (called by LinkEngine) -----------------
 
     func controlTick() {
         nowMs = now()
         let connected = connState == .connected
+        calib.tick(nowMs: nowMs)
 
         // Stunt safety: any closed gate kills the macro within one tick.
         if sequencer.active,
@@ -648,10 +797,20 @@ public final class AppState {
             controller.joyW = tiltAxes.w
         }
 
+        // Bench jog keepalive: 30 Hz while a wheel is held — the firmware's
+        // 300 ms no-refresh auto-stop is the backstop (doc 34 §9.3).
+        if connected, ctrlRole, let f = calib.jogKeepalive() {
+            link?.sendDPT(Proto.Cmd.dptMotorJog, data: f.payload)
+        }
+
         if let cmd = controller.tick(connUp: connected, ctrlRole: ctrlRole) {
-            link?.sendDrive(cmd)
-            outV = cmd.v
-            outW = cmd.w
+            // Calibration window / active jog: TC275 忽略驾驶目标，但标定结束
+            // 瞬间会恢复执行最新目标 — 心跳保持零目标防突跳（doc 17 §2.3 互锁 4）。
+            let suppressed = calib.windowOpen || calib.jogChannel != nil
+            let out = suppressed ? DriveCommand(v: 0, w: 0) : cmd
+            link?.sendDrive(out)
+            outV = out.v
+            outW = out.w
         } else if !connected {
             outV = 0
             outW = 0
@@ -670,6 +829,7 @@ public final class AppState {
     public func handleBackground() {
         abortStunt(reason: "退到后台")
         if tiltEnabled { setTiltEnabled(false) }
+        jogRelease() // 等价 web visibilitychange：后台必停点动
         joystickMoved(v: 0, w: 0)
         sound.update(active: false, speedNorm: 0)
         camera.stop() // hand back the single-viewer slot
