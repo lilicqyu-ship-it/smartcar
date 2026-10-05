@@ -7,6 +7,10 @@
 
 ## [未发布]
 
+### 融合保护开关（1.3.2）
+- 新增编译期融合保护主开关 `FUSION_CFG_PROTECTION`（`app/fusion.h`，默认 1）。置 0 构建台架/诊断旁路固件：场景分类、制动包络 cap、健康位与速度锚照常发布（`[FUSION]` 日志新增 `protection` 字段），但限速、停车锁存（近障/盲区/编码器丢失/超速）、45° 倾斜停车与 250 mm/s 倒车限速全部不执行，`effective[]` 直通原始请求，松杆保留立即制动位，锁存态强制清零。动机：ToF 离地 48 cm 水平安装时地面回波（最近 ~0.95–1.4 m）把 cap 压到满量程以下、重新武装超速假锁存并打破 OPEN_CLEAR，地面场景无法驾驶——旁路让车照常跑、日志继续记录"保护本会怎么做"。**旁路构建无任何前向保护，仅限台架/受控场地，测试完恢复默认 1 重烧。**
+- `test_fusion_bypass`（以 `FUSION_CFG_PROTECTION=0` 包含生产 `fusion.c`）新增 6 组旁路回归并入 CI；既有 `test_fusion`（默认 1）全过；TASKING Debug 构建通过（ROM 199042 B）。设计语义见 [37-sensor-fusion.md](doc/30-tc275/37-sensor-fusion.md)。
+
 ### 编码器健康修复（1.3.1）
 - **P0（BUG-ENC-1）**：4 路霍尔编码器健康被合并成单一 `alive`（任一侧 500 ms 内动过即真），且融合把"1 ms 发布序号变化"当成"编码器有效"（xcore 每次发布无条件自增 seq、`FusionInput` 无 alive 字段）——单侧失效被对侧运动掩蔽：`FUSION_ENCODER_LOST` 前进硬停止对传感器本身失效是死代码，死侧以假 0 测量参与闭环（PI 积分 windup）与融合（车速锚减半、轮速/陀螺一致性被污染）。修复：`XcoreEncoder` 新增按侧 `edgeAgeMs[2]` 边沿龄原语（饱和 0xFFFF，`ENCODER_EDGE_FRESH_MS=100`）；融合 `FUSION_ENCODER_OK` 改为"发布新鲜 + 被驱侧 500 ms 起步宽限内持续出边沿"（松杆清零，静止永不误报），速度锚与轮速/陀螺一致性只用边沿新鲜的侧；`motor_algo` 的 measOk 按侧判定，死侧回退开环清积分；`[WHEELS]` 日志新增 `left/right_edge_age_ms`。`alive` 保留为"近期有运动"指示、seq 保留为发布活性。
 - `test_fusion` 新增 3 组按侧失效回归（500 ms 锁存、单侧锚点、起步宽限不误锁）；`test_xcore` +2 断言（edgeAgeMs 跨核透传）。TASKING Debug 构建通过（ROM 198243 B）。根因推导、已知边界与台架待办见 [51-encoder-health-bugfix.md](doc/51-encoder-health-bugfix.md)；单侧拔线注入等台架验证未做。

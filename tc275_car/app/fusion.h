@@ -2,6 +2,19 @@
 #ifndef APP_FUSION_H
 #define APP_FUSION_H
 #include <stdint.h>
+/* Protection master switch (bench/diagnosis). 1 = full guard (default).
+ * 0 = telemetry-only bypass: FUSION_step still publishes the live scene
+ * classification, braking-envelope cap, health flags and speed anchor, but
+ * never limits, latches or hard-stops - the raw stick reaches the motors
+ * (obstacle/overspeed/blind/encoder/tilt stops and the reverse cap are all
+ * off; release keeps its immediate-brake bit). Motivated by the 480 mm mast
+ * mount: ground returns bind the envelope ~0.95-1.4 m out and can phantom-
+ * latch the overspeed guard, so the car needs to drive on the ground while
+ * the [FUSION] log records what the protection WOULD have done. Bench use
+ * only: with 0 there is NO forward protection of any kind. */
+#ifndef FUSION_CFG_PROTECTION
+#define FUSION_CFG_PROTECTION 1
+#endif
 #define FUSION_MAX_ZONES 64u
 #define FUSION_EVT_CID 0x27u
 #define FUSION_WIRE_LEN 28u

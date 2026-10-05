@@ -235,7 +235,11 @@ static void vRobotControlTask(void *pvParameters)
                             XL_U("tof_age_ms", out->tofAgeMs), XL_U("trusted_zones", out->validZones),
                             XL_U("no_target_zones", g_driveFusion.tofNoTarget),
                             XL_U("unknown_zones", g_driveFusion.tofUnknown),
-                            XL_U("open_clear_frames", g_driveFusion.openClearFrames));
+                            XL_U("open_clear_frames", g_driveFusion.openClearFrames),
+                            /* Compile-time FUSION_CFG_PROTECTION: 0 = the cap and
+                             * permission below are advisory only, nothing is
+                             * enforced (bench/diagnosis build, doc 37). */
+                            XL_U("protection", FUSION_CFG_PROTECTION));
                         XCORE_LOG_FIELDS("[FUSION_CONTROL]", XL_U("uptime_ms", g_fusionInput.nowMs),
                             XL_I("target_left_pct_x10", out->effective[0]),
                             XL_I("target_right_pct_x10", out->effective[1]),

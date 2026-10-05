@@ -1,6 +1,6 @@
 # TC275 开发者日志字典
 
-版本 V1.2，2026-10-04，适用 APPFW **v1.2.1 起**（V1.2：`[WHEELS]` 新增 `left/right_edge_age_ms` 两字段，编码器按侧健康判读，随 [51](../51-encoder-health-bugfix.md)；V1.1：落地链路改非阻塞字节泵，见下）。ASCLIN0/COM16，115200、8N1。本文是当前日志格式和频率的真源；35/36/37 号文档里的旧数字串保留为历史抓取。
+版本 V1.3，2026-10-05，适用 APPFW **v1.2.1 起**（V1.3：`[FUSION]` 新增 `protection` 字段，融合保护主开关镜像，随 37 号 V1.4 / APPFW 1.3.2；V1.2：`[WHEELS]` 新增 `left/right_edge_age_ms` 两字段，编码器按侧健康判读，随 [51](../51-encoder-health-bugfix.md)；V1.1：落地链路改非阻塞字节泵，见下）。ASCLIN0/COM16，115200、8N1。本文是当前日志格式和频率的真源；35/36/37 号文档里的旧数字串保留为历史抓取。
 
 ## 输出策略
 
@@ -36,6 +36,7 @@
 | `no_target_zones` | 本帧明确「无目标」（状态 255）的区域数；OPEN_CLEAR 要求其在整帧占比≥70% 且 trusted=0 |
 | `unknown_zones` | 本帧不可解释/异常状态的区域数（既非可信测距也非状态 255「无目标」）；分类先查此计数：占比>30% 直接判 `degraded` 爬行，优先于可信与空旷判断，即使帧内有可信距离也不放行 |
 | `open_clear_frames` | 连续满足空旷条件的新帧计数（16/64 区共用），达到 3 才进入 OPEN_CLEAR；任一可信目标或降级帧归零 |
+| `protection` | 编译期融合保护主开关 `FUSION_CFG_PROTECTION` 的镜像：1=保护启用（默认），`forward_cap_mm_s` 与 `forward`/`action` 是实际执行的行为；0=旁路（台架/诊断构建），此时 cap 与 forward 只是**建议值**，融合不干预、原始摇杆直通电机，近障/超速/盲区/编码器/倾斜/倒车限速全部关闭，判读时必须先看本字段，见 [37](37-sensor-fusion.md) |
 | FUSION_CONTROL `target_left_pct_x10` / `target_right_pct_x10` | 融合限速/停车后的左右侧有效速度目标 |
 | `brake` | 本轮融合要求制动，不等同整车急停故障码 |
 | `health_flags` | 位掩码：0x01 ToF 覆盖充分，0x02 IMU 新鲜，0x04 编码器新鲜，0x08 轴向已标定，0x10 轮速与陀螺不一致，0x20 陀螺零偏就绪，0x40 停车锁存需松杆，0x80 ToF 持续更新但覆盖不足（低速降级） |

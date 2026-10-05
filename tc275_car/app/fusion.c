@@ -350,6 +350,24 @@ void FUSION_step(Fusion *s, const FusionInput *in)
         s->capContMmS = (uint16_t)cap;
         s->capContMs = in->nowMs;
     }
+#if !FUSION_CFG_PROTECTION
+    /* Telemetry-only bypass (FUSION_CFG_PROTECTION=0, see fusion.h): the scene
+     * classification, cap and health flags above are the live truth, but none
+     * of it may touch the motors - pass the raw stick through untouched. The
+     * advisory capMmS stays on the wire so the [FUSION] log still shows what
+     * the protection would have granted; with this build it enforces nothing. */
+    o->effective[0] = l;
+    o->effective[1] = r;
+    o->brake = (uint8_t)(!l && !r && wasDriving);
+    o->reason = FUSION_FREE;
+    /* Keep the new-frame tracker and the latch state aligned with the bypass:
+     * re-enabling protection must start from a clean slate, and the scene
+     * classification above must keep seeing distinct frames. */
+    s->tofSeq = in->tof.seq;
+    s->latched = 0;
+    s->overspeedSeen = 0;
+    return;
+#endif
     forward = l > 0 || r > 0;
     /* Overspeed is only a hazard while the envelope is actually TIGHTER than
      * the operator's ceiling. When the cap saturates at full scale (an open or

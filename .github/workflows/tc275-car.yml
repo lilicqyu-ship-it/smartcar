@@ -63,6 +63,11 @@ jobs:
           gcc -std=c99 -Wall -Wextra -Werror -O2 -I . \
               test/host/test_fusion.c app/fusion.c -lm -o test/host/out/test_fusion
           test/host/out/test_fusion
+          # Protection-off build (FUSION_CFG_PROTECTION=0): raw-stick bypass
+          # with live telemetry; app/fusion.c is included by the test itself.
+          gcc -std=c99 -Wall -Wextra -Werror -O2 -I . \
+              test/host/test_fusion_bypass.c -lm -o test/host/out/test_fusion_bypass
+          test/host/out/test_fusion_bypass
 
       - name: Diagnostic transaction lifecycle and sensor integrity
         run: |
