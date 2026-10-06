@@ -32,7 +32,7 @@ C6 ──SPI/SF帧── TC275 ── 车辆
 ![新版驾驶页](doc/ui-home-redesign.png)
 ![整车拓扑页](doc/ui-topology.png)
 
-开发参数：`--tab 0..5` 指定初始页，`--no-alert` 抑制告警覆盖层，
+开发参数：`--tab 0..6` 指定初始页，`--no-alert` 抑制告警覆盖层，
 `--no-onboard` 跳过首启引导（用于截图/联调）。
 截图为模拟器未连接状态，不代表实车联调结果。
 
@@ -54,6 +54,7 @@ C6 ──SPI/SF帧── TC275 ── 车辆
 | 拓扑/芯片版本 | `S3Remote/UI/TopologyView.swift` + AppState `tcAppVer/tcSblVer` | tcver 信标（{"t":"tcver","app","sbl"}）、hello ver、遥测 fw_ver/hw_rev/link_rtt/link_err——零固件改动；s3-gateway 相机面为虚线占位（v1 控制面） |
 | 信号强度 | `S3Remote/Control/LinkQuality.swift` + UI `SignalBarsView` | 两级：网关在 hello 带可选 `rssi` 字段或周期发 `{"t":"rssi","dbm":N}` 时显示真实 dBm（分档与 S3 遥控器 Kconfig 同源：−60/−67/−75/−85）；否则用 RTT+遥测丢包合成 4 格预估（UI 标注"预估 · x"）。状态舱与诊断页常驻显示 |
 | `app_state.c` | `S3Remote/Model/AppState.swift` | UI 单一事实源、600 ms 遥测过期（"--"）、事件环形日志、快照式发布 |
+| TC275 DPT 标定协议 0x70~0x74（esp32c6_car doc/17 / tc275_car doc/34 同源契约） | `S3Remote/Control/CalibSession.swift` + `UI/CalibView.swift` | 判向标定/逐电机点动/记录读写三族命令 + `cal`/`rec`/`jogcnt` JSON 回执解析；载荷逐字节对齐 `calib_record.c`（jog 钳 ±500、REC_SET 12 B），见下方「台架标定」 |
 | LVGL P1/P2/P4/P5/P9 | `S3Remote/UI/*.swift` | Home（摇杆/大速度/STOP）、Vehicle、Diag（统计+配对+事件日志）、Settings、全屏告警覆盖层（急停 RELEASE / 失联自动清除 / 其余 ACK） |
 | —（App 侧玩法，零固件改动） | `Control/StuntSequencer.swift` 等 | 详见下方「玩法功能」 |
 
@@ -79,6 +80,30 @@ C6 ──SPI/SF帧── TC275 ── 车辆
   w>0 为左转（C6 Web 页 joyW=−dx 同源）——实际驾驶中推右会左转；已修正
   并补回归测试。
 
+## 台架标定（TC275 DPT 0x70~0x74）
+
+「标定」Tab 是 TC275 编码器判向标定协议的手机端入口，与 C6 Web 标定页
+`/calib.html` 消费同一条 WS 链路与同一份回执（`{"t":"cal"}` / `{"t":"rec"}` /
+`{"t":"jogcnt"}`），按标定流程分四步：
+
+1. **① 安全前提**：WS 已连接、CTRL 角色、TC275 在线、四轮离地确认（断线自动
+   重置确认）；缺项实时显示在标题右侧；
+2. **② 编码器判向**：二次确认后一次发一帧 0x70（每轮 250 ms 脉冲约 1.4 s），
+   3 s 回执窗口内防连点；超窗只显示"保存状态待确认"，DFlash 等静止/重试的
+   迟到回执仍会更新结果表；`delta==0` 标红"查接线"，`invert=-1` 标"已翻转"，
+   `saved` 显示落库结论（1 已写 / 2 写失败 / 缺失待确认）；
+3. **③ 点动复核**：四通道"按住即转"（30 Hz 发 0x71 `{motor, duty ±500}`，
+   松手补零帧，固件 300 ms 超时兜底），俯视图高亮点动轮并显示编码器计数
+   增量；故障锁存（新鲜遥测 fault≠0）、急停、STOP、判定窗口任一命中即禁用；
+4. **④ 生效参数与持久化**：进入页面自动 REC_GET 回读（ver/src/pos/invert/
+   fullScale/轮径/crcOk），可编辑 fullScale（100..5000）、轮径（30..200）与
+   四通道位置（必须唯一）发 REC_SET，或 REC_CLEAR 擦除回默认；"与最近一次
+   标定一致/不一致"判据逐轮比对 0x23 与 0x22 的 invert（落库证据）。
+
+安全互锁（doc 17 §2.3/§8.1 同源）：标定运行窗口与点动期间驾驶发送钳零防
+突跳（TC275 侧优先级 急停 > 标定 > jog > 伺服）；STOP 任何状态可用；离开
+标定页/退后台自动停点动。
+
 ## 页面
 
 - **驾驶**：状态栏（连接/角色/TC/电量/RTT）、实时画面卡（相机开启时）、
@@ -97,7 +122,9 @@ C6 ──SPI/SF帧── TC275 ── 车辆
 - **连接**：TX/RX 帧率、遥测丢包 ‰、RTT last/min/max、配对按钮与结果、
   事件日志（可一键分享/复制导出）。
 - **设置**：网关地址（默认 192.168.4.1）、token、摇杆死区、默认模式、
-  音效开关、轨迹轮距、体感灵敏度、相机开关与地址、新手引导重看、应用并重连。
+  驾驶辅助提示开关、音效开关、轨迹轮距、体感灵敏度、相机开关与地址、
+  新手引导重看、应用并重连。
+- **标定**：TC275 台架标定四步流程（见上方「台架标定」章节）。
 - **首启引导**：三步 onboarding（加 Wi-Fi → 长按配对键 → PAIR 取控），
   可跳过、可从设置重看。
 
@@ -111,7 +138,7 @@ open ios_remote/S3Remote.xcodeproj      # Cmd+R 运行（scheme 由 Xcode 自动
 xcodebuild -project ios_remote/S3Remote.xcodeproj -scheme S3Remote \
   -destination 'platform=iOS Simulator,name=iPhone 17 Pro' build
 xcodebuild -project ios_remote/S3Remote.xcodeproj -scheme S3Remote \
-  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test   # 60 项单测（含摇杆坐标映射回归）
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' test   # 170 项单测（含标定协议/摇杆坐标映射回归）
 ```
 
 工程无第三方依赖；`project.pbxproj` 为 Xcode 16+ 文件系统同步组格式，新增
@@ -171,3 +198,5 @@ Swift 文件放进 `S3Remote/` 或 `S3RemoteTests/` 目录即自动入编。
 # 驾驶辅助状态（2026-10-04）
 
 首页接收 C6 的 `fusion` JSON，显示近障停车、松杆恢复、测距过期及覆盖不足限速提示。覆盖不足时车端仅允许 150 mm/s（0.54 km/h）前进；250 mm/s（0.9 km/h）倒车上限仍由车端执行。提示不改变急停和驾驶心跳。原生 App 修改需在 macOS/Xcode 构建安装；当前 Windows 环境无法运行 SwiftUI/XCTest 或安装 iPhone App。
+
+驾驶页摇杆上方的提示横幅（前进限速/近障/测距过期）可在 **设置 → 操控 → 驾驶辅助提示** 关闭（2026-10-05）：开关只影响显示，车端保护与事件日志不受影响。

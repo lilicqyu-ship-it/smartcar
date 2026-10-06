@@ -22,6 +22,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(s.tiltSensitivity, 1.0, accuracy: 0.001)
         XCTAssertFalse(s.cameraEnabled, "camera keys absent → defaults")
         XCTAssertEqual(s.cameraHost, "")
+        XCTAssertTrue(s.guardHintEnabled, "guard banner defaults to shown for legacy blobs")
     }
 
     func testRoundTripOmitsTokenAndKeepsCameraKeys() throws {
@@ -31,6 +32,7 @@ final class AppSettingsTests: XCTestCase {
         s.tiltSensitivity = 1.4
         s.cameraEnabled = true
         s.cameraHost = "10.1.1.1"
+        s.guardHintEnabled = false
         s.token = "secret-runtime-token"
 
         let data = try JSONEncoder().encode(s)
@@ -38,6 +40,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertNil(json["token"], "token must never be serialized to UserDefaults")
         XCTAssertEqual(json["cameraEnabled"] as? Bool, true)
         XCTAssertEqual(json["cameraHost"] as? String, "10.1.1.1")
+        XCTAssertEqual(json["guardHintEnabled"] as? Bool, false)
 
         var back = try JSONDecoder().decode(AppSettings.self, from: data)
         back.token = s.token // runtime field is not part of the persisted form

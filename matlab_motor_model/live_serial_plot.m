@@ -1,25 +1,26 @@
 function live_serial_plot(port, baud)
 %LIVE_SERIAL_PLOT TC275 速度环串口实时示波器(100 Hz SRVB 台架流)
 %
-% 与固件的握手:TC275 上 ASCLIN0 控制台(115200, P14.0/P14.1 USB-串口)
-% 收一行命令 "BENCH on"(app/console.c)后,以 100 Hz 推出紧凑遥测行,
-% 本脚本实时解析并绘制,替代"上车试参数"式的盲调。关闭:
-% 串口终端发 "BENCH off",或直接断开。
+% 与固件的握手全自动:脚本连接 TC275 的 ASCLIN0 控制台(115200)后自己发
+% "BENCH on"(app/console.c),CPU1 的 MOTOR_ALGO_diag 随即以 100 Hz 推出
+% 紧凑遥测行,本脚本实时解析并绘制;关闭窗口自动发 "BENCH off" 并释放
+% 串口,期间不需要也不应该再开第二个串口终端(独占口)。
 %
 % 用法:
-%   live_serial_plot                          % 自动探测串口(usbserial/COM)
-%   live_serial_plot("/dev/tty.usbserial-A50285BI")
+%   live_serial_plot                          % 自动探测串口(cu.usbserial/usbmodem/COM)
+%   live_serial_plot("/dev/cu.usbserial-A50285BI")
 %   live_serial_plot("COM7", 115200)
 %
 % 窗口四格:左/右轮速度(目标 vs 实测)、左右 duty、左右积分项(真实值,
 % 固件按 x10 整数编码)。关闭窗口结束,样本自动存 results/live_serial_*.csv
 % (uptime 列保留固件时间戳,可与 sim_closed_loop 场景对比分析)。
+% 非 SRVB 行(控制台应答、常规日志)原样打到 MATLAB 命令行窗口。
 %
 % SRVB 行格式(XCORE_logi,值均为整数):
 %   SRVB <uptime_ms> <tgL> <msL> <dutyL> <intL*10> <tgR> <msR> <dutyR> <intR*10>
-% 全部在 percent*10 域。其余行(启动横幅/融合日志/控制台回复)只计数不解析。
-% 115200 baud 下 ~60 B/行 * 100 Hz ≈ 6 KB/s,低于 ~11.5 KB/s 线速,但日志环
-% 满载时固件会整行丢弃 —— 断缝直接反映为 uptime 跳变,CSV 里可复现。
+% 全部在 percent*10 域。115200 baud 下 ~60 B/行 * 100 Hz ≈ 6 KB/s,低于
+% ~11.5 KB/s 线速,但日志环满载时固件会整行丢弃 —— 断缝直接反映为
+% uptime 跳变,CSV 里可复现。
 %
 % 依赖:基础 MATLAB(serialport,R2020b+),无需工具箱。
 
@@ -29,7 +30,7 @@ if nargin < 2 || isempty(baud), baud = 115200; end
 sp = serialport(port, baud);
 configureTerminator(sp, "CR/LF");
 sp.Timeout = 1;
-fprintf('已连接 %s @ %d baud —— 串口终端发送 BENCH on 开始推流\n', port, baud);
+fprintf('已连接 %s @ %d baud\n', port, baud);
 
 fig = figure('Name', sprintf('TC275 速度环 — %s @ %d baud', port, baud), ...
              'NumberTitle', 'off', 'Color', 'w');
@@ -94,10 +95,12 @@ badParse = 0;    % SRVB 前缀但字段数不对
             end
         else
             others = others + 1;
+            fprintf('%s\n', line);    % 控制台应答/常规日志(BENCH=on 应在此可见)
         end
     end
 
 configureCallback(sp, "terminator", @onLine);
+writeline(sp, "BENCH on");            % 自动握手:固件切到 100 Hz SRVB 流
 
 try
     while isvalid(fig) && isvalid(sp)
@@ -109,7 +112,9 @@ catch
 end
 
 if isvalid(sp)
+    writeline(sp, "BENCH off");       % 恢复 5 s [SERVO] 慢速行
     configureCallback(sp, "off");
+    pause(0.05);                      % 让 BENCH off 走出 TX FIFO 再释放
     sp = [];                          %#ok<NASGU> 删除对象即释放串口
 end
 
@@ -125,25 +130,37 @@ if nRec > 0
     fprintf('已记录 %d 样本(其他行 %d,解析失败 %d)→ %s\n', ...
             nRec, others, badParse, outFile);
 else
-    fprintf('未收到 SRVB 样本(其他行 %d)—— 确认已在串口终端发送 BENCH on\n', ...
+    fprintf('未收到 SRVB 样本(其他行 %d)—— 确认该口是 TC275 控制台、固件含 BENCH 支持\n', ...
             others);
 end
 end
 
 function p = autoPort()
-%AUTOPORT 优先挑 USB 转串口(macOS: usbserial/usbmodem;Windows: COM)
+%AUTOPORT 选 TC275 的 USB 转串口;过滤 macOS 系统虚拟口,cu.* 优先于 tty.*
 ports = serialportlist("available");
 if isempty(ports)
-    error('live_serial_plot:noPort', '未发现可用串口 —— 检查 USB 线与驱动');
+    error('live_serial_plot:noPort', '未发现任何串口 —— 检查 USB 线与驱动');
 end
-cand = ports(contains(ports, {'usbserial', 'usbmodem'}));
+% debug-console / Bluetooth-Incoming-Port 是 macOS 自带虚拟口,永远不是车
+real = ports(~contains(ports, {'debug-console', 'Bluetooth-Incoming-Port'}));
+cand = real(contains(real, {'usbserial', 'usbmodem'}));
 if isempty(cand) && ispc
-    cand = ports(startsWith(ports, 'COM'));
+    cand = real(startsWith(real, 'COM'));
 end
-if isempty(cand), cand = ports; end
+if ~isempty(cand)
+    cu = cand(startsWith(cand, '/dev/cu.'));   % 同一芯片会成对出现,取发送端
+    if ~isempty(cu), cand = cu; end
+end
+if isempty(cand)
+    error('live_serial_plot:noTc275', ['未发现 TC275 的 USB 串口(通常为 ' ...
+        '/dev/cu.usbserial-*)。当前可用口:\n%s\n排查:换 USB 口/线(数据线);' ...
+        '确认板上串口桥已供电;macOS 若始终无 usbserial,装 FTDI VCP 驱动'], ...
+        strjoin(ports, newline));
+end
 if numel(cand) > 1
     error('live_serial_plot:ambiguous', ...
-          '发现多个候选串口,请显式指定其一:\n%s', strjoin(cand, newline));
+          '发现多个候选串口,请显式指定其一,如 live_serial_plot("%s"):\n%s', ...
+          char(cand(1)), strjoin(cand, newline));
 end
 p = char(cand(1));
 end

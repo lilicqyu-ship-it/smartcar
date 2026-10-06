@@ -144,17 +144,20 @@ MATLAB Function 模块(控制律/被控对象/编码器链,代码与 .m 同源),
 
 ## 8. 上车实测:串口实时示波器
 
-`live_serial_plot.m` 把模型预扫换成实车闭环观测:TC275 通过 ASCLIN0
-控制台收一行 `BENCH on`(115200,即 `just fw-flash tc275_car` 后的调试
-串口),CPU1 的 `MOTOR_ALGO_diag` 随即以 100 Hz 推出紧凑 SRVB 行
-(uptime + 左右目标/实测/duty/积分×10,全部 percent*10 域,~60 B/行
-≈ 6 KB/s,低于 115200 线速);`BENCH off` 恢复原来的 5 s `[SERVO]`
-慢速行。默认关闭、不持久化,不影响正常运行日志。
+`live_serial_plot.m` 把模型预扫换成实车闭环观测:脚本连上 TC275 的
+ASCLIN0 控制台(115200,即 `just fw-flash tc275_car` 后的调试串口)后
+自动发 `BENCH on`,CPU1 的 `MOTOR_ALGO_diag` 随即以 100 Hz 推出紧凑
+SRVB 行(uptime + 左右目标/实测/duty/积分×10,全部 percent*10 域,~60
+B/行 ≈ 6 KB/s,低于 115200 线速);结束时自动发 `BENCH off` 恢复原来的
+5 s `[SERVO]` 慢速行。默认关闭、不持久化,不影响正常运行日志。串口被
+MATLAB 占用期间不要再开第二个串口终端。端口自动探测会过滤 macOS 的
+`debug-console`/`Bluetooth-Incoming-Port` 虚拟口并优先 `/dev/cu.*`。
 
 ```bash
 just matlab-live          # 或在 MATLAB 里 live_serial_plot / live_serial_plot("COM7")
-# 串口终端发 BENCH on,再经 jog(0x71)/遥控触发阶跃,窗口四格实时出波形
-# 关闭窗口自动存 results/live_serial_*.csv,uptime 列保留固件时间戳
+# 脚本连接后自动发 BENCH on(无需第二个串口终端,串口独占),
+# 经 jog(0x71)/遥控触发阶跃,窗口四格实时出波形
+# 关闭窗口自动发 BENCH off 并存 results/live_serial_*.csv,uptime 列保留固件时间戳
 ```
 
 典型用法:先用 `tune_pid_grid` 预扫出候选 (Kp, Ki) → 上车 `BENCH on`

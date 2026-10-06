@@ -8,6 +8,18 @@
 ## [未发布]
 
 ### 新增
+- **台架标定页**（TC275 DPT 标定协议 0x70~0x74 的 iOS 端，零固件改动）：
+  新增第 7 个 Tab「标定」，与 C6 Web 标定页 `/calib.html` 同一份流程契约
+  （esp32c6_car doc/17 §9）：①安全前提四项检查（WS/CTRL/TC 在线/四轮离地
+  确认）→ ②编码器判向标定（二次确认一次发一帧 0x70、1.4 s 进度、3 s 回执
+  窗口、迟到回执仍更新、delta==0 标红查接线、saved 落库状态）→ ③逐电机
+  点动复核（按住 30 Hz 发 0x71、松手补零帧、±50 % duty 钳位、编码器计数
+  增量反馈、车辆俯视图高亮点动轮、故障锁存/急停/STOP 全互锁）→ ④生效参数
+  与持久化（REC_GET 回读、fullScale/轮径/位置编辑发 REC_SET、REC_CLEAR 擦除、
+  0x23 与最近一轮 0x22 的 invert 落库一致性判据）。运行窗口内驾驶发送钳零
+  防突跳；断线自动清理点动与等待态；`Control/CalibSession.swift`、
+  `UI/CalibView.swift`，新增 24 项单测（载荷逐字节对齐 tc275_car
+  `calib_record.c`）
 - **实时相机视频面**（车端零改动）：s3-gateway MJPEG 流 `:81/stream` 接入——
   驾驶页实时画面卡（LIVE/BUSY/ERROR 状态章 + 全屏页）、拓扑页网关节点转实时
   状态、设置里独立开关与地址（留空跟随控制网关）；单查看者礼让（离页/退后台
@@ -21,6 +33,10 @@
 - **启动屏品牌化**：UILaunchScreen 使用暖白纸底色（LaunchBackground 资产）
 
 ### 变更
+- **驾驶辅助提示开关**：驾驶页摇杆上方的提示横幅（前进限速/近障/测距过期
+  等 `fusion` 提示）新增设置项——设置 → 操控 → 驾驶辅助提示，默认开启；
+  关闭后仅隐藏横幅显示，车端限速保护与事件日志记录不受影响
+  （`AppSettings.guardHintEnabled`，旧设置 blob 兼容默认开启）
 - **配对 token 迁移 Keychain**（收口 README 已知限制）：运行时值仍走
   settings.token 供 WS URL 使用，持久化改由 Keychain 保存；首启自动迁移
   v1.2 遗留 blob 并从 UserDefaults 剔除；重置配对同步清两层

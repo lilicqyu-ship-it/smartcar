@@ -43,12 +43,18 @@ public struct AppSettings: Equatable, Codable, Sendable {
     // ---- camera plane (s3-gateway :81) ----
     public var cameraEnabled: Bool
     public var cameraHost: String // empty = follow the control-plane host
+    // ---- driving-assist banner (fusion warnings above the joystick) ----
+    /// Display switch for the drive page's guard hint banner ("前进限速 …" /
+    /// "近障停车 …"). Display-only: the vehicle-side protection and the event
+    /// log keep working regardless.
+    public var guardHintEnabled: Bool
 
     public init(host: String = "192.168.4.1", token: String = "",
                 deadzone: Double = 0.08, mode: DriveMode = .normal,
                 soundEnabled: Bool = false, trackWidthMm: Double = 150,
                 tiltSensitivity: Double = 1.0,
-                cameraEnabled: Bool = false, cameraHost: String = "") {
+                cameraEnabled: Bool = false, cameraHost: String = "",
+                guardHintEnabled: Bool = true) {
         self.host = host
         self.token = token
         self.deadzone = deadzone
@@ -58,6 +64,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         self.tiltSensitivity = tiltSensitivity
         self.cameraEnabled = cameraEnabled
         self.cameraHost = cameraHost
+        self.guardHintEnabled = guardHintEnabled
     }
 
     static let defaultsKey = "s3remote.settings.v1"
@@ -78,7 +85,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case host, token, deadzone, mode, soundEnabled, trackWidthMm, tiltSensitivity
-        case cameraEnabled, cameraHost
+        case cameraEnabled, cameraHost, guardHintEnabled
     }
 
     /// Lenient decode: a v1 JSON without the play/camera keys must not fail
@@ -94,6 +101,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         tiltSensitivity = try c.decodeIfPresent(Double.self, forKey: .tiltSensitivity) ?? 1.0
         cameraEnabled = try c.decodeIfPresent(Bool.self, forKey: .cameraEnabled) ?? false
         cameraHost = try c.decodeIfPresent(String.self, forKey: .cameraHost) ?? ""
+        guardHintEnabled = try c.decodeIfPresent(Bool.self, forKey: .guardHintEnabled) ?? true
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -107,6 +115,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         try c.encode(tiltSensitivity, forKey: .tiltSensitivity)
         try c.encode(cameraEnabled, forKey: .cameraEnabled)
         try c.encode(cameraHost, forKey: .cameraHost)
+        try c.encode(guardHintEnabled, forKey: .guardHintEnabled)
     }
 }
 

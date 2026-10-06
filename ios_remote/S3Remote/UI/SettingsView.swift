@@ -99,6 +99,19 @@ struct SettingsView: View {
                 .pickerStyle(.menu)
                 .tint(Theme.accent)
             }
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("驾驶辅助提示").font(.subheadline)
+                    Text("摇杆上方的限速/近障提示横幅")
+                        .font(.caption2).foregroundStyle(Theme.dim)
+                }
+                Spacer()
+                Toggle("", isOn: bind(\.guardHintEnabled))
+                    .labelsHidden()
+                    .tint(Theme.accent)
+            }
+            Text("开关只影响显示；车端的前进限速与近障保护始终生效，提示仍会记入事件日志。")
+                .font(.caption2).foregroundStyle(Theme.dim)
         } }
     }
 

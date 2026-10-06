@@ -17,7 +17,9 @@ struct HomeView: View {
                         LogoGaugeView()
                     }
                     StatusDeck()
-                    if let warning = app.fusionWarning {
+                    // 驾驶辅助提示横幅（前进限速/近障/测距过期…）：
+                    // 设置里可关（仅显示，车端保护与事件日志不受影响）
+                    if app.settings.guardHintEnabled, let warning = app.fusionWarning {
                         Label(warning, systemImage: "exclamationmark.triangle.fill")
                             .font(.subheadline).foregroundStyle(Theme.warn)
                             .frame(maxWidth: .infinity, alignment: .leading)
