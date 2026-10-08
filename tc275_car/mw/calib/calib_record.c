@@ -39,6 +39,7 @@ void CALIBREC_fillDefaults(CalibRecord *rec)
     rec->wheelDiaMm   = CALIB_WHEELDIA_DEF;
     for (i = 0u; i < 3u; i++) rec->imuAxis[i] = 0;
     rec->trackMm = 0u;
+    rec->wheelCalibrated = 0u;
 }
 
 static uint8_t axisOk(const int8_t axis[3], uint16_t track)
@@ -92,6 +93,7 @@ uint8_t CALIBREC_paramsOk(const CalibRecord *rec)
         }
     }
     if (axisOk(rec->imuAxis, rec->trackMm) == 0u) return 0u;
+    if (rec->wheelCalibrated > 1u) return 0u;
     return 1u;
 }
 
@@ -137,6 +139,7 @@ uint8_t CALIBREC_recSetDecode(const uint8_t *p, uint8_t len, CalibRecord *rec)
     rec->fullScaleMmS = CALIBREC_getI16(&p[8]);
     rec->wheelDiaMm   = CALIBREC_getI16(&p[10]);
     rec->ver          = CALIB_REC_VER;
+    rec->wheelCalibrated = 1u;
     return CALIBREC_paramsOk(rec);
 }
 
@@ -190,6 +193,7 @@ void CALIBREC_buildEvtRec(uint8_t *buf, const CalibRecord *rec, uint8_t crcOk)
     for (i = 0u; i < 3u; i++) buf[15u + i] = (uint8_t)rec->imuAxis[i];
     SF_putU16(&buf[18u], rec->trackMm);
     buf[20u] = 0u; /* caller may set final saved status for 0x7A */
+    buf[21u] = rec->wheelCalibrated;
 }
 
 void CALIBREC_encode(const CalibRecord *rec, uint8_t *blob)
@@ -211,7 +215,8 @@ void CALIBREC_encode(const CalibRecord *rec, uint8_t *blob)
     CALIBREC_putI16(&blob[BLOB_DIA], rec->wheelDiaMm);
     for (i = 0u; i < 3u; i++) blob[BLOB_AXIS + i] = (uint8_t)rec->imuAxis[i];
     SF_putU16(&blob[BLOB_TRACK], rec->trackMm);
-    blob[23] = blob[24] = blob[25] = 0u;
+    blob[23] = rec->wheelCalibrated;
+    blob[24] = blob[25] = 0u;
     SF_putU16(&blob[BLOB_CRC], SF_crc16(blob, BLOB_CRC_LEN));
 }
 
@@ -233,12 +238,14 @@ uint8_t CALIBREC_decode(const uint8_t *blob, CalibRecord *rec)
     {
         /* Existing wheel records remain readable; their IMU map is unset. */
         if (SF_getU16(&blob[18u]) != SF_crc16(blob, 18u)) return 0u;
+        rec->wheelCalibrated = 1u;
     }
     else if (blob[BLOB_VER] == CALIB_REC_VER)
     {
         if (SF_getU16(&blob[BLOB_CRC]) != SF_crc16(blob, BLOB_CRC_LEN)) return 0u;
         for (i = 0u; i < 3u; i++) rec->imuAxis[i] = (int8_t)blob[BLOB_AXIS + i];
         rec->trackMm = SF_getU16(&blob[BLOB_TRACK]);
+        rec->wheelCalibrated = blob[23u];
     }
     else return 0u;
 

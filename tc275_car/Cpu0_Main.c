@@ -212,7 +212,7 @@ static void vRobotControlTask(void *pvParameters)
                 g_fusionInput.encoderSeq = enc.seq;
                 g_fusionInput.encEdgeAgeMs[0] = enc.edgeAgeMs[0];
                 g_fusionInput.encEdgeAgeMs[1] = enc.edgeAgeMs[1];
-                g_fusionInput.wheelsCalibrated = live.rec.src != CALIB_SRC_DEFAULT;
+                g_fusionInput.wheelsCalibrated = live.rec.wheelCalibrated != 0u;
                 g_fusionInput.fullScaleMmS = live.rec.fullScaleMmS;
                 g_fusionInput.wheelMmS[0] = enc.vMeasLeftMmS;
                 g_fusionInput.wheelMmS[1] = enc.vMeasRightMmS;

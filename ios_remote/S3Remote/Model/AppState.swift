@@ -15,6 +15,10 @@ public enum ConnState: Equatable, Sendable {
     case connected
 }
 
+public enum ImuCalSaveStatus: Equatable, Sendable {
+    case idle, pending, saved, failed, rejected
+}
+
 public struct EventEntry: Identifiable, Equatable, Sendable {
     public let id = UUID()
     public let at: Date
@@ -186,6 +190,11 @@ public final class AppState {
     private var imuAtMs: Double = 0
     public private(set) var rawImuAttitude: RawImuAttitude?
     private var rawImuTracker = RawImuAttitudeTracker()
+    public private(set) var imuCalSaveStatus: ImuCalSaveStatus = .idle
+    private var imuCalSentAtMs: Double = 0
+    public var imuCalTimedOut: Bool {
+        imuCalSaveStatus == .pending && nowMs - imuCalSentAtMs > 8_000
+    }
     /// g-Ball trail: gravity-compensated horizontal acceleration (g, body
     /// fwd/lat), newest last, capped at 120 (≈6 s at 20 Hz).
     public private(set) var accelTrail: [(fwd: Double, lat: Double)] = []
@@ -901,6 +910,14 @@ public final class AppState {
 
     func applyCalibRecord(_ r: CalibRecord) {
         calib.receive(record: r)
+        if imuCalSaveStatus == .pending {
+            switch r.imuSaved {
+            case 1: imuCalSaveStatus = .saved
+            case 2: imuCalSaveStatus = .failed
+            case 3: imuCalSaveStatus = .rejected
+            default: break
+            }
+        }
         if let map = ImuAxisCalibration(axes: r.imuAxis),
            settings.imuDisplayCalibration != map {
             settings.imuDisplayCalibration = map
@@ -932,6 +949,8 @@ public final class AppState {
         }
         let body = calibration.axes.map { UInt8(bitPattern: Int8($0)) }
             + Wire.putU16(UInt16(trackMm))
+        imuCalSaveStatus = .pending
+        imuCalSentAtMs = nowMs
         link?.sendDPT(Proto.Cmd.dptImuCalSet, data: body)
         log("INFO", "已发送 IMU 轴向标定，等待 TC275 回执与 DFlash 写入")
     }

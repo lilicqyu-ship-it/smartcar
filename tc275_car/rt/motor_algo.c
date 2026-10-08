@@ -39,9 +39,9 @@ static uint32  g_jogSeq;                 /* last seen jog command counter    */
 static uint32  g_jogDeadlineMs;          /* 0 = jog inactive                 */
 static uint8   g_recordVer = 0xFFu;      /* impossible value: apply boot rec */
 
-/* Closed-loop enable gate. The servo may only close the loop on a record
- * whose source is real (src != CALIB_SRC_DEFAULT): a fresh flash or a
- * failed validation falls back to compile-time default signs, which the
+/* Closed-loop enable gate. The servo may only close the loop after wheel
+ * direction calibration. An IMU-only DFlash record must not open it: the
+ * default wheel signs can be wrong on mirrored gearboxes, and the
  * mirrored gearboxes make wrong on some wheels, and closing the loop on
  * wrong signs is exactly the positive-feedback runaway bench-observed in
  * doc 34 SS1 (sustained duty at target 0). Doc 23 SS8.4 therefore
@@ -416,7 +416,7 @@ static void MOTOR_ALGO_applyRecord(void)
     g_recordVer = live.version;
 
     {
-        boolean ok = (live.rec.src != CALIB_SRC_DEFAULT) ? TRUE : FALSE;
+        boolean ok = (live.rec.wheelCalibrated != 0u) ? TRUE : FALSE;
 
         if (ok != g_closedLoopOk)
         {

@@ -34,7 +34,7 @@ extern "C" {
  * delta i32x4 at [6..25]" is an arithmetic slip - four i32 are 16 bytes. */
 #define CALIB_EVT_RESULT_LEN    23u
 #define CALIB_EVT_RESULT_SAVED  22u    /* index of the saved byte          */
-#define CALIB_EVT_REC_LEN       21u    /* EVT 0x23 incl. IMU axes/track/saved */
+#define CALIB_EVT_REC_LEN       22u    /* EVT 0x23 incl. wheel calibration bit */
 
 /* Record layout versions (doc 34 SS8.1 ver byte). */
 #define CALIB_REC_VER           2u
@@ -82,6 +82,7 @@ typedef struct
     int16_t  wheelDiaMm;                     /* tyre diameter, mm               */
     int8_t   imuAxis[3];                     /* ±1..±3, all zero=uncalibrated  */
     uint16_t trackMm;                        /* 80..600, 0=uncalibrated        */
+    uint8_t  wheelCalibrated;                /* independent closed-loop gate   */
 } CalibRecord;
 
 /* Compile-time defaults: the factory state (pos per doc 23 SS3 motor table:

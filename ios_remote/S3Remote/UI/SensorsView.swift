@@ -445,6 +445,14 @@ struct SensorsView: View {
     }
 
     private var imuCalibrationStatus: String {
+        if app.imuCalTimedOut { return "等待车端回执超时：确认 C6 与 TC275 固件均支持 0x7A。" }
+        switch app.imuCalSaveStatus {
+        case .pending: return "已发送到车端，等待静止保存与 DFlash 回读。"
+        case .failed: return "已在本次运行生效，但 DFlash 保存失败；重启后不会保留。"
+        case .rejected: return "车端拒绝标定：确认停车、IMU 在线、轴向与轮距有效。"
+        case .saved: break
+        case .idle: break
+        }
         guard let record = app.calib.record else { return "车端记录未读取；需要控制权与 TC275 在线。" }
         if record.imuSaved == 3 { return "车端拒绝标定：确认停车、IMU 在线、轴向与轮距有效。" }
         if record.imuSaved == 2 { return "已在本次运行生效，但 DFlash 保存失败；重启后不会保留。" }

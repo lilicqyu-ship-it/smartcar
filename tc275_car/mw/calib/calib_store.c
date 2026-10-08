@@ -511,6 +511,7 @@ static boolean calib_persistInvert(const sint8 invert[CALIB_REC_WHEELS])
     {
         rec.invert[i] = invert[i];
     }
+    rec.wheelCalibrated = 1u;
     if (CALIBREC_paramsOk(&rec) == 0u)
     {
         return FALSE;            /* live params corrupted: refuse to persist  */
