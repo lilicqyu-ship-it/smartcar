@@ -780,6 +780,69 @@ static void bridge_emit_fusion(const uint8_t *p, uint16_t n)
     http_broadcast_ctl(json);
 }
 
+/* EVT 0x2A/0x2B diagnostic sensor streams (tc275_car app/sensor_stream.h is
+ * the wire truth source; the constants are mirrored here because the C6 build
+ * does not see that tree, same as the 0x27 fusion literal below). */
+#define DIAG_SUB_EVT_TOF_ZONES 0x2Au /* tofz: {seq u16, frag u8, mode u8, valid u8, near u16, zone u8x25} */
+#define DIAG_SUB_EVT_IMU       0x2Bu /* imu: {seq u32, stampMs u32, tempCentiC i16, accMg i16x3, gyroMdps i32x3} */
+#define SENSORSTREAM_TOF_FRAG_ZONES 25u
+#define SENSORSTREAM_TOF_FRAG_COUNT 3u
+#define SENSORSTREAM_TOF_HDR_LEN    7u
+#define SENSORSTREAM_TOF_WIRE_LEN   32u
+#define SENSORSTREAM_IMU_WIRE_LEN   28u
+
+/* EVT 0x2A -> {"t":"tofz","seq":n,"f":i,"m":mode,"v":valid,"near":mm,"z":[25 cells]}
+ * One fragment of the TC275's 64-zone ToF map (sensor_stream.h): the phone
+ * reassembles by {seq, f}, so this side stays stateless. Every fragment
+ * carries its full 25-cell wire payload (fragment 2's tail is padding past
+ * zone 63) so the phone sees one uniform shape; cells are distanceMm/16 and
+ * 0xFF = untrusted, passed through raw — the phone dequantises (x16 mm,
+ * 0xFF -> invalid), mirroring the quantisation here would only double the
+ * places that must agree. */
+static void bridge_emit_tofz(const uint8_t *p, uint16_t n)
+{
+    char json[256];
+    int k;
+
+    if (n != SENSORSTREAM_TOF_WIRE_LEN || p[2] >= SENSORSTREAM_TOF_FRAG_COUNT)
+    {
+        return;
+    }
+    k = snprintf(json, sizeof(json),
+                 "{\"t\":\"tofz\",\"seq\":%u,\"f\":%u,\"m\":%u,\"v\":%u,\"near\":%u,\"z\":[",
+                 proto_get_u16(p), p[2], p[3], p[4], proto_get_u16(p + 5));
+    for (int i = 0; i < (int)SENSORSTREAM_TOF_FRAG_ZONES; i++)
+    {
+        k += snprintf(json + k, sizeof(json) - (size_t)k, "%s%u",
+                      (i == 0) ? "" : ",", (unsigned)p[SENSORSTREAM_TOF_HDR_LEN + i]);
+    }
+    (void)snprintf(json + k, sizeof(json) - (size_t)k, "]}");
+    http_broadcast_ctl(json);
+}
+
+/* EVT 0x2B -> {"t":"imu","seq":n,"ms":n,"acc":[mg×3],"gyro":[mdps×3],"tp":cC}
+ * Raw CPU1 IMU sample at 20 Hz (sensor_stream.h wire layout). */
+static void bridge_emit_imu(const uint8_t *p, uint16_t n)
+{
+    char json[160];
+    int16_t temp;
+
+    if (n != SENSORSTREAM_IMU_WIRE_LEN)
+    {
+        return;
+    }
+    temp = (int16_t)proto_get_u16(p + 8);
+    snprintf(json, sizeof(json),
+             "{\"t\":\"imu\",\"seq\":%lu,\"ms\":%lu,"
+             "\"acc\":[%d,%d,%d],\"gyro\":[%ld,%ld,%ld],\"tp\":%d}",
+             (unsigned long)proto_get_u32(p), (unsigned long)proto_get_u32(p + 4),
+             (int16_t)proto_get_u16(p + 10), (int16_t)proto_get_u16(p + 12),
+             (int16_t)proto_get_u16(p + 14),
+             (long)(int32_t)proto_get_u32(p + 16), (long)(int32_t)proto_get_u32(p + 20),
+             (long)(int32_t)proto_get_u32(p + 24), (int)temp);
+    http_broadcast_ctl(json);
+}
+
 static void pump_link_frame(const proto_frame_t *f)
 {
     switch (f->cmd)
@@ -826,6 +889,14 @@ static void pump_link_frame(const proto_frame_t *f)
                 else if (sub == 0x27u)
                 {
                     bridge_emit_fusion(p, n);
+                }
+                else if (sub == DIAG_SUB_EVT_TOF_ZONES)
+                {
+                    bridge_emit_tofz(p, n);
+                }
+                else if (sub == DIAG_SUB_EVT_IMU)
+                {
+                    bridge_emit_imu(p, n);
                 }
                 else
                 {
