@@ -714,7 +714,7 @@ static void bridge_emit_cal(const uint8_t *p, uint16_t n)
  *              "fullScale":n,"wheelDia":n,"crcOk":n} */
 static void bridge_emit_rec(const uint8_t *p, uint16_t n)
 {
-    char json[160];
+    char json[240];
     int k;
     int16_t fs, wd;
 
@@ -737,9 +737,17 @@ static void bridge_emit_rec(const uint8_t *p, uint16_t n)
         k += snprintf(json + k, sizeof(json) - (size_t)k, "%s%d",
                       (i == 0) ? "" : ",", (int)(int8_t)p[6 + i]);
     }
-    (void)snprintf(json + k, sizeof(json) - (size_t)k,
-                   "],\"fullScale\":%d,\"wheelDia\":%d,\"crcOk\":%u}",
-                   fs, wd, p[14]);
+    k += snprintf(json + k, sizeof(json) - (size_t)k,
+                  "],\"fullScale\":%d,\"wheelDia\":%d,\"crcOk\":%u",
+                  fs, wd, p[14]);
+    if (n >= 21u)
+    {
+        (void)snprintf(json + k, sizeof(json) - (size_t)k,
+                       ",\"imuAxis\":[%d,%d,%d],\"trackMm\":%u,\"imuSaved\":%u}",
+                       (int)(int8_t)p[15], (int)(int8_t)p[16],
+                       (int)(int8_t)p[17], proto_get_u16(&p[18]), p[20]);
+    }
+    else (void)snprintf(json + k, sizeof(json) - (size_t)k, "}");
     http_broadcast_ctl(json);
 }
 

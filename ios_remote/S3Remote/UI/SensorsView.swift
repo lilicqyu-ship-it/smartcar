@@ -4,44 +4,79 @@
  * flag wall. Display-only by contract: every value here arrives via the
  * diagnostic JSON side-channel and nothing feeds back into driving.
  *
- * The IMU story reads in four layers, most-intuitive first: the g-ball
- * (what the car is doing), the tilt gauges (how close to the 45° tilt
- * stop), the six-axis live values (the numbers, in g and °/s), and the
- * auto-ranged strip charts (the trend). Chart style follows the app's
- * hand-drawn instrument set (Canvas + Path, Theme colors).
+ * The attitude is the primary instrument; acceleration, raw axes and trends
+ * follow it. The ToF card can also show the fresh fusion distance summary
+ * while the optional 64-zone stream is unavailable.
  */
 
 import SwiftUI
 
 struct SensorsView: View {
     @Environment(AppState.self) private var app
+    @State private var selectedSensor: SensorPage = .imu
+    @State private var levelCapture: [Double]?
+    @State private var noseCapture: [Double]?
+    @State private var trackMmText = ""
+    @State private var calibrationHint = ""
+
+    private enum SensorPage: CaseIterable {
+        case imu, tof
+
+        var title: String {
+            switch self { case .imu: "IMU 姿态"; case .tof: "ToF 测距" }
+        }
+
+        var symbol: String {
+            switch self { case .imu: "rotate.3d"; case .tof: "camera.metering.matrix" }
+        }
+    }
 
     var body: some View {
         Page {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 18) {
-                        PageHeading(eyebrow: "TELEMETRY / SENSORS", title: "传感器实况",
-                                    subtitle: "车端 IMU 与 ToF 的原始数据流，仅供观察，不参与控制。")
+                        PageHeading(eyebrow: "LIVE TELEMETRY", title: "传感器实况",
+                                    subtitle: "IMU 动态与前方距离 · 实时观察")
+                            .id("sensor-top")
+                        sensorSwitcher
                         streamBar
-                        tofPanel
-                        imu3DPanel
-                            .id("imu-panel")
-                        imuWavePanel
-                        guardPanel
+                        if selectedSensor == .imu {
+                            imu3DPanel
+                                .id("imu-panel")
+                            imuCalibrationPanel
+                            imuWavePanel
+                        } else {
+                            tofPanel
+                            guardPanel
+                        }
                     }
                     .padding(20)
                     .frame(maxWidth: 680)
                     .frame(maxWidth: .infinity)
                 }
+                .onChange(of: selectedSensor) { _, _ in
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        proxy.scrollTo("sensor-top", anchor: .top)
+                    }
+                }
                 .onAppear {
+                    app.calibRecGet()
                     // dev/screenshot hooks, same family as --tab/--no-alert
                     let args = ProcessInfo.processInfo.arguments
                     if args.contains("--sensors-bottom") {
-                        proxy.scrollTo("guard-panel", anchor: .bottom)
+                        selectedSensor = .tof
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                            proxy.scrollTo("guard-panel", anchor: .bottom)
+                        }
+                    } else if args.contains("--sensors-tof") {
+                        selectedSensor = .tof
                     } else if args.contains("--sensors-mid") {
                         proxy.scrollTo("imu-panel", anchor: .top)
                     }
+                }
+                .onChange(of: app.connState) { _, state in
+                    if state == .connected { app.calibRecGet() }
                 }
             }
         }
@@ -49,12 +84,41 @@ struct SensorsView: View {
 
     // ---- stream status + pause -------------------------------------------------
 
+    private var sensorSwitcher: some View {
+        HStack(spacing: 5) {
+            ForEach(SensorPage.allCases, id: \.self) { page in
+                Button {
+                    Haptics.selection()
+                    selectedSensor = page
+                } label: {
+                    HStack(spacing: 7) {
+                        Image(systemName: page.symbol)
+                            .font(.subheadline.weight(.semibold))
+                        Text(page.title)
+                            .font(.subheadline.weight(.semibold))
+                    }
+                    .foregroundStyle(selectedSensor == page ? Theme.text : Theme.dim)
+                    .frame(maxWidth: .infinity, minHeight: 42)
+                    .background(selectedSensor == page ? Theme.panel : Color.clear,
+                                in: RoundedRectangle(cornerRadius: 13))
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("显示\(page.title)界面")
+            }
+        }
+        .padding(5)
+        .background(Theme.bgLift, in: RoundedRectangle(cornerRadius: 18))
+    }
+
     private var streamBar: some View {
         HStack(spacing: 10) {
-            streamChip(title: "IMU", detail: app.imuRateHz.map { String(format: "%.0f Hz", $0) } ?? "--",
-                       fresh: app.imuFresh && !app.sensorPaused)
-            streamChip(title: "ToF", detail: "8×8 · 15 Hz",
-                       fresh: app.tofMapFresh && !app.sensorPaused)
+            if selectedSensor == .imu {
+                streamChip(title: "IMU", detail: app.imuRateHz.map { String(format: "%.0f Hz", $0) } ?? "--",
+                           fresh: app.imuFresh && !app.sensorPaused)
+            } else {
+                streamChip(title: "ToF", detail: "8×8 区域",
+                           fresh: tofDisplayMap != nil && !app.sensorPaused)
+            }
             Spacer()
             Button {
                 Haptics.light()
@@ -104,7 +168,9 @@ struct SensorsView: View {
                 Label("ToF 测距", systemImage: "camera.metering.matrix")
                     .font(.subheadline.weight(.semibold))
                     .foregroundStyle(Theme.dim)
-                let scene = Self.tofScene(app.tofMap?.mode, fresh: app.tofMapFresh)
+                let scene = tofUsingFusionSummary
+                    ? ("摘要", Theme.warn)
+                    : Self.tofScene(tofDisplayMap?.mode, fresh: tofDisplayMap != nil)
                 Text(scene.0)
                     .font(Theme.mono(12, weight: .bold))
                     .padding(.horizontal, 10)
@@ -112,13 +178,13 @@ struct SensorsView: View {
                     .background(scene.1.opacity(0.14), in: Capsule())
                     .foregroundStyle(scene.1)
                 Spacer()
-                Text(app.tofMap.map { "可信区 \($0.validZones)/64" } ?? "等待数据")
+                Text(tofZoneSummary)
                     .font(Theme.mono(12))
                     .foregroundStyle(Theme.dim)
             }
             HStack(alignment: .top, spacing: 16) {
-                TofHeatmapView(zones: app.tofMap?.zones,
-                               fresh: app.tofMapFresh && !app.sensorPaused)
+                TofHeatmapView(zones: tofDisplayMap?.zones,
+                               fresh: tofDisplayMap != nil && !app.sensorPaused)
                     .frame(width: 168, height: 168)
                 VStack(alignment: .leading, spacing: 10) {
                     VStack(alignment: .leading, spacing: 0) {
@@ -126,11 +192,7 @@ struct SensorsView: View {
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(Theme.dim)
                         HStack(alignment: .firstTextBaseline, spacing: 4) {
-                            Text(app.tofMap.flatMap { frame in
-                                frame.validZones > 0
-                                    ? String(format: "%.2f", Double(frame.nearestMm) / 1000)
-                                    : nil
-                            } ?? "--")
+                            Text(tofNearestMm.map { String(format: "%.2f", Double($0) / 1000) } ?? "--")
                                 .font(Theme.display(34))
                                 .foregroundStyle(Theme.text)
                                 .monospacedDigit()
@@ -142,21 +204,61 @@ struct SensorsView: View {
                     }
                     NearTrendSparkline(history: app.tofNearHistory)
                         .frame(height: 46)
-                    Text("近距走势 · 最近 150 帧")
+                    Text(tofUsingFusionSummary ? "融合摘要 · 区域图未收到" : "近距走势 · 最近 150 帧")
                         .font(.caption2)
-                        .foregroundStyle(Theme.dim)
+                        .foregroundStyle(tofUsingFusionSummary ? Theme.warn : Theme.dim)
                     Spacer(minLength: 0)
                 }
             }
-            Text("热力图为车前 ~45° 视场：越红越近，越蓝越远，灰格为未信任区。")
+            Text(tofExplanation)
                 .font(.caption2)
                 .foregroundStyle(Theme.dim)
         } }
     }
 
+    private var tofExplanation: String {
+        if tofUsingFusionSummary {
+            return "正在显示融合层的最近距离；区域分片未到达，请检查传感器数据流。"
+        }
+        guard let map = tofDisplayMap else { return "等待 ToF 区域分片；连接车辆后将显示 8×8 热力图。" }
+        if map.receivedFragments < TofZoneFrame.fragmentCount {
+            return "区域分片不完整，灰格为未收到或未信任区域；最近距离仍来自当前帧。"
+        }
+        return "热力图为车前 ~45° 视场：越红越近，越蓝越远，灰格为未信任区。"
+    }
+
+    private var tofDisplayMap: TofZoneFrame? {
+        if app.sensorPaused { return app.tofMap ?? app.tofPartialMap }
+        if app.tofMapFresh { return app.tofMap }
+        if app.tofPartialFresh { return app.tofPartialMap }
+        return nil
+    }
+
+    private var tofUsingFusionSummary: Bool {
+        tofDisplayMap == nil && app.fusionFresh && ((app.fusion?.flags ?? 0) & 0x81) != 0
+    }
+
+    private var tofNearestMm: Int? {
+        if let map = tofDisplayMap, map.validZones > 0 { return map.nearestMm }
+        if tofUsingFusionSummary, let fusion = app.fusion, fusion.validZones > 0 {
+            return fusion.distance
+        }
+        return nil
+    }
+
+    private var tofZoneSummary: String {
+        if let map = tofDisplayMap {
+            return map.receivedFragments == TofZoneFrame.fragmentCount
+                ? "可信区 \(map.validZones)/64"
+                : "区域 \(map.receivedFragments)/3 片"
+        }
+        if tofUsingFusionSummary, let fusion = app.fusion { return "融合 \(fusion.validZones) 区" }
+        return "等待区域数据"
+    }
+
     /// (label, color) for the FUSION_MODE_* scene classification.
     private static func tofScene(_ mode: Int?, fresh: Bool) -> (String, Color) {
-        guard fresh else { return ("过期", Theme.dim) }
+        guard fresh else { return (mode == nil ? "未收到" : "过期", Theme.dim) }
         switch mode {
         case 0: return ("失明", Theme.crit)
         case 1: return ("跟踪", Theme.live)
@@ -168,54 +270,242 @@ struct SensorsView: View {
 
     // ---- IMU 3D panel -----------------------------------------------------------
 
-    /// The IMU headline card: a 3D car tracking the live attitude, the
-    /// g-ball for what the accelerometer feels, tilt gauges against the
-    /// 45° tilt stop, and the six-axis live values beneath. Layout stacks
-    /// rows instead of columns — the phone's content width (~313 pt)
-    /// cannot fit three instruments side by side.
+    /// One large attitude instrument, then two tilt gauges and a separate
+    /// acceleration vector. The model needs the full phone width to be legible.
     private var imu3DPanel: some View {
-        Panel { VStack(alignment: .leading, spacing: 14) {
+        Panel { VStack(alignment: .leading, spacing: 13) {
             HStack {
-                Label("IMU 三维姿态", systemImage: "rotate.3d")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundStyle(Theme.dim)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(carFrameAttitude ? "车体姿态" : "IMU 姿态预览")
+                        .font(Theme.display(22))
+                    Text("IMU / FUSION")
+                        .font(Theme.mono(10))
+                        .tracking(2)
+                        .foregroundStyle(Theme.dim)
+                }
                 Spacer()
-                Circle()
-                    .fill(app.imuFresh ? Theme.live : Theme.dim.opacity(0.4))
-                    .frame(width: 8, height: 8)
+                Text(calibratedAttitude ? "车体融合" :
+                     (displayCalibrated ? "显示标定" : (attitudeAvailable ? "原始 IMU" : "等待 IMU")))
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(attitudeAvailable ? Theme.live : Theme.dim)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(attitudeAvailable ? Theme.live.opacity(0.1) : Theme.bgLift,
+                                in: Capsule())
             }
-            HStack(alignment: .top, spacing: 10) {
-                Car3DView(headingDeg: headingDeg, rollDeg: rollDeg, pitchDeg: pitchDeg,
-                          hasData: app.fusion != nil)
-                    .frame(maxWidth: .infinity)
+            Car3DView(headingDeg: attitudeAvailable ? headingDeg : 0,
+                      rollDeg: attitudeAvailable ? rollDeg : 0,
+                      pitchDeg: attitudeAvailable ? pitchDeg : 0,
+                      hasData: attitudeAvailable,
+                      sourceLabel: calibratedAttitude ? "已标定 · 车体融合" :
+                          (displayCalibrated ? "iOS 标定 · 等待车端确认" : "未标定 · 传感器坐标"))
+                .frame(height: 228)
+            if attitudeAvailable && !calibratedAttitude {
+                Text(displayCalibrated
+                     ? "iOS 轴向已标定，车端尚未确认；模型仅供预览，倾斜保护仍以车端融合状态为准。"
+                     : "轴向未标定：模型跟随 IMU 原始倾角；旋转为陀螺仪积分的相对变化，不代表车头实际方向。")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.warn)
+            }
+            HStack(spacing: 10) {
+                TiltGaugeView(title: "横滚", degrees: rollDeg, hasData: attitudeAvailable,
+                              showsProtection: calibratedAttitude)
+                TiltGaugeView(title: "俯仰", degrees: pitchDeg, hasData: attitudeAvailable,
+                              showsProtection: calibratedAttitude)
+            }
+            HStack(spacing: 12) {
+                headingReadout(title: "相对旋转", text: headingText, unit: "°")
+                Rectangle().fill(Theme.panelStroke).frame(width: 1, height: 18)
+                headingReadout(title: "旋转速率", text: yawRateText, unit: "°/s")
+            }
+            Divider()
+            HStack(alignment: .center, spacing: 15) {
                 GBallView(fwd: gBallFwd, lat: gBallLat,
                           trail: app.accelTrail,
-                          compensated: app.fusion != nil,
+                          compensated: attitudeAvailable && imuDisplayAvailable,
+                          carFrame: carFrameAttitude,
                           peakG: app.peakHorizontalG)
-                    .frame(maxWidth: .infinity)
+                    .frame(width: 128)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("水平加速度")
+                        .font(.subheadline.weight(.semibold))
+                    Text(carFrameAttitude ? "圆点偏移即车辆加速方向" : "传感器 X/Y 方向 · 重力近似扣除")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.dim)
+                    accelerationReadout(carFrameAttitude ? "前后" : "X 轴", value: gBallFwd)
+                    accelerationReadout(carFrameAttitude ? "左右" : "Y 轴", value: gBallLat)
+                    Text("仅用于观察，不参与控制")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.dim)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            TiltGaugeView(title: "横滚", degrees: rollDeg)
-            TiltGaugeView(title: "俯仰", degrees: pitchDeg)
-            HStack(spacing: 12) {
-                headingReadout(title: "航向", text: headingText, unit: "°")
-                headingReadout(title: "航向率", text: yawRateText, unit: "°/s")
-            }
-            axisValueGrid
         } }
     }
 
-    private var rollDeg: Double { Double(app.fusion?.rollCdeg ?? 0) / 100 }
-    private var pitchDeg: Double { Double(app.fusion?.pitchCdeg ?? 0) / 100 }
-    private var headingDeg: Double { Double(app.fusion?.headingCdeg ?? 0) / 100 }
+    private var imuCalibrationPanel: some View {
+        Panel { VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Label("IMU 安装标定", systemImage: "scope")
+                    .font(.subheadline.weight(.semibold))
+                Spacer()
+                Button("读取车端") { app.calibRecGet() }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.plain)
+                    .foregroundStyle(Theme.accentDeep)
+            }
+            Text("车停稳后记录水平姿态，再抬起车头约 20–30° 并停稳记录。由两次重力方向推算车体前/左/上轴；轮距需实测。")
+                .font(.caption2)
+                .foregroundStyle(Theme.dim)
+            HStack(spacing: 8) {
+                calibrationButton(levelCapture == nil ? "① 记录水平" : "① 重录水平",
+                                  ready: levelCapture != nil) {
+                    levelCapture = captureStableImu()
+                    noseCapture = nil
+                    if levelCapture != nil { calibrationHint = "已记录水平姿态；请抬起车头后记录第二姿态。" }
+                }
+                calibrationButton(noseCapture == nil ? "② 记录抬头" : "② 重录抬头",
+                                  ready: noseCapture != nil) {
+                    noseCapture = captureStableImu()
+                    if let levelCapture, let noseCapture {
+                        calibrationHint = ImuAxisCalibration.derive(level: levelCapture, noseUp: noseCapture) == nil
+                            ? "两次姿态区分不够：检查车身水平，抬头至少 20° 后停稳重录。"
+                            : "轴向推算完成；输入实测左右轮距，再写入 TC275。"
+                    }
+                }
+            }
+            HStack(spacing: 10) {
+                Text("左右轮距")
+                    .font(.caption.weight(.semibold))
+                TextField("实测 mm", text: $trackMmText)
+                    .keyboardType(.numberPad)
+                    .font(Theme.mono(14))
+                    .multilineTextAlignment(.trailing)
+                Text("mm · 80–600")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.dim)
+            }
+            .padding(10)
+            .background(Theme.bgLift, in: RoundedRectangle(cornerRadius: 10))
+            Button {
+                guard let axisCalibration, let track = Int(trackMmText) else { return }
+                app.setImuDisplayCalibration(axisCalibration, trackMm: track)
+                calibrationHint = "标定已发送；等待车端写入回执，写入后可重新读取确认。"
+            } label: {
+                Text("写入车端并保存")
+                    .font(.subheadline.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 42)
+                    .background(calibrationReady ? Theme.accent : Theme.bgLift,
+                                in: RoundedRectangle(cornerRadius: 11))
+                    .foregroundStyle(calibrationReady ? .white : Theme.dim)
+            }
+            .buttonStyle(.plain)
+            .disabled(!calibrationReady)
+            if !calibrationHint.isEmpty {
+                Text(calibrationHint).font(.caption2).foregroundStyle(Theme.dim)
+            }
+            Text(imuCalibrationStatus)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(calibratedAttitude ? Theme.live : Theme.warn)
+        } }
+    }
+
+    private func calibrationButton(_ title: String, ready: Bool,
+                                   action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack {
+                Text(title)
+                if ready { Image(systemName: "checkmark.circle.fill") }
+            }
+            .font(.caption.weight(.semibold))
+            .frame(maxWidth: .infinity, minHeight: 38)
+            .background(Theme.bgLift, in: RoundedRectangle(cornerRadius: 10))
+            .foregroundStyle(ready ? Theme.live : Theme.text)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var axisCalibration: ImuAxisCalibration? {
+        guard let levelCapture, let noseCapture else { return nil }
+        return ImuAxisCalibration.derive(level: levelCapture, noseUp: noseCapture)
+    }
+
+    private var calibrationReady: Bool {
+        axisCalibration != nil && (Int(trackMmText).map { (80...600).contains($0) } ?? false)
+            && app.connState == .connected && app.ctrlRole && app.tcUp
+            && app.imuFresh && !app.sensorPaused
+    }
+
+    private var imuCalibrationStatus: String {
+        guard let record = app.calib.record else { return "车端记录未读取；需要控制权与 TC275 在线。" }
+        if record.imuSaved == 3 { return "车端拒绝标定：确认停车、IMU 在线、轴向与轮距有效。" }
+        if record.imuSaved == 2 { return "已在本次运行生效，但 DFlash 保存失败；重启后不会保留。" }
+        if record.imuSaved == 1 { return "车端 DFlash 保存成功 · 轴向 \(record.imuAxis) · 轮距 \(record.trackMm) mm" }
+        if record.imuAxis.contains(where: { $0 != 0 }) {
+            return "车端轴向 \(record.imuAxis) · 轮距 \(record.trackMm) mm · \(calibratedAttitude ? "融合已生效" : "等待融合状态")"
+        }
+        return "车端 IMU 轴向尚未标定"
+    }
+
+    private func captureStableImu() -> [Double]? {
+        let samples = Array(app.imuHistory.suffix(10))
+        guard app.imuFresh, !app.sensorPaused, samples.count == 10,
+              let first = samples.first, let last = samples.last,
+              (300...900).contains(last.stampMs - first.stampMs),
+              samples.allSatisfy({ $0.gyroMdps.allSatisfy { abs($0) < 15_000 } }) else {
+            calibrationHint = "等待稳定的 IMU 数据：保持姿态静止约 0.5 秒后重试。"
+            return nil
+        }
+        return (0..<3).map { axis in
+            Double(samples.reduce(0) { $0 + $1.accMg[axis] }) / Double(samples.count)
+        }
+    }
+
+    private func accelerationReadout(_ title: String, value: Double) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(title).font(.caption2).foregroundStyle(Theme.dim)
+            Spacer(minLength: 2)
+            Text(imuDisplayAvailable && attitudeAvailable ? String(format: "%+.2f", value) : "--")
+                .font(Theme.mono(15))
+                .monospacedDigit()
+            Text("g").font(.caption2).foregroundStyle(Theme.dim)
+        }
+    }
+
+    private var rollDeg: Double {
+        calibratedAttitude ? Double(app.fusion?.rollCdeg ?? 0) / 100
+                           : (app.rawImuAttitude?.rollDeg ?? 0)
+    }
+    private var pitchDeg: Double {
+        calibratedAttitude ? Double(app.fusion?.pitchCdeg ?? 0) / 100
+                           : (app.rawImuAttitude?.pitchDeg ?? 0)
+    }
+    private var headingDeg: Double {
+        calibratedAttitude ? Double(app.fusion?.headingCdeg ?? 0) / 100
+                           : (app.rawImuAttitude?.relativeYawDeg ?? 0)
+    }
+    private var calibratedAttitude: Bool {
+        app.fusionFresh && ((app.fusion?.flags ?? 0) & 0x0a) == 0x0a
+    }
+    private var displayCalibrated: Bool { app.settings.imuDisplayCalibration != nil }
+    private var carFrameAttitude: Bool { calibratedAttitude || displayCalibrated }
+    private var attitudeAvailable: Bool {
+        calibratedAttitude || (imuDisplayAvailable && app.rawImuAttitude != nil)
+    }
     private var headingText: String {
-        app.fusion == nil ? "--" : String(format: "%+.1f", Double(app.fusion!.headingCdeg) / 100)
+        attitudeAvailable ? String(format: "%+.1f", headingDeg) : "--"
     }
     private var yawRateText: String {
-        guard let fusion = app.fusion else { return "--" }
-        return String(format: "%+.1f", Double(fusion.yawRateCdegS) / 100)
+        guard attitudeAvailable else { return "--" }
+        let rate = calibratedAttitude ? Double(app.fusion?.yawRateCdegS ?? 0) / 100
+                                      : (app.rawImuAttitude?.yawRateDegS ?? 0)
+        return String(format: "%+.1f", rate)
     }
     private var gBallFwd: Double { app.accelTrail.last?.fwd ?? 0 }
     private var gBallLat: Double { app.accelTrail.last?.lat ?? 0 }
+    private var imuDisplayAvailable: Bool {
+        app.sensorPaused ? !app.imuHistory.isEmpty : app.imuFresh
+    }
 
     private func headingReadout(title: String, text: String, unit: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 3) {
@@ -236,41 +526,51 @@ struct SensorsView: View {
     /// Six-axis live values, one column per axis, colored to match the
     /// strip-chart traces: accel in g, angular rate in °/s.
     private var axisValueGrid: some View {
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6),
-                  spacing: 8) {
-            ForEach(axisValueItems, id: \.label) { item in
-                VStack(spacing: 2) {
-                    HStack(spacing: 3) {
-                        Circle().fill(item.color).frame(width: 5, height: 5)
-                        Text(item.label)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(Theme.dim)
+        VStack(alignment: .leading, spacing: 8) {
+            Text("六轴瞬时值")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Theme.dim)
+            LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 3),
+                      spacing: 8) {
+                ForEach(axisValueItems, id: \.label) { item in
+                    VStack(alignment: .leading, spacing: 5) {
+                        HStack(spacing: 5) {
+                            Circle().fill(item.color).frame(width: 6, height: 6)
+                            Text(item.label)
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Theme.dim)
+                        }
+                        HStack(alignment: .firstTextBaseline, spacing: 2) {
+                            Text(item.value ?? "--")
+                                .font(Theme.mono(15))
+                                .foregroundStyle(Theme.text)
+                                .monospacedDigit()
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.75)
+                            Text(item.unit)
+                                .font(Theme.mono(9))
+                                .foregroundStyle(Theme.dim)
+                        }
                     }
-                    Text(item.value ?? "--")
-                        .font(Theme.mono(12))
-                        .foregroundStyle(Theme.text)
-                        .monospacedDigit()
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.6)
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.bgLift.opacity(0.65), in: RoundedRectangle(cornerRadius: 12))
                 }
-                .padding(.vertical, 6)
-                .frame(maxWidth: .infinity)
-                .background(Theme.bgLift, in: RoundedRectangle(cornerRadius: 10))
             }
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("六轴实时数值")
     }
 
-    private var axisValueItems: [(label: String, color: Color, value: String?)] {
-        let sample = app.imuHistory.last
+    private var axisValueItems: [(label: String, color: Color, value: String?, unit: String)] {
+        let sample = imuDisplayAvailable ? app.imuHistory.last : nil
         let acc = AxisLegend.series.map { axis in
             (label: "a\(axis.label.lowercased())", color: axis.color,
-             value: sample.map { String(format: "%+.2f", Double($0.accMg[axis.index]) / 1000) })
+             value: sample.map { String(format: "%+.2f", Double($0.accMg[axis.index]) / 1000) }, unit: "g")
         }
         let gyro = AxisLegend.series.map { axis in
             (label: "ω\(axis.label.lowercased())", color: axis.color,
-             value: sample.map { String(format: "%+.1f", Double($0.gyroMdps[axis.index]) / 1000) })
+             value: sample.map { String(format: "%+.1f", Double($0.gyroMdps[axis.index]) / 1000) }, unit: "°/s")
         }
         return acc + gyro
     }
@@ -288,6 +588,7 @@ struct SensorsView: View {
                     .font(Theme.mono(12))
                     .foregroundStyle(Theme.dim)
             }
+            axisValueGrid
             // Series stay in wire units (mg / mdps); autoRange + the legend
             // present them in g / °/s.
             let accRange = ImuKinematics.autoRange(values: accSeries.map(\.values),
@@ -524,6 +825,15 @@ struct TofHeatmapView: View {
         }
         .aspectRatio(1, contentMode: .fit)
         .background(Theme.bgLift, in: RoundedRectangle(cornerRadius: 14))
+        .overlay {
+            if zones == nil {
+                Text("区域图未收到")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(Theme.dim)
+                    .padding(8)
+                    .background(Theme.panel.opacity(0.9), in: Capsule())
+            }
+        }
         .overlay(RoundedRectangle(cornerRadius: 14)
             .strokeBorder(Theme.panelStroke.opacity(0.6), lineWidth: 1))
         .accessibilityElement(children: .ignore)
@@ -626,12 +936,13 @@ enum AxisLegend {
 /// Horizontal-acceleration bubble: the ball sits at the gravity-compensated
 /// (fwd, lat) vector, 1 g at the rim — accelerating runs it up (车头方向),
 /// braking down, cornering sideways. The fading trail is the last ~6 s of
-/// positions. Grey ball + 「未补偿」 while the fusion attitude is missing.
+/// positions. In an uncalibrated installation the axes are sensor X/Y.
 struct GBallView: View {
     let fwd: Double
     let lat: Double
     let trail: [(fwd: Double, lat: Double)]
     var compensated: Bool = true
+    var carFrame: Bool = true
     var peakG: Double = 0
 
     var body: some View {
@@ -653,11 +964,11 @@ struct GBallView: View {
                 cross.addLine(to: CGPoint(x: centre.x, y: centre.y + radius))
                 ctx.stroke(cross, with: .color(Theme.dim.opacity(0.3)),
                            style: StrokeStyle(lineWidth: 0.7, dash: [1, 3]))
-                // orientation hints: 前 (nose) up, 左 (left) left
-                ctx.draw(Text("前").font(.system(size: 9, weight: .semibold))
+                // Orientation hints follow the active coordinate system.
+                ctx.draw(Text(carFrame ? "前" : "X").font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(Theme.dim),
                          at: CGPoint(x: centre.x, y: centre.y - radius + 9))
-                ctx.draw(Text("左").font(.system(size: 9, weight: .semibold))
+                ctx.draw(Text(carFrame ? "左" : "Y").font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(Theme.dim.opacity(0.7)),
                          at: CGPoint(x: centre.x - radius + 10, y: centre.y))
                 ctx.draw(Text("1g").font(Theme.mono(8)).foregroundStyle(Theme.dim.opacity(0.6)),
@@ -688,7 +999,7 @@ struct GBallView: View {
             Text(compensated ? String(format: "峰值 %.2f g", peakG) : "未补偿")
                 .font(Theme.mono(10))
                 .foregroundStyle(compensated ? Theme.dim : Theme.warn)
-            Text("水平加速度")
+            Text(carFrame ? "水平加速度" : "传感器水平分量")
                 .font(.caption2)
                 .foregroundStyle(Theme.dim)
         }
@@ -696,9 +1007,10 @@ struct GBallView: View {
         .overlay(RoundedRectangle(cornerRadius: 14)
             .strokeBorder(Theme.panelStroke.opacity(0.6), lineWidth: 1))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("水平加速度矢量球")
+        .accessibilityLabel(carFrame ? "水平加速度矢量球" : "传感器 X Y 加速度矢量球")
         .accessibilityValue(compensated
-            ? String(format: "前向 %.2f g，侧向 %.2f g，峰值 %.2f g", fwd, lat, peakG)
+            ? String(format: carFrame ? "前向 %.2f g，侧向 %.2f g，峰值 %.2f g"
+                                      : "X 轴 %.2f g，Y 轴 %.2f g，峰值 %.2f g", fwd, lat, peakG)
             : "姿态缺失，未补偿")
     }
 
@@ -726,24 +1038,26 @@ struct GBallView: View {
 struct TiltGaugeView: View {
     let title: String
     let degrees: Double
+    var hasData: Bool = true
+    var showsProtection: Bool = true
     var spanDeg: Double = 60
     var limitDeg: Double = 45
 
     private var valueColor: Color {
-        if abs(degrees) > limitDeg { return Theme.crit }
-        if abs(degrees) > limitDeg - 10 { return Theme.warn }
+        if showsProtection && abs(degrees) > limitDeg { return Theme.crit }
+        if showsProtection && abs(degrees) > limitDeg - 10 { return Theme.warn }
         return Theme.text
     }
 
     var body: some View {
-        VStack(spacing: 4) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .firstTextBaseline) {
                 Text(title)
-                    .font(.caption2.weight(.semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(Theme.dim)
                 Spacer()
-                Text(String(format: "%+.1f°", degrees))
-                    .font(Theme.mono(13))
+                Text(hasData ? String(format: "%+.1f°", degrees) : "--°")
+                    .font(Theme.mono(17))
                     .monospacedDigit()
                     .foregroundStyle(valueColor)
             }
@@ -755,19 +1069,21 @@ struct TiltGaugeView: View {
                 let track = CGRect(x: 0, y: cy - 5, width: size.width, height: 10)
                 ctx.fill(Path(roundedRect: track, cornerRadius: 5), with: .color(Theme.bgLift))
                 // red stop zones beyond ±limitDeg
-                let zoneWidth = half * (1 - limitDeg / spanDeg)
-                for side in [0.0, 1.0] {
-                    let zone = CGRect(x: side == 0 ? 0 : size.width - zoneWidth,
-                                      y: cy - 5, width: zoneWidth, height: 10)
-                    ctx.fill(Path(roundedRect: zone, cornerRadius: 5),
-                             with: .color(Theme.crit.opacity(0.22)))
+                if showsProtection {
+                    let zoneWidth = half * (1 - limitDeg / spanDeg)
+                    for side in [0.0, 1.0] {
+                        let zone = CGRect(x: side == 0 ? 0 : size.width - zoneWidth,
+                                          y: cy - 5, width: zoneWidth, height: 10)
+                        ctx.fill(Path(roundedRect: zone, cornerRadius: 5),
+                                 with: .color(Theme.crit.opacity(0.22)))
+                    }
                 }
                 // ticks every 15°, majors at 0 and ±limit
                 var deg = -spanDeg
                 while deg <= spanDeg + 0.01 {
                     let x = mid + CGFloat(deg / spanDeg) * half
-                    let major = abs(deg) < 0.01 || abs(abs(deg) - limitDeg) < 0.01
-                    let isLimit = abs(abs(deg) - limitDeg) < 0.01
+                    let isLimit = showsProtection && abs(abs(deg) - limitDeg) < 0.01
+                    let major = abs(deg) < 0.01 || isLimit
                     var tick = Path()
                     tick.move(to: CGPoint(x: x, y: cy - (major ? 8 : 6)))
                     tick.addLine(to: CGPoint(x: x, y: cy + 8))
@@ -782,27 +1098,25 @@ struct TiltGaugeView: View {
                 var needle = Path()
                 needle.move(to: CGPoint(x: nx, y: cy - 10))
                 needle.addLine(to: CGPoint(x: nx, y: cy + 10))
-                ctx.stroke(needle, with: .color(abs(degrees) > limitDeg ? Theme.crit : Theme.accent),
+                ctx.stroke(needle, with: .color(hasData ? (showsProtection && abs(degrees) > limitDeg ? Theme.crit : Theme.accent) : Theme.dim),
                            style: StrokeStyle(lineWidth: 3.5, lineCap: .round))
                 var cap = Path()
                 cap.addEllipse(in: CGRect(x: nx - 2.5, y: cy - 2.5, width: 5, height: 5))
-                ctx.fill(cap, with: .color(Theme.accent))
+                ctx.fill(cap, with: .color(hasData ? Theme.accent : Theme.dim))
             }
             .frame(height: 22)
             .animation(.easeInOut(duration: 0.2), value: degrees)
-            HStack {
-                Text("−60°")
-                Spacer()
-                Text("保护 45°")
-                    .foregroundStyle(Theme.crit.opacity(0.7))
-                Spacer()
-                Text("+60°")
-            }
-            .font(Theme.mono(8))
-            .foregroundStyle(Theme.dim.opacity(0.7))
+            Text(showsProtection ? "±45° 倾斜保护" : "传感器参考角")
+                .font(Theme.mono(9))
+                .foregroundStyle(Theme.dim)
         }
+        .padding(11)
+        .frame(maxWidth: .infinity)
+        .background(Theme.bgLift.opacity(0.72), in: RoundedRectangle(cornerRadius: 13))
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("\(title)倾角")
-        .accessibilityValue(String(format: "%.1f 度，保护阈值 45 度", degrees))
+        .accessibilityValue(hasData
+            ? String(format: showsProtection ? "%.1f 度，保护阈值 45 度" : "传感器参考角 %.1f 度", degrees)
+            : "等待数据")
     }
 }

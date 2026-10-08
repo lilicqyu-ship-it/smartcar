@@ -14,6 +14,7 @@ static XcoreRecordLive liveRecord;
 static XcoreCalibResult mailbox;
 static XcoreJog jog;
 static XcoreEncoder encoder;
+static XcoreImu imu;
 static XcoreEvtFrame events[64];
 static unsigned eventCount, writeCount, failureLogs;
 static boolean writeResults[3];
@@ -49,6 +50,7 @@ uint32 XCORE_motorGetTarget(sint16 *left, sint16 *right, boolean *estop)
     return 0;
 }
 void XCORE_encoderRead(XcoreEncoder *out) { *out = encoder; }
+void XCORE_imuRead(XcoreImu *out) { *out = imu; }
 boolean XCORE_evtPush(const XcoreEvtFrame *frame)
 {
     assert(eventCount < sizeof events / sizeof events[0]);
@@ -95,6 +97,8 @@ static void reset(void)
     memset(&mailbox, 0, sizeof mailbox);
     memset(&jog, 0, sizeof jog);
     memset(&encoder, 0, sizeof encoder);
+    memset(&imu, 0, sizeof imu);
+    imu.alive = 1u;
     memset(flashBlob, 0, sizeof flashBlob);
     eventCount = writeCount = failureLogs = 0;
     writeResults[0] = writeResults[1] = writeResults[2] = TRUE;
@@ -189,6 +193,30 @@ int main(void)
     assert(resultCount() == 1);
     expectResult(0, CALIB_STATUS_DONE, CALIB_SAVED_FAILED);
     nowMs += 500; CALIB_tick(); assert(resultCount() == 1);
+
+    /* IMU command: parked + live IMU, immediate echo then verified save. */
+    {
+        uint8 imuBody[5] = {1u, 2u, 3u, 150u, 0u};
+        reset();
+        CALIB_imuSet(imuBody, sizeof imuBody);
+        assert(eventCount == 1 && events[0].cid == SF_CID_DPT_REC);
+        assert(events[0].payload[20] == 0u);
+        assert(liveRecord.rec.imuAxis[0] == 1 && liveRecord.rec.trackMm == 150u);
+        nowMs += 500; CALIB_tick();
+        assert(writeCount == 1 && eventCount == 2);
+        assert(events[1].payload[20] == 1u);
+        assert(CALIBREC_decode(flashBlob, &decoded));
+        assert(decoded.imuAxis[0] == 1 && decoded.trackMm == 150u);
+        reset();
+        imu.alive = 0u;
+        CALIB_imuSet(imuBody, sizeof imuBody);
+        assert(eventCount == 1 && events[0].payload[20] == 3u);
+        assert(liveRecord.rec.imuAxis[0] == 0);
+        reset();
+        encoder.pctLeft = 10;
+        CALIB_imuSet(imuBody, sizeof imuBody);
+        assert(eventCount == 1 && events[0].payload[20] == 3u);
+    }
 
     puts("PASS: calibration save holds, quiet gate, retry success, final failure, BUSY, replacement operations, invalid parameters");
     return 0;

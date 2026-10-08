@@ -11,9 +11,10 @@
 #define BLOB_INVERT  10u
 #define BLOB_FULL    14u
 #define BLOB_DIA     16u
-#define BLOB_CRC     18u
-
-#define BLOB_CRC_LEN  18u        /* crc16 covers bytes 0..17 */
+#define BLOB_AXIS    18u
+#define BLOB_TRACK   21u
+#define BLOB_CRC     26u
+#define BLOB_CRC_LEN 26u        /* v2 crc16 covers bytes 0..25 */
 
 static const uint8_t g_magic[4] = {'S', 'D', 'C', '1'};
 
@@ -36,6 +37,29 @@ void CALIBREC_fillDefaults(CalibRecord *rec)
     }
     rec->fullScaleMmS = CALIB_FULLSCALE_DEF;
     rec->wheelDiaMm   = CALIB_WHEELDIA_DEF;
+    for (i = 0u; i < 3u; i++) rec->imuAxis[i] = 0;
+    rec->trackMm = 0u;
+}
+
+static uint8_t axisOk(const int8_t axis[3], uint16_t track)
+{
+    uint8_t used = 0u, i, j;
+    int sign = 1, inversions = 0;
+    if ((axis[0] == 0) && (axis[1] == 0) && (axis[2] == 0)) return track == 0u;
+    if ((track < 80u) || (track > 600u)) return 0u;
+    for (i = 0u; i < 3u; i++)
+    {
+        int a = axis[i] < 0 ? -axis[i] : axis[i];
+        if ((a < 1) || (a > 3) || (used & (1u << a))) return 0u;
+        used |= (uint8_t)(1u << a);
+        if (axis[i] < 0) sign = -sign;
+        for (j = 0u; j < i; j++)
+        {
+            int b = axis[j] < 0 ? -axis[j] : axis[j];
+            if (b > a) inversions++;
+        }
+    }
+    return ((inversions & 1) ? -sign : sign) == 1;
 }
 
 uint8_t CALIBREC_paramsOk(const CalibRecord *rec)
@@ -67,6 +91,7 @@ uint8_t CALIBREC_paramsOk(const CalibRecord *rec)
             return 0u;
         }
     }
+    if (axisOk(rec->imuAxis, rec->trackMm) == 0u) return 0u;
     return 1u;
 }
 
@@ -115,6 +140,16 @@ uint8_t CALIBREC_recSetDecode(const uint8_t *p, uint8_t len, CalibRecord *rec)
     return CALIBREC_paramsOk(rec);
 }
 
+uint8_t CALIBREC_imuSetDecode(const uint8_t *p, uint8_t len, CalibRecord *rec)
+{
+    uint8_t i;
+    if ((p == NULL) || (rec == NULL) || (len != CALIB_IMU_SET_LEN)) return 0u;
+    for (i = 0u; i < 3u; i++) rec->imuAxis[i] = (int8_t)p[i];
+    rec->trackMm = (uint16_t)p[3] | ((uint16_t)p[4] << 8);
+    rec->ver = CALIB_REC_VER;
+    return CALIBREC_paramsOk(rec);
+}
+
 void CALIBREC_buildEvtResult(uint8_t *buf, uint8_t status,
                              const int8_t invert[CALIB_REC_WHEELS],
                              const int32_t delta[CALIB_REC_WHEELS],
@@ -152,6 +187,9 @@ void CALIBREC_buildEvtRec(uint8_t *buf, const CalibRecord *rec, uint8_t crcOk)
     CALIBREC_putI16(&buf[10u], rec->fullScaleMmS);
     CALIBREC_putI16(&buf[12u], rec->wheelDiaMm);
     buf[14u] = crcOk;
+    for (i = 0u; i < 3u; i++) buf[15u + i] = (uint8_t)rec->imuAxis[i];
+    SF_putU16(&buf[18u], rec->trackMm);
+    buf[20u] = 0u; /* caller may set final saved status for 0x75 */
 }
 
 void CALIBREC_encode(const CalibRecord *rec, uint8_t *blob)
@@ -171,6 +209,9 @@ void CALIBREC_encode(const CalibRecord *rec, uint8_t *blob)
     }
     CALIBREC_putI16(&blob[BLOB_FULL], rec->fullScaleMmS);
     CALIBREC_putI16(&blob[BLOB_DIA], rec->wheelDiaMm);
+    for (i = 0u; i < 3u; i++) blob[BLOB_AXIS + i] = (uint8_t)rec->imuAxis[i];
+    SF_putU16(&blob[BLOB_TRACK], rec->trackMm);
+    blob[23] = blob[24] = blob[25] = 0u;
     SF_putU16(&blob[BLOB_CRC], SF_crc16(blob, BLOB_CRC_LEN));
 }
 
@@ -188,14 +229,18 @@ uint8_t CALIBREC_decode(const uint8_t *blob, CalibRecord *rec)
     {
         return 0u;
     }
-    if (blob[BLOB_VER] != CALIB_REC_VER)
+    if (blob[BLOB_VER] == 1u)
     {
-        return 0u;
+        /* Existing wheel records remain readable; their IMU map is unset. */
+        if (SF_getU16(&blob[18u]) != SF_crc16(blob, 18u)) return 0u;
     }
-    if (SF_getU16(&blob[BLOB_CRC]) != SF_crc16(blob, BLOB_CRC_LEN))
+    else if (blob[BLOB_VER] == CALIB_REC_VER)
     {
-        return 0u;
+        if (SF_getU16(&blob[BLOB_CRC]) != SF_crc16(blob, BLOB_CRC_LEN)) return 0u;
+        for (i = 0u; i < 3u; i++) rec->imuAxis[i] = (int8_t)blob[BLOB_AXIS + i];
+        rec->trackMm = SF_getU16(&blob[BLOB_TRACK]);
     }
+    else return 0u;
 
     for (i = 0u; i < CALIB_REC_WHEELS; i++)
     {

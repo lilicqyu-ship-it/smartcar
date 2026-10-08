@@ -48,13 +48,16 @@ public struct AppSettings: Equatable, Codable, Sendable {
     /// "近障停车 …"). Display-only: the vehicle-side protection and the event
     /// log keep working regardless.
     public var guardHintEnabled: Bool
+    /// 手机端传感器显示轴向标定；不改变车端融合或安全保护。
+    public var imuDisplayCalibration: ImuAxisCalibration?
 
     public init(host: String = "192.168.4.1", token: String = "",
                 deadzone: Double = 0.08, mode: DriveMode = .normal,
                 soundEnabled: Bool = false, trackWidthMm: Double = 150,
                 tiltSensitivity: Double = 1.0,
                 cameraEnabled: Bool = false, cameraHost: String = "",
-                guardHintEnabled: Bool = true) {
+                guardHintEnabled: Bool = true,
+                imuDisplayCalibration: ImuAxisCalibration? = nil) {
         self.host = host
         self.token = token
         self.deadzone = deadzone
@@ -65,6 +68,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         self.cameraEnabled = cameraEnabled
         self.cameraHost = cameraHost
         self.guardHintEnabled = guardHintEnabled
+        self.imuDisplayCalibration = imuDisplayCalibration
     }
 
     static let defaultsKey = "s3remote.settings.v1"
@@ -85,7 +89,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case host, token, deadzone, mode, soundEnabled, trackWidthMm, tiltSensitivity
-        case cameraEnabled, cameraHost, guardHintEnabled
+        case cameraEnabled, cameraHost, guardHintEnabled, imuDisplayCalibration
     }
 
     /// Lenient decode: a v1 JSON without the play/camera keys must not fail
@@ -102,6 +106,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         cameraEnabled = try c.decodeIfPresent(Bool.self, forKey: .cameraEnabled) ?? false
         cameraHost = try c.decodeIfPresent(String.self, forKey: .cameraHost) ?? ""
         guardHintEnabled = try c.decodeIfPresent(Bool.self, forKey: .guardHintEnabled) ?? true
+        imuDisplayCalibration = try c.decodeIfPresent(ImuAxisCalibration.self, forKey: .imuDisplayCalibration)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -116,6 +121,7 @@ public struct AppSettings: Equatable, Codable, Sendable {
         try c.encode(cameraEnabled, forKey: .cameraEnabled)
         try c.encode(cameraHost, forKey: .cameraHost)
         try c.encode(guardHintEnabled, forKey: .guardHintEnabled)
+        try c.encodeIfPresent(imuDisplayCalibration, forKey: .imuDisplayCalibration)
     }
 }
 
@@ -164,6 +170,10 @@ public final class AppState {
         if let warning = status.warning, warning != oldWarning { log("WARN", warning) }
     }
 
+    /// The fusion beacon can provide a ToF distance summary even when the
+    /// optional three-fragment zone stream is unavailable on an older C6.
+    public var fusionFresh: Bool { fusion != nil && nowMs - fusionAtMs < 1000 }
+
     // ---- sensor streams (sensor tab: raw IMU + ToF zone map) -----------------
     // Diagnostic JSON side-channel ({"t":"imu"} @ 20 Hz, {"t":"tofz"} @ 15 Hz
     // reassembled). Display-only: nothing here feeds driving or safety.
@@ -174,6 +184,8 @@ public final class AppState {
     /// Raw IMU samples, oldest last, capped at 200 (≈10 s at 20 Hz).
     public private(set) var imuHistory: [ImuSample] = []
     private var imuAtMs: Double = 0
+    public private(set) var rawImuAttitude: RawImuAttitude?
+    private var rawImuTracker = RawImuAttitudeTracker()
     /// g-Ball trail: gravity-compensated horizontal acceleration (g, body
     /// fwd/lat), newest last, capped at 120 (≈6 s at 20 Hz).
     public private(set) var accelTrail: [(fwd: Double, lat: Double)] = []
@@ -183,12 +195,16 @@ public final class AppState {
     /// Latest complete 8×8 zone map, nil until the first frame assembles.
     public private(set) var tofMap: TofZoneFrame?
     private var tofMapAtMs: Double = 0
+    /// Current incomplete frame, shown only if no recent complete map exists.
+    public private(set) var tofPartialMap: TofZoneFrame?
+    private var tofPartialAtMs: Double = 0
     /// Nearest-distance trend from complete maps with ≥1 trusted zone.
     public private(set) var tofNearHistory: [Int] = []
     private var tofAssembler = TofZoneAssembler()
 
-    public var imuFresh: Bool { nowMs - imuAtMs < 1000 }
-    public var tofMapFresh: Bool { nowMs - tofMapAtMs < 1000 }
+    public var imuFresh: Bool { !imuHistory.isEmpty && nowMs - imuAtMs < 1000 }
+    public var tofMapFresh: Bool { tofMap != nil && nowMs - tofMapAtMs < 1000 }
+    public var tofPartialFresh: Bool { tofPartialMap != nil && nowMs - tofPartialAtMs < 1000 }
 
     /// Observed IMU stream rate from the car's own sample stamps (Hz);
     /// nil while fewer than two samples are buffered.
@@ -206,14 +222,21 @@ public final class AppState {
         if imuHistory.count > 200 {
             imuHistory.removeFirst(imuHistory.count - 200)
         }
-        // g-Ball: gravity compensation needs the attitude; without fusion the
-        // raw ax/ay still move the ball, the view just greys it out.
-        let fusion = self.fusion
+        let displaySample = settings.imuDisplayCalibration?.map(sample) ?? sample
+        rawImuTracker.observe(displaySample)
+        rawImuAttitude = rawImuTracker.attitude
+        // Keep the acceleration instrument in the same coordinate system as
+        // the displayed pose. Without axis calibration it is sensor X/Y,
+        // never car forward/left.
+        let calibrated = fusionFresh && ((fusion?.flags ?? 0) & 0x0a) == 0x0a
+        let roll = calibrated ? Double(fusion?.rollCdeg ?? 0) / 100
+                              : (rawImuAttitude?.rollDeg ?? 0)
+        let pitch = calibrated ? Double(fusion?.pitchCdeg ?? 0) / 100
+                               : (rawImuAttitude?.pitchDeg ?? 0)
         let horizontal = ImuKinematics.horizontalG(
-            accMgX: Double(sample.accMg[0]), y: Double(sample.accMg[1]),
-            z: Double(sample.accMg[2]),
-            rollDeg: Double(fusion?.rollCdeg ?? 0) / 100,
-            pitchDeg: Double(fusion?.pitchCdeg ?? 0) / 100)
+            accMgX: Double(displaySample.accMg[0]), y: Double(displaySample.accMg[1]),
+            z: Double(displaySample.accMg[2]),
+            rollDeg: roll, pitchDeg: pitch)
         accelTrail.append((fwd: horizontal.fwd, lat: horizontal.lat))
         if accelTrail.count > 120 {
             accelTrail.removeFirst(accelTrail.count - 120)
@@ -227,9 +250,15 @@ public final class AppState {
         guard !sensorPaused else { return }
         guard let frame = tofAssembler.add(seq: seq, frag: frag, mode: mode,
                                            valid: valid, nearestMm: nearestMm,
-                                           zones: zones) else { return }
+                                           zones: zones) else {
+            tofPartialMap = tofAssembler.partialFrame
+            if tofPartialMap != nil { tofPartialAtMs = now() }
+            return
+        }
         tofMap = frame
         tofMapAtMs = now()
+        tofPartialMap = nil
+        tofPartialAtMs = 0
         // An all-invalid frame (nearest 0) is "no reading", not "wall at 0 mm":
         // leave the trend at its last value; the valid/freshness chips say why.
         if frame.validZones > 0 {
@@ -243,11 +272,15 @@ public final class AppState {
     private func clearSensorStreams() {
         imuHistory = []
         imuAtMs = 0
+        rawImuTracker.reset()
+        rawImuAttitude = nil
         accelTrail = []
         peakTracker.reset()
         peakHorizontalG = 0
         tofMap = nil
         tofMapAtMs = 0
+        tofPartialMap = nil
+        tofPartialAtMs = 0
         tofNearHistory = []
         tofAssembler.reset()
     }
@@ -868,6 +901,39 @@ public final class AppState {
 
     func applyCalibRecord(_ r: CalibRecord) {
         calib.receive(record: r)
+        if let map = ImuAxisCalibration(axes: r.imuAxis),
+           settings.imuDisplayCalibration != map {
+            settings.imuDisplayCalibration = map
+            rawImuTracker.reset()
+            rawImuAttitude = nil
+        }
+        if r.ver >= 2, r.imuAxis == [0, 0, 0], settings.imuDisplayCalibration != nil {
+            settings.imuDisplayCalibration = nil
+            rawImuTracker.reset()
+            rawImuAttitude = nil
+        }
+        if r.imuSaved == 1 { log("INFO", "IMU 轴向标定已写入 TC275 DFlash") }
+        if r.imuSaved == 2 { log("WARN", "IMU 轴向标定生效但 DFlash 保存失败") }
+        if r.imuSaved == 3 { log("WARN", "IMU 轴向标定被车端拒绝；检查静止、IMU 和轴向数据") }
+    }
+
+    public func setImuDisplayCalibration(_ calibration: ImuAxisCalibration, trackMm: Int) {
+        settings.imuDisplayCalibration = calibration
+        rawImuTracker.reset()
+        rawImuAttitude = nil
+        if let last = imuHistory.last {
+            rawImuTracker.observe(calibration.map(last))
+            rawImuAttitude = rawImuTracker.attitude
+        }
+        guard connState == .connected, ctrlRole, tcUp,
+              (80...600).contains(trackMm), !sensorPaused else {
+            log("WARN", "姿态显示标定已保存；车端写入需连接、控制权、IMU 流与实测轮距")
+            return
+        }
+        let body = calibration.axes.map { UInt8(bitPattern: Int8($0)) }
+            + Wire.putU16(UInt16(trackMm))
+        link?.sendDPT(Proto.Cmd.dptImuCalSet, data: body)
+        log("INFO", "已发送 IMU 轴向标定，等待 TC275 回执与 DFlash 写入")
     }
 
     func applyJogCounts(on: Bool, deltas: [Int]) {

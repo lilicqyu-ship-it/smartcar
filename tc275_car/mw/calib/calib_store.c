@@ -79,12 +79,19 @@ typedef struct
 
 static PendingWrite g_pending;
 static void calib_finishHeldResult(uint8 saved);
+static void calib_sendRecordSaved(uint8 saved);
+static boolean g_imuPendingReply;
 
 /* Arm a deferred operation. CALIB_tick runs it once the bench has been quiet
  * for CALIB_WRITE_IDLE_MS, and re-arms through calib_delayWrite() on motion or
  * a failed flash operation. */
 static void calib_queueWrite(uint8 action, const CalibRecord *rec)
 {
+    if (g_imuPendingReply != FALSE)
+    {
+        calib_sendRecordSaved(3u); /* superseded before save */
+        g_imuPendingReply = FALSE;
+    }
     /* A replacement operation cannot confirm the older calibration's save. */
     calib_finishHeldResult(CALIB_SAVED_NONE);
     g_pending.action   = action;
@@ -440,6 +447,11 @@ static boolean calib_flashErase(void)
  * fallback (no record / failed validation, doc 34 SS8.1) reads 0. */
 void CALIB_sendRecord(void)
 {
+    calib_sendRecordSaved(0u);
+}
+
+static void calib_sendRecordSaved(uint8 saved)
+{
     XcoreEvtFrame   frame;
     XcoreRecordLive live;
 
@@ -450,6 +462,7 @@ void CALIB_sendRecord(void)
     frame.len  = CALIB_EVT_REC_LEN;
     CALIBREC_buildEvtRec(frame.payload, &live.rec,
                          (live.rec.src == CALIB_SRC_DEFAULT) ? 0u : 1u);
+    frame.payload[20u] = saved;
     (void)XCORE_evtPush(&frame);
 }
 
@@ -564,6 +577,7 @@ void CALIB_init(void)
 
     g_pending.action = CALIB_ACT_IDLE;
     g_holdActive     = FALSE;
+    g_imuPendingReply = FALSE;
 }
 
 static void calib_handleResult(void)
@@ -621,6 +635,30 @@ void CALIB_recordClear(void)
     CALIB_sendRecord();
 
     calib_queueWrite(CALIB_ACT_ERASE, &rec);
+}
+
+void CALIB_imuSet(const uint8 *data, uint8 len)
+{
+    XcoreRecordLive live;
+    XcoreImu imu;
+    CalibRecord rec;
+
+    XCORE_recordGet(&live);
+    XCORE_imuRead(&imu);
+    rec = live.rec;
+    if ((CALIBREC_imuSetDecode(data, len, &rec) == 0u) ||
+        (calib_motionSeen() != 0u) || (imu.alive == 0u) ||
+        (g_pending.action != CALIB_ACT_IDLE))
+    {
+        calib_sendRecordSaved(3u); /* rejected: bad map, motion, IMU or busy */
+        return;
+    }
+    rec.src = CALIB_SRC_ONLINE;
+    XCORE_recordSet(&rec);
+    CALIB_sendRecord();                 /* pending, live on next 10 ms step */
+    rec.src = CALIB_SRC_DFLASH;
+    calib_queueWrite(CALIB_ACT_WRITE, &rec);
+    g_imuPendingReply = TRUE;
 }
 
 /* ---- jog encoder counts (EVT 0x26) ------------------------------------------ */
@@ -744,6 +782,12 @@ void CALIB_tick(void)
         {
             g_pending.action = CALIB_ACT_IDLE;
             calib_finishHeldResult(saved);
+            if (g_imuPendingReply != FALSE)
+            {
+                XCORE_recordSet(&g_pending.rec);
+                calib_sendRecordSaved(1u);
+                g_imuPendingReply = FALSE;
+            }
         }
         else if (++g_pending.attempts >= CALIB_FLASH_RETRIES)
         {
@@ -752,6 +796,11 @@ void CALIB_tick(void)
              * result frame now reports the final failure with saved=2. */
             g_pending.action = CALIB_ACT_IDLE;
             calib_finishHeldResult(saved);
+            if (g_imuPendingReply != FALSE)
+            {
+                calib_sendRecordSaved(2u);
+                g_imuPendingReply = FALSE;
+            }
             XCORE_logln("CALSAVE failed (flash)");
         }
         else

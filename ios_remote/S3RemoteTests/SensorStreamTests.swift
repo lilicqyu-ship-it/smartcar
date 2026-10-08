@@ -33,6 +33,34 @@ final class SensorStreamTests: XCTestCase {
         XCTAssertNil(parse(#"{"t":"imu","seq":1,"ms":0,"acc":[0,0,0],"gyro":[0,0,0]}"#))
     }
 
+    func testRawImuPreviewMovesWithGravityAndGyro() {
+        var tracker = RawImuAttitudeTracker()
+        tracker.observe(ImuSample(seq: 1, stampMs: 100, accMg: [0, 0, 1000],
+                                  gyroMdps: [0, 0, 0], tempCentiC: 2500))
+        tracker.observe(ImuSample(seq: 2, stampMs: 150, accMg: [-500, 0, 866],
+                                  gyroMdps: [0, 0, 90_000], tempCentiC: 2500))
+        XCTAssertGreaterThan(tracker.attitude?.pitchDeg ?? 0, 8)
+        XCTAssertEqual(tracker.attitude?.relativeYawDeg ?? 0, 4.5, accuracy: 0.001)
+        tracker.observe(ImuSample(seq: 3, stampMs: 5000, accMg: [-500, 0, 866],
+                                  gyroMdps: [0, 0, 90_000], tempCentiC: 2500))
+        XCTAssertEqual(tracker.attitude?.relativeYawDeg ?? 0, 4.5, accuracy: 0.001)
+        tracker.reset()
+        XCTAssertNil(tracker.attitude)
+    }
+
+    func testImuAxisCalibrationDerivesRightHandedCarFrame() {
+        let aligned = ImuAxisCalibration.derive(level: [0, 0, 1000],
+                                                 noseUp: [-500, 0, 866])
+        XCTAssertEqual(aligned?.axes, [1, 2, 3])
+        let turned = ImuAxisCalibration.derive(level: [0, 0, 1000],
+                                                noseUp: [0, 500, 866])
+        XCTAssertEqual(turned?.axes, [-2, 1, 3])
+        XCTAssertEqual(turned?.map([0, 500, 866]), [-500, 0, 866])
+        XCTAssertNil(ImuAxisCalibration.derive(level: [0, 0, 1000],
+                                                noseUp: [-50, 0, 999]))
+        XCTAssertNil(ImuAxisCalibration(axes: [1, -2, 3]))
+    }
+
     // ---- {"t":"tofz"} ----------------------------------------------------------------
 
     private func tofz(seq: Int = 7, f: Int = 0, m: Int = 1, v: Int = 58,
@@ -116,8 +144,21 @@ final class SensorStreamTests: XCTestCase {
         XCTAssertNotNil(frame)
         XCTAssertEqual(frame?.seq, 1)
         XCTAssertEqual(frame?.zones.count, 64)
+        XCTAssertEqual(frame?.receivedFragments, 3)
         XCTAssertEqual(frame?.zones[0], 1600) // 100 cells × 16 mm
         XCTAssertEqual(frame?.zones[63], 1600)
+    }
+
+    func testAssemblerExposesOnlyReceivedCellsWhenAFragmentIsLost() {
+        var asm = TofZoneAssembler()
+        XCTAssertNil(asm.add(seq: 9, frag: 1, mode: 1, valid: 40, nearestMm: 720,
+                             zones: [Int](repeating: 45, count: 25)))
+        let partial = asm.partialFrame
+        XCTAssertEqual(partial?.receivedFragments, 1)
+        XCTAssertEqual(partial?.nearestMm, 720)
+        XCTAssertNil(partial?.zones[0])
+        XCTAssertEqual(partial?.zones[25], 720)
+        XCTAssertNil(partial?.zones[50])
     }
 
     func testAssemblerAcceptsOutOfOrderFragments() {
@@ -189,6 +230,7 @@ final class SensorStreamTests: XCTestCase {
     @MainActor
     func testAppStateImuBufferCapsAndPauses() {
         let app = AppState(settings: AppSettings(host: "127.0.0.1"))
+        XCTAssertFalse(app.imuFresh)
         for i in 0..<250 {
             app.applyImu(ImuSample(seq: i, stampMs: i * 50, accMg: [0, 0, 1000],
                                    gyroMdps: [0, 0, 0], tempCentiC: 2500))
@@ -206,16 +248,19 @@ final class SensorStreamTests: XCTestCase {
     @MainActor
     func testAppStateTofBuffersAndClear() {
         let app = AppState(settings: AppSettings(host: "127.0.0.1"))
+        XCTAssertFalse(app.tofMapFresh)
         app.handleOpen() // handleDown only acts from a live state
         var cells = [Int](repeating: 100, count: 25)
         cells[0] = 50 // 800 mm
         app.applyTofFragment(seq: 1, frag: 0, mode: 1, valid: 64, nearestMm: 800, zones: cells)
         XCTAssertNil(app.tofMap) // not complete yet
+        XCTAssertEqual(app.tofPartialMap?.receivedFragments, 1)
         app.applyTofFragment(seq: 1, frag: 1, mode: 1, valid: 64, nearestMm: 800,
                              zones: [Int](repeating: 100, count: 25))
         app.applyTofFragment(seq: 1, frag: 2, mode: 1, valid: 64, nearestMm: 800,
                              zones: [Int](repeating: 100, count: 25))
         XCTAssertEqual(app.tofMap?.nearestMm, 800)
+        XCTAssertNil(app.tofPartialMap)
         XCTAssertEqual(app.tofMap?.zones[0], 800)
         XCTAssertEqual(app.tofNearHistory, [800])
 
@@ -232,6 +277,7 @@ final class SensorStreamTests: XCTestCase {
 
         app.handleDown("test")
         XCTAssertNil(app.tofMap)
+        XCTAssertNil(app.tofPartialMap)
         XCTAssertTrue(app.imuHistory.isEmpty)
         XCTAssertTrue(app.tofNearHistory.isEmpty)
     }
@@ -355,7 +401,10 @@ final class SensorStreamTests: XCTestCase {
         let app = AppState(settings: AppSettings(host: "127.0.0.1"))
         app.handleOpen() // handleDown only acts from a live state
         // Fusion level + braking samples → trail grows, peak tracks the max.
-        app.applyFusion(FusionStatus(reason: 0, flags: 7, distance: 1000, cap: 600,
+        // flags must carry IMU_OK|CALIBRATED (0x0a): without axis calibration
+        // applyImu routes the g-ball through the raw-IMU attitude preview
+        // instead of the car-frame fusion angles.
+        app.applyFusion(FusionStatus(reason: 0, flags: 15, distance: 1000, cap: 600,
                                      speedMmS: 0, yawRateCdegS: 0, headingCdeg: 0,
                                      rollCdeg: 0, pitchCdeg: 0, tofAgeMs: 10,
                                      validZones: 60, brake: 0))
@@ -368,11 +417,23 @@ final class SensorStreamTests: XCTestCase {
         XCTAssertEqual(app.accelTrail[1].lat, 0.1, accuracy: 1e-9)
         XCTAssertEqual(app.peakHorizontalG, 0.3, accuracy: 1e-9)
 
+        // Drop CALIBRATED → the raw-IMU preview takes over: braking reads
+        // partly as tilt, never as the car-frame value.
+        app.applyFusion(FusionStatus(reason: 0, flags: 7, distance: 1000, cap: 600,
+                                     speedMmS: 0, yawRateCdegS: 0, headingCdeg: 0,
+                                     rollCdeg: 0, pitchCdeg: 0, tofAgeMs: 10,
+                                     validZones: 60, brake: 0))
+        app.applyImu(ImuSample(seq: 3, stampMs: 100, accMg: [-300, 0, 1000],
+                               gyroMdps: [0, 0, 0], tempCentiC: 2500))
+        XCTAssertEqual(app.accelTrail.count, 3)
+        XCTAssertNotNil(app.rawImuAttitude)
+        XCTAssertNotEqual(app.accelTrail[2].fwd, -0.3, accuracy: 1e-6)
+
         // Pause freezes the trail.
         app.sensorPaused = true
-        app.applyImu(ImuSample(seq: 3, stampMs: 100, accMg: [-990, 0, 1000],
+        app.applyImu(ImuSample(seq: 4, stampMs: 150, accMg: [-990, 0, 1000],
                                gyroMdps: [0, 0, 0], tempCentiC: 2500))
-        XCTAssertEqual(app.accelTrail.count, 2)
+        XCTAssertEqual(app.accelTrail.count, 3)
         XCTAssertEqual(app.peakHorizontalG, 0.3, accuracy: 1e-9)
 
         // Link down clears both.

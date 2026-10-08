@@ -8,7 +8,7 @@
  * a link, and AppState just stores whatever a completed call returns.
  */
 
-/// One complete 64-zone map (15 Hz at the sensor; emitted per frame).
+/// One 64-zone snapshot; unknown cells stay nil until their fragment arrives.
 public struct TofZoneFrame: Equatable, Sendable {
     public static let zoneCount = 64
     public static let cellsPerFragment = 25
@@ -22,6 +22,8 @@ public struct TofZoneFrame: Equatable, Sendable {
     public let validZones: Int
     /// Nearest trusted distance of this frame, mm (0 when none).
     public let nearestMm: Int
+    /// 1/2 means a partial diagnostic view; 3 means all 64 zones arrived.
+    public let receivedFragments: Int
     /// Row-major 8×8, mm; nil = untrusted zone (driver status not 5/9).
     public let zones: [Int?]
 }
@@ -35,6 +37,16 @@ public struct TofZoneAssembler: Sendable {
     private var cells = [Int?](repeating: nil, count: TofZoneFrame.zoneCount)
 
     public init() {}
+
+    /// Available cells from the current frame. Missing fragments remain nil,
+    /// so a lossy diagnostic stream can still show honest partial data.
+    public var partialFrame: TofZoneFrame? {
+        let received = seen.filter { $0 }.count
+        guard seq >= 0, received > 0 else { return nil }
+        return TofZoneFrame(seq: seq, mode: mode, validZones: validZones,
+                            nearestMm: nearestMm, receivedFragments: received,
+                            zones: cells)
+    }
 
     /// Feed one fragment; returns the completed frame when this fragment
     /// finishes its set. Malformed pieces, duplicates and fragments of a
@@ -62,7 +74,9 @@ public struct TofZoneAssembler: Sendable {
         }
         guard seen.allSatisfy({ $0 }) else { return nil }
         let frame = TofZoneFrame(seq: seq, mode: mode, validZones: validZones,
-                                 nearestMm: nearestMm, zones: cells)
+                                 nearestMm: nearestMm,
+                                 receivedFragments: TofZoneFrame.fragmentCount,
+                                 zones: cells)
         reset() // a repeated seq (u16 wrap) must not glue two frames together
         return frame
     }

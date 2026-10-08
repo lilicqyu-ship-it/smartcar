@@ -73,11 +73,16 @@ public struct CalibRecord: Equatable, Sendable {
     public let invert: [Int]
     public let fullScaleMmS: Int
     public let wheelDiaMm: Int
+    public let imuAxis: [Int]
+    public let trackMm: Int
+    /// 0 = 普通回显/写入等待，1 = DFlash 已验证，2 = 失败，3 = 拒绝。
+    public let imuSaved: Int?
     /// 0 = DFlash 校验/范围失败已回落默认
     public let crcOk: Bool
 
     public init(ver: Int, src: Int, pos: [Int], invert: [Int],
-                fullScaleMmS: Int, wheelDiaMm: Int, crcOk: Bool) {
+                fullScaleMmS: Int, wheelDiaMm: Int, crcOk: Bool,
+                imuAxis: [Int] = [0, 0, 0], trackMm: Int = 0, imuSaved: Int? = nil) {
         self.ver = ver
         self.src = src
         self.pos = pos
@@ -85,6 +90,9 @@ public struct CalibRecord: Equatable, Sendable {
         self.fullScaleMmS = fullScaleMmS
         self.wheelDiaMm = wheelDiaMm
         self.crcOk = crcOk
+        self.imuAxis = imuAxis
+        self.trackMm = trackMm
+        self.imuSaved = imuSaved
     }
 
     public var srcText: String {

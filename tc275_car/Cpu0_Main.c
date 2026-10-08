@@ -191,6 +191,22 @@ static void vRobotControlTask(void *pvParameters)
                 uint8 i;
                 XCORE_encoderRead(&enc); XCORE_imuRead(&imu);
                 XCORE_recordGet(&live); XCORE_tofRead(&g_fusionInput.tof);
+                /* 0x75 applies the persisted IMU map through RecordLive.
+                 * CPU0 alone owns the Fusion instance; a clear record removes
+                 * the mapping on the next control tick. */
+                if (live.rec.imuAxis[0] == 0)
+                {
+                    if (g_driveFusion.cfg.axis[0] != 0)
+                        FUSION_clearCalibration(&g_driveFusion);
+                }
+                else if ((g_driveFusion.cfg.axis[0] != live.rec.imuAxis[0]) ||
+                         (g_driveFusion.cfg.axis[1] != live.rec.imuAxis[1]) ||
+                         (g_driveFusion.cfg.axis[2] != live.rec.imuAxis[2]) ||
+                         (g_driveFusion.cfg.trackMm != live.rec.trackMm))
+                {
+                    (void)FUSION_calibrate(&g_driveFusion, live.rec.imuAxis,
+                                           live.rec.trackMm);
+                }
                 g_fusionInput.nowMs = (uint32)xTaskGetTickCount() * portTICK_PERIOD_MS;
                 g_fusionInput.imuSeq = imu.seq; g_fusionInput.imuAlive = imu.alive;
                 g_fusionInput.encoderSeq = enc.seq;

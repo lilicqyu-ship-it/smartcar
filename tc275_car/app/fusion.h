@@ -132,6 +132,7 @@ typedef struct
 void FUSION_init(Fusion *s);
 /* CPU0 stopped-only caller. Reject non-right-handed axis maps / bad geometry. */
 uint8_t FUSION_calibrate(Fusion *s, const int8_t axis[3], uint16_t trackMm);
+void FUSION_clearCalibration(Fusion *s);
 void FUSION_step(Fusion *s, const FusionInput *in);
 void FUSION_encode(const FusionOutput *o, uint8_t wire[FUSION_WIRE_LEN]);
 #endif

@@ -51,6 +51,13 @@ uint8_t FUSION_calibrate(Fusion *s, const int8_t a[3], uint16_t track)
     s->holding = 0;
     return 1;
 }
+void FUSION_clearCalibration(Fusion *s)
+{
+    s->cfg.axis[0] = s->cfg.axis[1] = s->cfg.axis[2] = 0;
+    s->cfg.trackMm = 0;
+    s->heading = s->roll = s->pitch = s->yawRate = 0;
+    s->holding = 0;
+}
 static void motion(Fusion *s, const FusionInput *in, float dt, uint32_t elapsedMs)
 {
     unsigned i;

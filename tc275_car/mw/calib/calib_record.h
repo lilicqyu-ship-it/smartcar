@@ -23,8 +23,9 @@ extern "C" {
 #endif
 
 #define CALIB_REC_WHEELS        4u
-#define CALIB_REC_BLOB_LEN      20u    /* DFlash record incl. magic + crc16     */
+#define CALIB_REC_BLOB_LEN      28u    /* v2 DFlash record incl. CRC16          */
 #define CALIB_REC_SET_LEN       12u    /* 0x73 REC_SET body (after the op byte) */
+#define CALIB_IMU_SET_LEN        5u    /* 0x75 {axis i8x3, trackMm u16LE}       */
 #define CALIB_JOG_LEN            3u    /* 0x71 MOTOR_JOG body (after the op)    */
 /* EVT 0x22 is {op, status, invert i8x4, delta i32x4, saved} = 23 B. The
  * offsets are those the slave decoder reads (esp32c6_car
@@ -33,10 +34,10 @@ extern "C" {
  * delta i32x4 at [6..25]" is an arithmetic slip - four i32 are 16 bytes. */
 #define CALIB_EVT_RESULT_LEN    23u
 #define CALIB_EVT_RESULT_SAVED  22u    /* index of the saved byte          */
-#define CALIB_EVT_REC_LEN       15u    /* EVT 0x23, doc 34 SS9.1           */
+#define CALIB_EVT_REC_LEN       21u    /* EVT 0x23 incl. IMU axes/track/saved */
 
 /* Record layout versions (doc 34 SS8.1 ver byte). */
-#define CALIB_REC_VER           1u
+#define CALIB_REC_VER           2u
 
 /* Data source (doc 34 SS8.1 src byte, mirrored into EVT 0x23). */
 #define CALIB_SRC_DEFAULT      0u      /* no valid record: compile-time defaults */
@@ -79,6 +80,8 @@ typedef struct
     int8_t   invert[CALIB_REC_WHEELS];       /* +1/-1, 0x70 result             */
     int16_t  fullScaleMmS;                   /* percent*10 == 1000 at this mm/s */
     int16_t  wheelDiaMm;                     /* tyre diameter, mm               */
+    int8_t   imuAxis[3];                     /* ±1..±3, all zero=uncalibrated  */
+    uint16_t trackMm;                        /* 80..600, 0=uncalibrated        */
 } CalibRecord;
 
 /* Compile-time defaults: the factory state (pos per doc 23 SS3 motor table:
@@ -94,6 +97,9 @@ uint8_t CALIBREC_jogDecode(const uint8_t *p, uint8_t *motor, int16_t *duty);
 
 /* --- 0x73 REC_SET body {pos u8x4, invert i8x4, fullScale i16, wheelDia i16} - */
 uint8_t CALIBREC_recSetDecode(const uint8_t *p, uint8_t len, CalibRecord *rec);
+
+/* 0x75: validates a right-handed IMU axis map and measured wheel track. */
+uint8_t CALIBREC_imuSetDecode(const uint8_t *p, uint8_t len, CalibRecord *rec);
 
 /* --- EVT 0x22 {op, status, invert i8x4, delta i32x4, saved} ----------------- */
 void CALIBREC_buildEvtResult(uint8_t *buf, uint8_t status,

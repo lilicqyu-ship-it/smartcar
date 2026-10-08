@@ -183,7 +183,10 @@ public enum TextMessage: Equatable, Sendable {
                   let crcOk = (obj["crcOk"] as? NSNumber)?.boolValue else { return nil }
             return .rec(CalibRecord(ver: ver, src: src, pos: pos, invert: invert,
                                     fullScaleMmS: fullScale, wheelDiaMm: wheelDia,
-                                    crcOk: crcOk))
+                                    crcOk: crcOk,
+                                    imuAxis: intArray(obj["imuAxis"], count: 3) ?? [0, 0, 0],
+                                    trackMm: obj["trackMm"] as? Int ?? 0,
+                                    imuSaved: obj["imuSaved"] as? Int))
 
         case "jogcnt":
             // bridge_emit_jogcnt: on 0/1，d = 4 × i32 LE

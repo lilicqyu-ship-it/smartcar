@@ -487,13 +487,15 @@ static void test_evt_dpt_round_trip(void)
     CHECK_EQ(CALIB_EVT_RESULT_SAVED, CALIB_EVT_RESULT_LEN - 1u);
     CHECK_EQ(2u + CALIB_REC_WHEELS + (CALIB_REC_WHEELS * 4u) + 1u,
              CALIB_EVT_RESULT_LEN);
-    CHECK_EQ(CALIB_EVT_REC_LEN, 15u);
+    CHECK_EQ(CALIB_EVT_REC_LEN, 21u);
 
     CALIBREC_fillDefaults(&rec);
     rec.src          = CALIB_SRC_DFLASH;
     rec.invert[1]    = -1;
     rec.fullScaleMmS = 843;
     rec.wheelDiaMm   = 65;
+    rec.imuAxis[0] = 1; rec.imuAxis[1] = 2; rec.imuAxis[2] = 3;
+    rec.trackMm = 150;
     CALIBREC_buildEvtResult(in22, CALIB_STATUS_DONE, invert, delta,
                             CALIB_SAVED_WRITTEN);
     CALIBREC_buildEvtRec(in23, &rec, 1u);
@@ -558,9 +560,14 @@ static void test_evt_dpt_round_trip(void)
     CHECK_EQ(CALIBREC_getI16(&f.payload[10]), 843);
     CHECK_EQ(CALIBREC_getI16(&f.payload[12]), 65);
     CHECK_EQ(f.payload[14], 1u);
+    CHECK_EQ((int8_t)f.payload[15], 1);
+    CHECK_EQ((int8_t)f.payload[16], 2);
+    CHECK_EQ((int8_t)f.payload[17], 3);
+    CHECK_EQ(SF_getU16(&f.payload[18]), 150u);
+    CHECK_EQ(f.payload[20], 0u);
 }
 
-/* The DFlash blob is 20 B inside one 8 B-page-organised sector; a torn write
+/* The v2 DFlash blob is 28 B inside one 8 B-page-organised sector; a torn write
  * or a bit flip must degrade to the defaults, never to a half-trusted sign. */
 static void test_calib_record_blob(void)
 {
@@ -576,6 +583,8 @@ static void test_calib_record_blob(void)
     rec.fullScaleMmS = 1234;
     rec.wheelDiaMm   = 66;
     rec.src          = CALIB_SRC_DFLASH;
+    rec.imuAxis[0] = -2; rec.imuAxis[1] = 1; rec.imuAxis[2] = 3;
+    rec.trackMm = 160;
 
     CALIBREC_encode(&rec, blob);
     CHECK_EQ(CALIBREC_decode(blob, &back), 1u);
@@ -584,6 +593,10 @@ static void test_calib_record_blob(void)
     CHECK(memcmp(back.pos, rec.pos, sizeof(rec.pos)) == 0);
     CHECK_EQ(back.fullScaleMmS, 1234);
     CHECK_EQ(back.wheelDiaMm, 66);
+    CHECK_EQ(back.imuAxis[0], -2);
+    CHECK_EQ(back.imuAxis[1], 1);
+    CHECK_EQ(back.imuAxis[2], 3);
+    CHECK_EQ(back.trackMm, 160u);
 
     /* erased sector: no magic, no record */
     memset(blob, 0xFF, sizeof(blob));
@@ -608,14 +621,37 @@ static void test_calib_record_blob(void)
     CALIBREC_encode(&rec, blob);
     blob[14] = 0x00u;                        /* fullScale = 0, low byte */
     blob[15] = 0x00u;
-    SF_putU16(&blob[18], SF_crc16(blob, 18u));   /* repair the CRC over the lie */
+    SF_putU16(&blob[26], SF_crc16(blob, 26u));   /* repair the CRC over the lie */
     CHECK_EQ(CALIBREC_decode(blob, &back), 0u);
 
     /* unknown layout version refuses without reading the body */
     CALIBREC_encode(&rec, blob);
     blob[4] = (uint8_t)(CALIB_REC_VER + 1u);
-    SF_putU16(&blob[18], SF_crc16(blob, 18u));
+    SF_putU16(&blob[26], SF_crc16(blob, 26u));
     CHECK_EQ(CALIBREC_decode(blob, &back), 0u);
+
+    /* v1 wheel record remains valid and migrates with IMU unset. */
+    CALIBREC_fillDefaults(&rec);
+    CALIBREC_encode(&rec, blob);
+    blob[4] = 1u;
+    SF_putU16(&blob[18], SF_crc16(blob, 18u));
+    CHECK_EQ(CALIBREC_decode(blob, &back), 1u);
+    CHECK_EQ(back.imuAxis[0], 0);
+    CHECK_EQ(back.trackMm, 0u);
+
+    /* 0x75 rejects left-handed, duplicate and out-of-range maps. */
+    {
+        uint8_t body[5] = {1u, 2u, 3u, 150u, 0u};
+        CALIBREC_fillDefaults(&rec);
+        CHECK_EQ(CALIBREC_imuSetDecode(body, 5u, &rec), 1u);
+        CHECK_EQ(rec.trackMm, 150u);
+        body[1] = 1u;
+        CHECK_EQ(CALIBREC_imuSetDecode(body, 5u, &rec), 0u);
+        body[1] = 0xFEu;
+        CHECK_EQ(CALIBREC_imuSetDecode(body, 5u, &rec), 0u);
+        body[1] = 2u; body[3] = 20u;
+        CHECK_EQ(CALIBREC_imuSetDecode(body, 5u, &rec), 0u);
+    }
 
     /* every legal full-scale/diameter pair survives (range edges included) */
     {

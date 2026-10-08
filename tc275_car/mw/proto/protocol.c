@@ -117,6 +117,10 @@ void PROTO_handleCommand(uint8 cmd, const uint8 *data, uint8 len)
         CALIB_recordClear();
         break;
 
+    case PROTO_CMD_DPT_IMU_CAL_SET:
+        CALIB_imuSet(data, len);
+        break;
+
     case PROTO_CMD_DIAG:
         /* Not a driving command: no heartbeat, no fault gating. The beacon
          * itself is sent by the CPU0 task right after this queue drain. */
