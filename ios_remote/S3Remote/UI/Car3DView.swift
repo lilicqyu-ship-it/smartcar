@@ -1,5 +1,9 @@
-/* 3D 姿态仪：车身、车顶和车轮共用旋转；固定比例与地面参照显示倾斜。 */
+/*
+ * Car3DView.swift — 姿态仪里的小车模型。SceneKit 是系统框架；车辆节点旋转，
+ * 地面参照和相机固定。所有传感器值仅供显示，不反馈到驾驶控制。
+ */
 import SwiftUI
+import SceneKit
 
 struct Car3DView: View {
     var headingDeg: Double
@@ -11,7 +15,10 @@ struct Car3DView: View {
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 18).fill(Theme.ink)
-            Canvas { ctx, size in render(ctx, size: size) }
+            CarSceneView(headingDeg: headingDeg, rollDeg: rollDeg,
+                         pitchDeg: pitchDeg)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             VStack {
                 HStack {
                     Label("相对旋转", systemImage: "rotate.3d")
@@ -36,97 +43,162 @@ struct Car3DView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: 18))
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("IMU 三维姿态模型")
+        .accessibilityLabel("三维小车姿态")
         .accessibilityValue(hasData
             ? String(format: "%@，相对旋转 %.0f 度，横滚 %.1f 度，俯仰 %.1f 度",
                      sourceLabel, headingDeg, rollDeg, pitchDeg)
             : "等待数据")
     }
+}
 
-    private func render(_ ctx: GraphicsContext, size: CGSize) {
-        let centre = CGPoint(x: size.width / 2, y: size.height * 0.55)
-        // 地面固定，车身绕自身原点转。逐帧自动缩放会掩盖角度变化。
-        for fraction in [0.55, 0.82, 1.10] {
-            let r = size.width * fraction / 2
-            ctx.stroke(Path(ellipseIn: CGRect(x: centre.x - r, y: centre.y - r * 0.32,
-                                             width: 2 * r, height: r * 0.64)),
-                       with: .color(.white.opacity(0.11)), lineWidth: 1)
-        }
-        var grid = Path()
-        grid.move(to: CGPoint(x: 16, y: centre.y))
-        grid.addLine(to: CGPoint(x: size.width - 16, y: centre.y))
-        grid.move(to: CGPoint(x: centre.x, y: 37))
-        grid.addLine(to: CGPoint(x: centre.x, y: size.height - 28))
-        ctx.stroke(grid, with: .color(.white.opacity(0.09)),
-                   style: StrokeStyle(lineWidth: 1, dash: [3, 5]))
-        ctx.fill(Path(ellipseIn: CGRect(x: size.width * 0.28, y: size.height * 0.75,
-                                      width: size.width * 0.44, height: 17)),
-                 with: .color(.black.opacity(0.34)))
+private struct CarSceneView: UIViewRepresentable {
+    let headingDeg: Double
+    let rollDeg: Double
+    let pitchDeg: Double
 
-        let chassis = Car3DProjection.vertices().0
-        let roof: [Car3DProjection.Vertex] = [
-            (0.18, -0.36, 0.59), (0.18, 0.36, 0.59),
-            (-0.47, 0.36, 0.59), (-0.47, -0.36, 0.59),
-        ]
-        let fixedScale = min(size.width * 0.67, size.height * 1.02)
-        let points = (chassis + roof).map { v -> CGPoint in
-            let turned = Car3DProjection.rotate(v, yawDeg: headingDeg,
-                                                pitchDeg: pitchDeg, rollDeg: rollDeg)
-            let p = Car3DProjection.project(turned, size: 1)
-            return CGPoint(x: centre.x + p.x * fixedScale,
-                           y: centre.y + (p.y - 0.5) * fixedScale)
-        }
-        for i in 8..<12 {
-            let p = points[i]
-            let tire = Path(ellipseIn: CGRect(x: p.x - 12, y: p.y - 8, width: 24, height: 16))
-            ctx.fill(tire, with: .color(.black.opacity(0.96)))
-            ctx.stroke(tire, with: .color(.white.opacity(0.34)), lineWidth: 1)
-            ctx.fill(Path(ellipseIn: CGRect(x: p.x - 3, y: p.y - 3, width: 6, height: 6)),
-                     with: .color(.white.opacity(0.44)))
-        }
-        let bodyColor = Color(red: 0.64, green: 0.70, blue: 0.67)
-        let sideColor = Color(red: 0.31, green: 0.39, blue: 0.39)
-        ctx.fill(polygon([points[4], points[5], points[1], points[0]]),
-                 with: .color(Theme.accentDeep))
-        ctx.fill(polygon([points[5], points[6], points[2], points[1]]),
-                 with: .color(sideColor.opacity(0.85)))
-        ctx.fill(polygon([points[7], points[4], points[0], points[3]]),
-                 with: .color(sideColor))
-        let deck = polygon([points[0], points[1], points[2], points[3]])
-        ctx.fill(deck, with: .color(bodyColor))
-        ctx.stroke(deck, with: .color(.white.opacity(0.73)), lineWidth: 1.5)
-        ctx.fill(polygon([points[0], points[1], points[15], points[14]]),
-                 with: .color(Theme.info.opacity(0.82)))
-        ctx.fill(polygon([points[1], points[2], points[16], points[15]]),
-                 with: .color(Theme.info.opacity(0.57)))
-        ctx.fill(polygon([points[3], points[0], points[14], points[17]]),
-                 with: .color(Theme.info.opacity(0.67)))
-        let roofPath = polygon([points[14], points[15], points[16], points[17]])
-        ctx.fill(roofPath, with: .color(Color(red: 0.75, green: 0.79, blue: 0.76)))
-        ctx.stroke(roofPath, with: .color(.white.opacity(0.7)), lineWidth: 1.3)
-        let front = midpoint(points[0], points[1])
-        let tail = midpoint(points[2], points[3])
-        let tip = CGPoint(x: front.x + (front.x - tail.x) * 0.24,
-                          y: front.y + (front.y - tail.y) * 0.24)
-        var arrow = Path()
-        arrow.move(to: midpoint(front, tail))
-        arrow.addLine(to: tip)
-        ctx.stroke(arrow, with: .color(Theme.accent),
-                   style: StrokeStyle(lineWidth: 4, lineCap: .round))
-        ctx.fill(Path(ellipseIn: CGRect(x: tip.x - 4, y: tip.y - 4, width: 8, height: 8)),
-                 with: .color(Theme.accent))
+    func makeUIView(context: Context) -> SCNView {
+        let view = SCNView(frame: .zero)
+        view.backgroundColor = .clear
+        view.isOpaque = false
+        view.autoenablesDefaultLighting = false
+        view.antialiasingMode = .multisampling4X
+        view.rendersContinuously = true
+        let scene = SCNScene()
+        scene.background.contents = UIColor.clear
+        scene.rootNode.addChildNode(Self.car())
+        scene.rootNode.addChildNode(Self.ground())
+
+        let camera = SCNNode()
+        camera.camera = SCNCamera()
+        camera.camera?.fieldOfView = 39
+        camera.position = SCNVector3(3.2, 2.55, -5.25)
+        camera.look(at: SCNVector3(0, 0.60, 0))
+        scene.rootNode.addChildNode(camera)
+        view.pointOfView = camera
+
+        let ambient = SCNNode()
+        ambient.light = SCNLight()
+        ambient.light?.type = .ambient
+        ambient.light?.color = UIColor(white: 0.72, alpha: 1)
+        scene.rootNode.addChildNode(ambient)
+        let sun = SCNNode()
+        sun.light = SCNLight()
+        sun.light?.type = .omni
+        sun.light?.color = UIColor(white: 0.95, alpha: 1)
+        sun.position = SCNVector3(-3, 6, -4)
+        scene.rootNode.addChildNode(sun)
+        view.scene = scene
+        return view
     }
 
-    private func polygon(_ points: [CGPoint]) -> Path {
-        Path { path in
-            guard let first = points.first else { return }
-            path.move(to: first)
-            for p in points.dropFirst() { path.addLine(to: p) }
-            path.closeSubpath()
-        }
+    func updateUIView(_ view: SCNView, context: Context) {
+        guard let car = view.scene?.rootNode.childNode(withName: "vehicle", recursively: false) else { return }
+        let radians = Float.pi / 180
+        // Body X前/Y左/Z上 -> SceneKit -Z前/-X左/+Y上。
+        let yaw = simd_quatf(angle: Float(headingDeg) * radians, axis: SIMD3<Float>(0, 1, 0))
+        let pitch = simd_quatf(angle: Float(pitchDeg) * radians, axis: SIMD3<Float>(1, 0, 0))
+        let roll = simd_quatf(angle: Float(rollDeg) * radians, axis: SIMD3<Float>(0, 0, -1))
+        SCNTransaction.begin()
+        SCNTransaction.animationDuration = 0.10
+        car.simdOrientation = yaw * pitch * roll
+        SCNTransaction.commit()
     }
 
-    private func midpoint(_ a: CGPoint, _ b: CGPoint) -> CGPoint {
-        CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2)
+    private static func car() -> SCNNode {
+        let root = SCNNode()
+        root.name = "vehicle"
+        let orange = UIColor(red: 0.91, green: 0.38, blue: 0.20, alpha: 1)
+        let orangeDark = UIColor(red: 0.57, green: 0.22, blue: 0.16, alpha: 1)
+        let glass = UIColor(red: 0.18, green: 0.34, blue: 0.42, alpha: 1)
+        let cream = UIColor(red: 0.94, green: 0.91, blue: 0.81, alpha: 1)
+
+        root.addChildNode(box(1.80, 0.39, 3.00, radius: 0.19,
+                              color: orange, at: SCNVector3(0, 0.48, 0)))
+        root.addChildNode(box(1.72, 0.08, 1.04, radius: 0.04,
+                              color: orangeDark, at: SCNVector3(0, 0.70, -0.98)))
+        root.addChildNode(box(1.48, 0.56, 1.31, radius: 0.11,
+                              color: glass, at: SCNVector3(0, 0.92, 0.18)))
+        root.addChildNode(box(1.57, 0.13, 1.42, radius: 0.09,
+                              color: cream, at: SCNVector3(0, 1.25, 0.18)))
+        // Windshield border and roof rails make the front unambiguous.
+        root.addChildNode(box(1.54, 0.055, 0.07, radius: 0.02,
+                              color: cream, at: SCNVector3(0, 1.06, -0.51)))
+        for side: Float in [-1, 1] {
+            root.addChildNode(box(0.055, 0.085, 1.30, radius: 0.02,
+                                  color: orangeDark, at: SCNVector3(side * 0.77, 1.34, 0.18)))
+            root.addChildNode(wheel(x: side * 0.97, z: -0.96))
+            root.addChildNode(wheel(x: side * 0.97, z: 0.96))
+            root.addChildNode(sphere(0.115, color: cream,
+                                     at: SCNVector3(side * 0.62, 0.55, -1.53)))
+            root.addChildNode(box(0.23, 0.10, 0.045, radius: 0.02,
+                                  color: .systemRed, at: SCNVector3(side * 0.63, 0.51, 1.53)))
+        }
+        root.addChildNode(box(0.90, 0.12, 0.05, radius: 0.02,
+                              color: .darkGray, at: SCNVector3(0, 0.43, -1.54)))
+        // Bright nose stripe helps read yaw even when the car is nearly level.
+        root.addChildNode(box(0.13, 0.026, 0.70, radius: 0.01,
+                              color: cream, at: SCNVector3(0, 0.75, -1.08)))
+        return root
+    }
+
+    private static func wheel(x: Float, z: Float) -> SCNNode {
+        let root = SCNNode()
+        root.position = SCNVector3(x, 0.34, z)
+        let tire = SCNCylinder(radius: 0.35, height: 0.19)
+        tire.radialSegmentCount = 20
+        tire.firstMaterial = material(UIColor(white: 0.07, alpha: 1))
+        let tireNode = SCNNode(geometry: tire)
+        tireNode.eulerAngles.z = .pi / 2
+        root.addChildNode(tireNode)
+        let hub = SCNCylinder(radius: 0.16, height: 0.20)
+        hub.firstMaterial = material(UIColor(white: 0.70, alpha: 1))
+        let hubNode = SCNNode(geometry: hub)
+        hubNode.eulerAngles.z = .pi / 2
+        hubNode.position.x = x < 0 ? -0.03 : 0.03
+        root.addChildNode(hubNode)
+        return root
+    }
+
+    private static func ground() -> SCNNode {
+        let root = SCNNode()
+        let grid = UIColor(white: 0.55, alpha: 0.20)
+        for radius: CGFloat in [1.4, 2.0, 2.6] {
+            let ring = SCNTorus(ringRadius: radius, pipeRadius: 0.012)
+            ring.firstMaterial = material(grid)
+            let node = SCNNode(geometry: ring)
+            node.position.y = -0.05
+            root.addChildNode(node)
+        }
+        for angle in [Float.zero, Float.pi / 2] {
+            let line = box(0.012, 0.012, 5.2, radius: 0,
+                           color: grid, at: SCNVector3(0, -0.05, 0))
+            line.eulerAngles.y = angle
+            root.addChildNode(line)
+        }
+        return root
+    }
+
+    private static func box(_ w: CGFloat, _ h: CGFloat, _ l: CGFloat,
+                            radius: CGFloat, color: UIColor, at p: SCNVector3) -> SCNNode {
+        let geometry = SCNBox(width: w, height: h, length: l, chamferRadius: radius)
+        geometry.firstMaterial = material(color)
+        let node = SCNNode(geometry: geometry)
+        node.position = p
+        return node
+    }
+
+    private static func sphere(_ radius: CGFloat, color: UIColor, at p: SCNVector3) -> SCNNode {
+        let geometry = SCNSphere(radius: radius)
+        geometry.firstMaterial = material(color)
+        let node = SCNNode(geometry: geometry)
+        node.position = p
+        return node
+    }
+
+    private static func material(_ color: UIColor) -> SCNMaterial {
+        let m = SCNMaterial()
+        m.diffuse.contents = color
+        m.lightingModel = .blinn
+        return m
     }
 }

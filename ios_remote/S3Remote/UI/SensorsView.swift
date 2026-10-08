@@ -78,6 +78,9 @@ struct SensorsView: View {
                 .onChange(of: app.connState) { _, state in
                     if state == .connected { app.calibRecGet() }
                 }
+                .onChange(of: app.ctrlRole) { _, ownsControl in
+                    if ownsControl { app.calibRecGet() }
+                }
             }
         }
     }
@@ -403,6 +406,11 @@ struct SensorsView: View {
             .disabled(!calibrationReady)
             if !calibrationHint.isEmpty {
                 Text(calibrationHint).font(.caption2).foregroundStyle(Theme.dim)
+            }
+            if axisCalibration != nil && !calibrationReady {
+                Text("写入需要：控制权、TC275 在线、IMU 实时流、未暂停，以及 80–600 mm 的实测轮距。")
+                    .font(.caption2)
+                    .foregroundStyle(Theme.warn)
             }
             Text(imuCalibrationStatus)
                 .font(.caption2.weight(.semibold))

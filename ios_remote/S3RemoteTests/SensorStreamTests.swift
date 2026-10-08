@@ -73,6 +73,20 @@ final class SensorStreamTests: XCTestCase {
         XCTAssertEqual(restored.imuDisplayCalibration?.axes, [-2, 1, 3])
     }
 
+    @MainActor
+    func testCarRecordMapsIncomingRawImuForPosePreview() {
+        let app = AppState(settings: AppSettings(host: "127.0.0.1"))
+        app.applyCalibRecord(CalibRecord(ver: 2, src: 1, pos: [0, 2, 3, 1],
+                                         invert: [1, 1, -1, -1], fullScaleMmS: 1000,
+                                         wheelDiaMm: 48, crcOk: true,
+                                         imuAxis: [-2, 1, 3], trackMm: 160))
+        app.applyImu(ImuSample(seq: 1, stampMs: 100, accMg: [0, 500, 866],
+                               gyroMdps: [0, 0, 0], tempCentiC: 2500))
+        XCTAssertEqual(app.settings.imuDisplayCalibration?.axes, [-2, 1, 3])
+        XCTAssertGreaterThan(app.rawImuAttitude?.pitchDeg ?? 0, 20)
+        XCTAssertEqual(app.imuHistory.last?.accMg, [0, 500, 866]) // wire stays raw
+    }
+
     // ---- {"t":"tofz"} ----------------------------------------------------------------
 
     private func tofz(seq: Int = 7, f: Int = 0, m: Int = 1, v: Int = 58,
