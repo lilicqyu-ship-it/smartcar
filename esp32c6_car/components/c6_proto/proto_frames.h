@@ -79,18 +79,19 @@ extern "C" {
  * Byte 0x70 keeps its historical name here and means CAL DIR on the TC275 side:
  * PROTO_CMD_DPT_ENTER (esp32c6_car) == PROTO_CMD_DPT_CAL_DIR (tc275_car protocol.h) -
  * same byte, two names, actual semantics = encoder direction calibration.
- * 0x75 configures IMU mounting axes and wheel track on TC275; 0x76..0x79
- * remain unimplemented. */
+ * 0x75..0x79 remain reserved for their historical purposes; IMU mounting
+ * calibration uses the new 0x7A op. */
 #define PROTO_CMD_DPT_ENTER         0x70u  /* 编码器判向标定 (CAL_DIR)          */
 #define PROTO_CMD_DPT_MOTOR_JOG     0x71u  /* {motor u8, duty i16LE} 开环点动   */
 #define PROTO_CMD_DPT_REC_GET       0x72u  /* 读 DFlash 标定记录 -> EVT 0x23    */
 #define PROTO_CMD_DPT_REC_SET       0x73u  /* 12 B 写入 -> EVT 0x23 回执        */
 #define PROTO_CMD_DPT_REC_CLEAR     0x74u  /* 擦除回默认 -> EVT 0x23 回执       */
-#define PROTO_CMD_DPT_IMU_CAL_SET   0x75u  /* {axis i8x3, trackMm u16LE}; EVT 0x23 */
+#define PROTO_CMD_DPT_CAL_SAVE      0x75u  /* 未实现（TC275 default 忽略）      */
 #define PROTO_CMD_DPT_SN_WRITE      0x76u  /* 未实现                            */
 #define PROTO_CMD_DPT_AGING         0x77u  /* 未实现                            */
 #define PROTO_CMD_DPT_REPORT        0x78u  /* 未实现                            */
 #define PROTO_CMD_DPT_SELFTEST      0x79u  /* 未实现（C6-local items, LLDD 3.1）*/
+#define PROTO_CMD_DPT_IMU_CAL_SET   0x7Au  /* {axis i8x3, trackMm u16LE}; EVT 0x23 */
 
 /* ---- payload sub-ops -----------------------------------------------------*/
 /* 0x42 LINK_STATE */

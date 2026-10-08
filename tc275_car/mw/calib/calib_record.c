@@ -189,7 +189,7 @@ void CALIBREC_buildEvtRec(uint8_t *buf, const CalibRecord *rec, uint8_t crcOk)
     buf[14u] = crcOk;
     for (i = 0u; i < 3u; i++) buf[15u + i] = (uint8_t)rec->imuAxis[i];
     SF_putU16(&buf[18u], rec->trackMm);
-    buf[20u] = 0u; /* caller may set final saved status for 0x75 */
+    buf[20u] = 0u; /* caller may set final saved status for 0x7A */
 }
 
 void CALIBREC_encode(const CalibRecord *rec, uint8_t *blob)

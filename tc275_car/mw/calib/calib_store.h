@@ -46,7 +46,7 @@ void CALIB_recordSet(const uint8 *data, uint8 len);
  * covered by the caller's EVT 0x23). */
 void CALIB_recordClear(void);
 
-/* 0x75: parked-only, fresh-IMU axis/track calibration. Applies via the live
+/* 0x7A: parked-only, fresh-IMU axis/track calibration. Applies via the live
  * record; CPU0 fusion task sees it on the next tick. EVT 0x23 saved byte
  * reports pending/success/failure/rejection. */
 void CALIB_imuSet(const uint8 *data, uint8 len);

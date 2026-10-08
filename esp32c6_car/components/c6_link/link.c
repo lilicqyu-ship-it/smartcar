@@ -282,7 +282,7 @@ static size_t v2_to_sf(const proto_frame_t *vf, sf_frame_t *sf)
         memcpy(&sf->data[1], vf->data, vf->len);
         return 1u;
     }
-    if ((vf->cmd >= PROTO_CMD_DPT_ENTER) && (vf->cmd <= PROTO_CMD_DPT_SELFTEST))
+    if ((vf->cmd >= PROTO_CMD_DPT_ENTER) && (vf->cmd <= PROTO_CMD_DPT_IMU_CAL_SET))
     {
         sf->type = SF_TYPE_CMD;  sf->cid = SF_CID_DPT;
         sf->len  = (uint16_t)(vf->len + 1u);

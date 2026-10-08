@@ -61,6 +61,18 @@ final class SensorStreamTests: XCTestCase {
         XCTAssertNil(ImuAxisCalibration(axes: [1, -2, 3]))
     }
 
+    func testImuCalibrationRecordJsonAndSettingsPersistence() throws {
+        let json = #"{"t":"rec","ver":2,"src":1,"pos":[0,2,3,1],"invert":[1,1,-1,-1],"fullScale":1000,"wheelDia":48,"crcOk":1,"imuAxis":[-2,1,3],"trackMm":160,"imuSaved":1}"#
+        guard case .rec(let record) = parse(json) else { return XCTFail("not rec") }
+        XCTAssertEqual(record.imuAxis, [-2, 1, 3])
+        XCTAssertEqual(record.trackMm, 160)
+        XCTAssertEqual(record.imuSaved, 1)
+        var settings = AppSettings()
+        settings.imuDisplayCalibration = ImuAxisCalibration(axes: record.imuAxis)
+        let restored = try JSONDecoder().decode(AppSettings.self, from: JSONEncoder().encode(settings))
+        XCTAssertEqual(restored.imuDisplayCalibration?.axes, [-2, 1, 3])
+    }
+
     // ---- {"t":"tofz"} ----------------------------------------------------------------
 
     private func tofz(seq: Int = 7, f: Int = 0, m: Int = 1, v: Int = 58,

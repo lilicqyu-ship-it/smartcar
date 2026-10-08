@@ -25,7 +25,7 @@ extern "C" {
 #define CALIB_REC_WHEELS        4u
 #define CALIB_REC_BLOB_LEN      28u    /* v2 DFlash record incl. CRC16          */
 #define CALIB_REC_SET_LEN       12u    /* 0x73 REC_SET body (after the op byte) */
-#define CALIB_IMU_SET_LEN        5u    /* 0x75 {axis i8x3, trackMm u16LE}       */
+#define CALIB_IMU_SET_LEN        5u    /* 0x7A {axis i8x3, trackMm u16LE}       */
 #define CALIB_JOG_LEN            3u    /* 0x71 MOTOR_JOG body (after the op)    */
 /* EVT 0x22 is {op, status, invert i8x4, delta i32x4, saved} = 23 B. The
  * offsets are those the slave decoder reads (esp32c6_car
@@ -98,7 +98,7 @@ uint8_t CALIBREC_jogDecode(const uint8_t *p, uint8_t *motor, int16_t *duty);
 /* --- 0x73 REC_SET body {pos u8x4, invert i8x4, fullScale i16, wheelDia i16} - */
 uint8_t CALIBREC_recSetDecode(const uint8_t *p, uint8_t len, CalibRecord *rec);
 
-/* 0x75: validates a right-handed IMU axis map and measured wheel track. */
+/* 0x7A: validates a right-handed IMU axis map and measured wheel track. */
 uint8_t CALIBREC_imuSetDecode(const uint8_t *p, uint8_t len, CalibRecord *rec);
 
 /* --- EVT 0x22 {op, status, invert i8x4, delta i32x4, saved} ----------------- */

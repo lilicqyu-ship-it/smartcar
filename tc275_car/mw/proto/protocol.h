@@ -37,7 +37,7 @@
 #define PROTO_CMD_DPT_REC_GET     0x72
 #define PROTO_CMD_DPT_REC_SET     0x73
 #define PROTO_CMD_DPT_REC_CLEAR   0x74
-#define PROTO_CMD_DPT_IMU_CAL_SET 0x75
+#define PROTO_CMD_DPT_IMU_CAL_SET 0x7A
 
 /* OTA commands (doc 24 SS5.3 / F7 command table; values match the C6 side,
  * esp32c6_car components/c6_proto/proto_frames.h). They travel as SF OTA frames

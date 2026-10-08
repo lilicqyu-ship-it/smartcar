@@ -35,7 +35,7 @@ public enum Proto {
         public static let dptRecGet: UInt8 = 0x72   // ∅ → EVT 0x23
         public static let dptRecSet: UInt8 = 0x73   // 12 B {pos, invert, fs, wd}
         public static let dptRecClear: UInt8 = 0x74 // ∅ → EVT 0x23
-        public static let dptImuCalSet: UInt8 = 0x75 // {axis i8x3, trackMm u16LE} → EVT 0x23
+        public static let dptImuCalSet: UInt8 = 0x7A // {axis i8x3, trackMm u16LE} → EVT 0x23
     }
 
     /// CRC16-CCITT-FALSE (proto_crc16).

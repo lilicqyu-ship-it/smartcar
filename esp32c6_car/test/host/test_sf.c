@@ -207,7 +207,7 @@ static size_t v2_to_sf_ref(const proto_frame_t *vf, sf_frame_t *sf, uint8_t *seq
         memcpy(&sf->data[1], vf->data, vf->len);
         return 1;
     }
-    if (vf->cmd >= PROTO_CMD_DPT_ENTER && vf->cmd <= PROTO_CMD_DPT_SELFTEST)
+    if (vf->cmd >= PROTO_CMD_DPT_ENTER && vf->cmd <= PROTO_CMD_DPT_IMU_CAL_SET)
     {
         /* mirror of link.c L285: DPT family -> SF CMD/DPT, payload[0]=op */
         sf->type = SF_TYPE_CMD; sf->cid = SF_CID_DPT;
@@ -323,6 +323,17 @@ static int test_dpt_calib_frames(void)
     MU_CHECK_EQ(s.len, 13);
     MU_CHECK(memcmp(s.data, "\x73", 1) == 0);
 
+    /* 0x7A IMU map keeps historical 0x75..0x79 reserved. */
+    v.cmd = PROTO_CMD_DPT_IMU_CAL_SET; v.len = 5;
+    v.data[0] = (uint8_t)-2; v.data[1] = 1; v.data[2] = 3;
+    proto_put_u16(&v.data[3], 160);
+    MU_CHECK_EQ(v2_to_sf_ref(&v, &s, &seq), 1);
+    MU_CHECK_EQ(s.cid, SF_CID_DPT);
+    MU_CHECK_EQ(s.len, 6);
+    MU_CHECK_EQ(s.data[0], 0x7A);
+    MU_CHECK_EQ((int8_t)s.data[1], -2);
+    MU_CHECK_EQ(proto_get_u16(&s.data[4]), 160);
+
     /* EVT 0x22 cal result: {op,status,invert i8x4,delta i32x4 LE,saved} 23B */
     s.type = SF_TYPE_EVT; s.cid = SF_CID_DPT_RESULT; s.seq = seq++; s.flags = 0;
     s.len = 23; memset(s.data, 0, sizeof(s.data));
@@ -359,6 +370,18 @@ static int test_dpt_calib_frames(void)
     MU_CHECK_EQ(proto_get_u16(&out.data[10]), 3250);
     MU_CHECK_EQ(proto_get_u16(&out.data[12]), 125);
     MU_CHECK_EQ((int8_t)out.data[6], -1);
+
+    /* v2 record appends IMU map, measured track and verified save result. */
+    s.seq = seq++; s.len = 21; s.data[0] = 2;
+    s.data[15] = (uint8_t)-2; s.data[16] = 1; s.data[17] = 3;
+    proto_put_u16(&s.data[18], 160); s.data[20] = 1;
+    n = sf_encode(&s, wire, sizeof(wire));
+    sf_parser_init(&p);
+    for (i = 0; i < (int)n; i++) { (void)sf_parser_feed(&p, wire[i], &out); }
+    MU_CHECK_EQ(out.len, 21);
+    MU_CHECK_EQ((int8_t)out.data[15], -2);
+    MU_CHECK_EQ(proto_get_u16(&out.data[18]), 160);
+    MU_CHECK_EQ(out.data[20], 1);
     return 0;
 }
 

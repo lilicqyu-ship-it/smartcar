@@ -639,7 +639,7 @@ static void test_calib_record_blob(void)
     CHECK_EQ(back.imuAxis[0], 0);
     CHECK_EQ(back.trackMm, 0u);
 
-    /* 0x75 rejects left-handed, duplicate and out-of-range maps. */
+    /* 0x7A rejects left-handed, duplicate and out-of-range maps. */
     {
         uint8_t body[5] = {1u, 2u, 3u, 150u, 0u};
         CALIBREC_fillDefaults(&rec);
