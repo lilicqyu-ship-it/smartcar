@@ -44,6 +44,7 @@
 #include "mw/sf/sf_frame.h"
 #include "app/robot.h"
 #include "app/fusion.h"
+#include "app/sensor_stream.h"
 #include "app/console.h"
 #include <string.h>
 
@@ -294,6 +295,12 @@ static void vRobotControlTask(void *pvParameters)
                 XCORE_estopClear();
             }
         }
+
+        /* Diagnostic sensor streams to the phone (app/sensor_stream.h):
+         * IMU samples at 20 Hz plus the ToF zone map, both via the
+         * low-priority data ring so a busy link cannot delay this task. */
+        SENSORSTREAM_tick((uint32)xTaskGetTickCount() * portTICK_PERIOD_MS,
+                          g_driveFusion.tofMode);
 
         XCORE_logService();
 
