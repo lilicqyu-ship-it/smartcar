@@ -312,6 +312,11 @@ public final class LinkEngine: NSObject, URLSessionWebSocketDelegate {
             app.applyCalibRecord(record)
         case .jogCnt(let on, let deltas):
             app.applyJogCounts(on: on, deltas: deltas)
+        case .imu(let sample):
+            app.applyImu(sample)
+        case .tofFragment(let seq, let frag, let mode, let valid, let near, let zones):
+            app.applyTofFragment(seq: seq, frag: frag, mode: mode,
+                                 valid: valid, nearestMm: near, zones: zones)
         }
     }
 

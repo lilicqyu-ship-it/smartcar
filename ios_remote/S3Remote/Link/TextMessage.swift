@@ -21,11 +21,24 @@ public enum PairState: String, Equatable, Sendable {
 }
 
 /// CPU0 driving guard, forwarded by C6 as the optional fusion JSON beacon.
+/// The C6 has always broadcast the full 28-byte fusion snapshot (12 fields,
+/// wire truth tc275_car app/fusion.c FUSION_encode) — the remote simply
+/// never parsed the attitude/speed half before the sensor tab needed it.
 public struct FusionStatus: Equatable, Sendable {
     public let reason: Int
     public let flags: Int
     public let distance: Int
     public let cap: Int
+    // Remaining snapshot fields; 0 = unknown (older C6 that sends only the
+    // original four). Display-only.
+    public var speedMmS: Int = 0
+    public var yawRateCdegS: Int = 0
+    public var headingCdeg: Int = 0
+    public var rollCdeg: Int = 0
+    public var pitchCdeg: Int = 0
+    public var tofAgeMs: Int = 0
+    public var validZones: Int = 0
+    public var brake: Int = 0
 
     public var warning: String? {
         if reason == 4 { return "倾斜保护停车，请扶正车辆" }
@@ -39,6 +52,18 @@ public struct FusionStatus: Equatable, Sendable {
         if reason == 1 { return "接近障碍，已限制前进速度" }
         return nil
     }
+}
+
+/// Raw CPU1 IMU sample forwarded by C6 as the optional {"t":"imu"} JSON
+/// stream (EVT 0x2B, wire truth tc275_car app/sensor_stream.h). Values are
+/// the car's body frame straight from the LSM6DSV16BX: acc in milligee,
+/// gyro in millideg/s, die temperature in 0.01 °C units. ~20 Hz.
+public struct ImuSample: Equatable, Sendable {
+    public let seq: Int
+    public let stampMs: Int
+    public let accMg: [Int] // [x, y, z]
+    public let gyroMdps: [Int] // [x, y, z]
+    public let tempCentiC: Int
 }
 
 public enum TextMessage: Equatable, Sendable {
@@ -59,6 +84,12 @@ public enum TextMessage: Equatable, Sendable {
     case rec(CalibRecord)
     /// {"t":"jogcnt",...} — 点动期间逐通道编码器计数增量（EVT 0x26，10 Hz）
     case jogCnt(on: Bool, deltas: [Int])
+    /// {"t":"imu",...} — 车端原始 IMU 采样（EVT 0x2B，20 Hz）
+    case imu(ImuSample)
+    /// {"t":"tofz",...} — ToF 8×8 zone 图的一个分片（EVT 0x2A，随 15 Hz 帧
+    /// 每帧 3 片；25/25/14 区，cell = mm/16，0xFF = 无可信目标）。
+    /// 由 TofZoneAssembler 按 {seq, frag} 重组。
+    case tofFragment(seq: Int, frag: Int, mode: Int, valid: Int, nearestMm: Int, zones: [Int])
 
     public static func parse(_ data: Data) -> TextMessage? {
         guard
@@ -107,7 +138,27 @@ public enum TextMessage: Equatable, Sendable {
                   let flags = obj["flags"] as? Int, (0...65535).contains(flags),
                   let distance = obj["distance"] as? Int, (0...65535).contains(distance),
                   let cap = obj["cap"] as? Int, (0...65535).contains(cap) else { return nil }
-            return .fusion(FusionStatus(reason: reason, flags: flags, distance: distance, cap: cap))
+            // 姿态/速度半边：i16/u16 量化字段，越界即整帧丢弃（不造数）。
+            func i16(_ key: String) -> Int? {
+                guard let v = obj[key] as? Int, (-32_768...32_767).contains(v) else { return nil }
+                return v
+            }
+            func u16(_ key: String) -> Int? {
+                guard let v = obj[key] as? Int, (0...65_535).contains(v) else { return nil }
+                return v
+            }
+            func u8(_ key: String) -> Int? {
+                guard let v = obj[key] as? Int, (0...255).contains(v) else { return nil }
+                return v
+            }
+            guard let speed = i16("speed"), let yawRate = i16("yawRate"),
+                  let heading = i16("heading"), let roll = i16("roll"),
+                  let pitch = i16("pitch"), let age = u16("age"),
+                  let zones = u8("zones"), let brake = u8("brake") else { return nil }
+            return .fusion(FusionStatus(reason: reason, flags: flags, distance: distance, cap: cap,
+                                        speedMmS: speed, yawRateCdegS: yawRate,
+                                        headingCdeg: heading, rollCdeg: roll, pitchCdeg: pitch,
+                                        tofAgeMs: age, validZones: zones, brake: brake))
 
         case "cal":
             // bridge_emit_cal: status 必有；saved V1.1 起才有（缺失=待确认）；
@@ -140,6 +191,28 @@ public enum TextMessage: Equatable, Sendable {
                   let deltas = intArray(obj["d"], count: 4) else { return nil }
             return .jogCnt(on: on == 1, deltas: deltas)
 
+        case "imu":
+            // bridge_emit_imu: seq/ms 无符号，acc/gyro 恒 3 元素（可为负）
+            guard let seq = obj["seq"] as? Int, seq >= 0,
+                  let ms = obj["ms"] as? Int, ms >= 0,
+                  let acc = intArray(obj["acc"], count: 3),
+                  let gyro = intArray(obj["gyro"], count: 3),
+                  let tp = obj["tp"] as? Int else { return nil }
+            return .imu(ImuSample(seq: seq, stampMs: ms, accMg: acc,
+                                  gyroMdps: gyro, tempCentiC: tp))
+
+        case "tofz":
+            // bridge_emit_tofz: seq u16、frag 0..2、mode 0..3、valid 0..64、
+            // near u16、z 恰 25 个 0..255 cell。畸形片整体丢弃，不造数。
+            guard let seq = obj["seq"] as? Int, (0...65_535).contains(seq),
+                  let frag = obj["f"] as? Int, (0...2).contains(frag),
+                  let mode = obj["m"] as? Int, (0...3).contains(mode),
+                  let valid = obj["v"] as? Int, (0...64).contains(valid),
+                  let near = obj["near"] as? Int, (0...65_535).contains(near),
+                  let zones = byteCellArray(obj["z"], count: 25) else { return nil }
+            return .tofFragment(seq: seq, frag: frag, mode: mode, valid: valid,
+                                nearestMm: near, zones: zones)
+
         default:
             return nil
         }
@@ -149,5 +222,18 @@ public enum TextMessage: Equatable, Sendable {
     private static func intArray(_ any: Any?, count: Int) -> [Int]? {
         guard let nums = any as? [NSNumber], nums.count == count else { return nil }
         return nums.map { $0.intValue }
+    }
+
+    /// tofz 的 zone cell：0...255 的整数数组（0xFF 合法 = 无目标）。
+    private static func byteCellArray(_ any: Any?, count: Int) -> [Int]? {
+        guard let nums = any as? [NSNumber], nums.count == count else { return nil }
+        var cells = [Int]()
+        cells.reserveCapacity(count)
+        for n in nums {
+            let v = n.intValue
+            guard (0...255).contains(v) else { return nil }
+            cells.append(v)
+        }
+        return cells
     }
 }

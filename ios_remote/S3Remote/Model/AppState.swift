@@ -164,6 +164,94 @@ public final class AppState {
         if let warning = status.warning, warning != oldWarning { log("WARN", warning) }
     }
 
+    // ---- sensor streams (sensor tab: raw IMU + ToF zone map) -----------------
+    // Diagnostic JSON side-channel ({"t":"imu"} @ 20 Hz, {"t":"tofz"} @ 15 Hz
+    // reassembled). Display-only: nothing here feeds driving or safety.
+    /// Freeze switch for the sensor tab's buffers ("暂停" button). While set,
+    /// incoming samples are dropped so the charts hold still for reading;
+    /// the connection and the event log are unaffected.
+    public var sensorPaused = false
+    /// Raw IMU samples, oldest last, capped at 200 (≈10 s at 20 Hz).
+    public private(set) var imuHistory: [ImuSample] = []
+    private var imuAtMs: Double = 0
+    /// g-Ball trail: gravity-compensated horizontal acceleration (g, body
+    /// fwd/lat), newest last, capped at 120 (≈6 s at 20 Hz).
+    public private(set) var accelTrail: [(fwd: Double, lat: Double)] = []
+    /// Peak |horizontal| acceleration since the link came up (g).
+    public private(set) var peakHorizontalG: Double = 0
+    private var peakTracker = PeakGTracker()
+    /// Latest complete 8×8 zone map, nil until the first frame assembles.
+    public private(set) var tofMap: TofZoneFrame?
+    private var tofMapAtMs: Double = 0
+    /// Nearest-distance trend from complete maps with ≥1 trusted zone.
+    public private(set) var tofNearHistory: [Int] = []
+    private var tofAssembler = TofZoneAssembler()
+
+    public var imuFresh: Bool { nowMs - imuAtMs < 1000 }
+    public var tofMapFresh: Bool { nowMs - tofMapAtMs < 1000 }
+
+    /// Observed IMU stream rate from the car's own sample stamps (Hz);
+    /// nil while fewer than two samples are buffered.
+    public var imuRateHz: Double? {
+        guard imuHistory.count >= 2 else { return nil }
+        let dt = imuHistory[imuHistory.count - 1].stampMs - imuHistory[imuHistory.count - 2].stampMs
+        guard dt > 0 else { return nil }
+        return 1000.0 / Double(dt)
+    }
+
+    func applyImu(_ sample: ImuSample) {
+        guard !sensorPaused else { return }
+        imuAtMs = now()
+        imuHistory.append(sample)
+        if imuHistory.count > 200 {
+            imuHistory.removeFirst(imuHistory.count - 200)
+        }
+        // g-Ball: gravity compensation needs the attitude; without fusion the
+        // raw ax/ay still move the ball, the view just greys it out.
+        let fusion = self.fusion
+        let horizontal = ImuKinematics.horizontalG(
+            accMgX: Double(sample.accMg[0]), y: Double(sample.accMg[1]),
+            z: Double(sample.accMg[2]),
+            rollDeg: Double(fusion?.rollCdeg ?? 0) / 100,
+            pitchDeg: Double(fusion?.pitchCdeg ?? 0) / 100)
+        accelTrail.append((fwd: horizontal.fwd, lat: horizontal.lat))
+        if accelTrail.count > 120 {
+            accelTrail.removeFirst(accelTrail.count - 120)
+        }
+        peakTracker.observe(horizontal.magnitude)
+        peakHorizontalG = peakTracker.peak
+    }
+
+    func applyTofFragment(seq: Int, frag: Int, mode: Int, valid: Int,
+                          nearestMm: Int, zones: [Int]) {
+        guard !sensorPaused else { return }
+        guard let frame = tofAssembler.add(seq: seq, frag: frag, mode: mode,
+                                           valid: valid, nearestMm: nearestMm,
+                                           zones: zones) else { return }
+        tofMap = frame
+        tofMapAtMs = now()
+        // An all-invalid frame (nearest 0) is "no reading", not "wall at 0 mm":
+        // leave the trend at its last value; the valid/freshness chips say why.
+        if frame.validZones > 0 {
+            tofNearHistory.append(frame.nearestMm)
+            if tofNearHistory.count > 150 {
+                tofNearHistory.removeFirst(tofNearHistory.count - 150)
+            }
+        }
+    }
+
+    private func clearSensorStreams() {
+        imuHistory = []
+        imuAtMs = 0
+        accelTrail = []
+        peakTracker.reset()
+        peakHorizontalG = 0
+        tofMap = nil
+        tofMapAtMs = 0
+        tofNearHistory = []
+        tofAssembler.reset()
+    }
+
     // battery display debounce (C6 cee1189 strategy: median + EMA + latches);
     // alarms/colors keep using the real telemetry above
     private var batteryFilter = BatteryDisplayFilter()
@@ -348,6 +436,7 @@ public final class AppState {
         tiltAxes = (0, 0)
         calib.linkDown() // 车端因失联中止标定；本地清理点动与等待态
         calib.setWheelsOffConfirmed(false) // 重新连接后需重新确认安全前提
+        clearSensorStreams()
         speedFilter.reset()
         displaySpeedMmS = 0
         log("WARN", "连接断开：\(reason) — 车辆由 TC275 心跳看门狗停车")
@@ -378,7 +467,10 @@ public final class AppState {
             log("INFO", up ? "Vehicle link up (TC275)" : "Vehicle link down (TC275)")
         }
         tcUp = up
-        if !up { fusion = nil }
+        if !up {
+            fusion = nil
+            clearSensorStreams()
+        }
     }
 
     func applyAuthRejected() {

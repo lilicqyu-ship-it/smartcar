@@ -70,12 +70,16 @@ final class LinkMessageTests: XCTestCase {
     }
 
     func testFusionLimitedCoverageWarning() {
-        guard case .fusion(let status) = parse(#"{"t":"fusion","reason":1,"flags":166,"distance":1280,"cap":150}"#) else {
+        // Exact string shape of bridge_emit_fusion (all 12 fields; the
+        // attitude/speed half is parsed since the 传感器 tab needs it).
+        guard case .fusion(let status) = parse(
+            #"{"t":"fusion","reason":1,"flags":166,"distance":1280,"cap":150,"speed":0,"yawRate":0,"heading":0,"roll":0,"pitch":0,"age":40,"zones":58,"brake":0}"#
+        ) else {
             return XCTFail("missing driving guard")
         }
         XCTAssertEqual(status.warning, "测距覆盖不足 · 前进限速 0.54 km/h")
         XCTAssertNil(parse(#"{"t":"fusion","reason":1,"flags":166,"distance":1280}"#))
-        XCTAssertNil(parse(#"{"t":"fusion","reason":1,"flags":166,"distance":1280,"cap":-1}"#))
+        XCTAssertNil(parse(#"{"t":"fusion","reason":1,"flags":166,"distance":1280,"cap":-1,"speed":0,"yawRate":0,"heading":0,"roll":0,"pitch":0,"age":0,"zones":0,"brake":0}"#))
         XCTAssertEqual(FusionStatus(reason: 2, flags: 192, distance: 100, cap: 0).warning,
                        "前向保护停车 · 松开油门后再试")
         XCTAssertEqual(FusionStatus(reason: 3, flags: 6, distance: 0, cap: 0).warning,
