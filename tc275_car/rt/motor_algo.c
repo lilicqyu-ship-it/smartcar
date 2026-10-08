@@ -41,14 +41,13 @@ static uint8   g_recordVer = 0xFFu;      /* impossible value: apply boot rec */
 
 /* Closed-loop enable gate. The servo may only close the loop after wheel
  * direction calibration. An IMU-only DFlash record must not open it: the
- * default wheel signs can be wrong on mirrored gearboxes, and the
- * mirrored gearboxes make wrong on some wheels, and closing the loop on
+ * default wheel signs can be wrong on mirrored gearboxes, and closing the loop on
  * wrong signs is exactly the positive-feedback runaway bench-observed in
  * doc 34 SS1 (sustained duty at target 0). Doc 23 SS8.4 therefore
- * prescribes "open-loop equivalent" for src=0: SERVO_update's measValid=
+ * prescribes "open-loop equivalent" until wheelCalibrated=1: SERVO_update's measValid=
  * FALSE path (duty = target, integral dropped) is reused unchanged. The
- * gate follows the RecordLive version edge - 0x70 DONE (CPU0 persists,
- * src = DFLASH) and 0x73 REC_SET enable it, 0x74 REC_CLEAR disables it. */
+ * gate follows the RecordLive version edge - 0x70 DONE and 0x73 REC_SET
+ * enable it, 0x74 REC_CLEAR disables it; IMU 0x7A leaves it untouched. */
 static boolean g_closedLoopOk;
 
 /* ---- wheel direction calibration (bench, doc 23 SS8.4 step 2 automated) ---
@@ -422,7 +421,7 @@ static void MOTOR_ALGO_applyRecord(void)
         {
             g_closedLoopOk = ok;
             XCORE_logln(ok ? "SERVO closed-loop enabled"
-                           : "SERVO open-loop (record src=0; calibrate via 0x70)");
+                           : "SERVO open-loop (wheels uncalibrated; calibrate via 0x70)");
         }
     }
 

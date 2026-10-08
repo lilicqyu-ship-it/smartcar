@@ -165,6 +165,7 @@ final class LinkMessageTests: XCTestCase {
         XCTAssertEqual(rec.wheelDiaMm, 48)
         XCTAssertTrue(rec.crcOk)
         XCTAssertEqual(rec.srcText, "DFlash")
+        XCTAssertTrue(rec.wheelCalibrated) // 旧 15 B 固件兼容
     }
 
     func testRecCrcFailAndDefaults() {
@@ -172,6 +173,15 @@ final class LinkMessageTests: XCTestCase {
         guard case .rec(let rec) = parse(json) else { return XCTFail() }
         XCTAssertFalse(rec.crcOk)
         XCTAssertEqual(rec.srcText, "默认值")
+        XCTAssertFalse(rec.wheelCalibrated)
+    }
+
+    func testImuOnlyRecordDoesNotMarkWheelsCalibrated() {
+        let json = #"{"t":"rec","ver":2,"src":1,"pos":[0,2,3,1],"invert":[1,1,1,1],"fullScale":1000,"wheelDia":48,"crcOk":1,"imuAxis":[1,2,3],"trackMm":150,"imuSaved":1,"wheelCalibrated":0}"#
+        guard case .rec(let rec) = parse(json) else { return XCTFail("not rec") }
+        XCTAssertEqual(rec.imuAxis, [1, 2, 3])
+        XCTAssertEqual(rec.imuSaved, 1)
+        XCTAssertFalse(rec.wheelCalibrated)
     }
 
     func testRecMalformedDropped() {

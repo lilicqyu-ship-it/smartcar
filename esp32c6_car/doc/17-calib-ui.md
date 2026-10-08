@@ -347,8 +347,8 @@ c6 侧改动点：`c6_link` 不改；JSON 事件流新增/扩展（`"cal"` 扩�
 以上 0x75..0x79 “未实现”仍成立；新增 `0x7A IMU_CAL_SET`，命令体
 `{axis i8[3], trackMm u16LE}`。C6 的 v2→SF DPT 路由扩至 0x7A，
 EVT 0x23 仍从 SF EVT 经 DIAG 隧道进入 bridge。记录回显由 15 B 扩到
-21 B，原 0..14 字节不变，15..17 是轴向、18..19 是实测轮距、20 是
-IMU 保存状态（0 等待/普通、1 写入成功、2 保存失败、3 拒绝）。桥接 JSON
-新增 `imuAxis`、`trackMm`、`imuSaved`；旧 15 B 帧仍按旧字段解析。
+22 B，原 0..14 字节不变，15..17 是轴向、18..19 是实测轮距、20 是
+IMU 保存状态（0 等待/普通、1 写入成功、2 保存失败、3 拒绝），21 是独立车轮判向标志。桥接 JSON
+新增 `imuAxis`、`trackMm`、`imuSaved`、`wheelCalibrated`；旧 15/21 B 帧仍按旧字段解析。
 车端记录 v2 的 28 B DFlash 布局与 v1 兼容规则见 TC275 34 §14。Web
 标定页当前没有 IMU 向导，IMU 标定入口在 iOS 传感器页。

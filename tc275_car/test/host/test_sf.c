@@ -487,10 +487,11 @@ static void test_evt_dpt_round_trip(void)
     CHECK_EQ(CALIB_EVT_RESULT_SAVED, CALIB_EVT_RESULT_LEN - 1u);
     CHECK_EQ(2u + CALIB_REC_WHEELS + (CALIB_REC_WHEELS * 4u) + 1u,
              CALIB_EVT_RESULT_LEN);
-    CHECK_EQ(CALIB_EVT_REC_LEN, 21u);
+    CHECK_EQ(CALIB_EVT_REC_LEN, 22u);
 
     CALIBREC_fillDefaults(&rec);
     rec.src          = CALIB_SRC_DFLASH;
+    rec.wheelCalibrated = 1u;
     rec.invert[1]    = -1;
     rec.fullScaleMmS = 843;
     rec.wheelDiaMm   = 65;
@@ -565,6 +566,7 @@ static void test_evt_dpt_round_trip(void)
     CHECK_EQ((int8_t)f.payload[17], 3);
     CHECK_EQ(SF_getU16(&f.payload[18]), 150u);
     CHECK_EQ(f.payload[20], 0u);
+    CHECK_EQ(f.payload[21], 1u);
 }
 
 /* The v2 DFlash blob is 28 B inside one 8 B-page-organised sector; a torn write
@@ -583,6 +585,7 @@ static void test_calib_record_blob(void)
     rec.fullScaleMmS = 1234;
     rec.wheelDiaMm   = 66;
     rec.src          = CALIB_SRC_DFLASH;
+    rec.wheelCalibrated = 1u;
     rec.imuAxis[0] = -2; rec.imuAxis[1] = 1; rec.imuAxis[2] = 3;
     rec.trackMm = 160;
 
@@ -597,6 +600,13 @@ static void test_calib_record_blob(void)
     CHECK_EQ(back.imuAxis[1], 1);
     CHECK_EQ(back.imuAxis[2], 3);
     CHECK_EQ(back.trackMm, 160u);
+    CHECK_EQ(back.wheelCalibrated, 1u);
+
+    /* IMU-only persistence must leave the wheel closed-loop gate disabled. */
+    rec.wheelCalibrated = 0u;
+    CALIBREC_encode(&rec, blob);
+    CHECK_EQ(CALIBREC_decode(blob, &back), 1u);
+    CHECK_EQ(back.wheelCalibrated, 0u);
 
     /* erased sector: no magic, no record */
     memset(blob, 0xFF, sizeof(blob));
@@ -638,6 +648,7 @@ static void test_calib_record_blob(void)
     CHECK_EQ(CALIBREC_decode(blob, &back), 1u);
     CHECK_EQ(back.imuAxis[0], 0);
     CHECK_EQ(back.trackMm, 0u);
+    CHECK_EQ(back.wheelCalibrated, 1u);
 
     /* 0x7A rejects left-handed, duplicate and out-of-range maps. */
     {
@@ -707,6 +718,7 @@ static void test_dpt_command_bodies(void)
     CHECK_EQ(rec.invert[1], -1);
     CHECK_EQ(rec.fullScaleMmS, 1500);
     CHECK_EQ(rec.wheelDiaMm, 72);
+    CHECK_EQ(rec.wheelCalibrated, 1u);
 
     /* wrong length, illegal sign, illegal position, illegal full scale */
     CHECK_EQ(CALIBREC_recSetDecode(body, CALIB_REC_SET_LEN - 1u, &rec), 0u);

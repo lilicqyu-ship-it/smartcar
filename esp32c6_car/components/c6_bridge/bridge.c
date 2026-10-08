@@ -740,7 +740,14 @@ static void bridge_emit_rec(const uint8_t *p, uint16_t n)
     k += snprintf(json + k, sizeof(json) - (size_t)k,
                   "],\"fullScale\":%d,\"wheelDia\":%d,\"crcOk\":%u",
                   fs, wd, p[14]);
-    if (n >= 21u)
+    if (n >= 22u)
+    {
+        (void)snprintf(json + k, sizeof(json) - (size_t)k,
+                       ",\"imuAxis\":[%d,%d,%d],\"trackMm\":%u,\"imuSaved\":%u,\"wheelCalibrated\":%u}",
+                       (int)(int8_t)p[15], (int)(int8_t)p[16],
+                       (int)(int8_t)p[17], proto_get_u16(&p[18]), p[20], p[21]);
+    }
+    else if (n >= 21u)
     {
         (void)snprintf(json + k, sizeof(json) - (size_t)k,
                        ",\"imuAxis\":[%d,%d,%d],\"trackMm\":%u,\"imuSaved\":%u}",

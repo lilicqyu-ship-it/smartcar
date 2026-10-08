@@ -186,7 +186,8 @@ public enum TextMessage: Equatable, Sendable {
                                     crcOk: crcOk,
                                     imuAxis: intArray(obj["imuAxis"], count: 3) ?? [0, 0, 0],
                                     trackMm: obj["trackMm"] as? Int ?? 0,
-                                    imuSaved: obj["imuSaved"] as? Int))
+                                    imuSaved: obj["imuSaved"] as? Int,
+                                    wheelCalibrated: (obj["wheelCalibrated"] as? NSNumber)?.boolValue))
 
         case "jogcnt":
             // bridge_emit_jogcnt: on 0/1，d = 4 × i32 LE

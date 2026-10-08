@@ -77,12 +77,15 @@ public struct CalibRecord: Equatable, Sendable {
     public let trackMm: Int
     /// 0 = 普通回显/写入等待，1 = DFlash 已验证，2 = 失败，3 = 拒绝。
     public let imuSaved: Int?
+    /// 独立车轮判向标志；旧固件无此字段时仅按旧记录来源兼容推断。
+    public let wheelCalibrated: Bool
     /// 0 = DFlash 校验/范围失败已回落默认
     public let crcOk: Bool
 
     public init(ver: Int, src: Int, pos: [Int], invert: [Int],
                 fullScaleMmS: Int, wheelDiaMm: Int, crcOk: Bool,
-                imuAxis: [Int] = [0, 0, 0], trackMm: Int = 0, imuSaved: Int? = nil) {
+                imuAxis: [Int] = [0, 0, 0], trackMm: Int = 0, imuSaved: Int? = nil,
+                wheelCalibrated: Bool? = nil) {
         self.ver = ver
         self.src = src
         self.pos = pos
@@ -93,6 +96,7 @@ public struct CalibRecord: Equatable, Sendable {
         self.imuAxis = imuAxis
         self.trackMm = trackMm
         self.imuSaved = imuSaved
+        self.wheelCalibrated = wheelCalibrated ?? (src != 0)
     }
 
     public var srcText: String {

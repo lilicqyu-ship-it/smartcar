@@ -372,16 +372,17 @@ static int test_dpt_calib_frames(void)
     MU_CHECK_EQ((int8_t)out.data[6], -1);
 
     /* v2 record appends IMU map, measured track and verified save result. */
-    s.seq = seq++; s.len = 21; s.data[0] = 2;
+    s.seq = seq++; s.len = 22; s.data[0] = 2;
     s.data[15] = (uint8_t)-2; s.data[16] = 1; s.data[17] = 3;
-    proto_put_u16(&s.data[18], 160); s.data[20] = 1;
+    proto_put_u16(&s.data[18], 160); s.data[20] = 1; s.data[21] = 0;
     n = sf_encode(&s, wire, sizeof(wire));
     sf_parser_init(&p);
     for (i = 0; i < (int)n; i++) { (void)sf_parser_feed(&p, wire[i], &out); }
-    MU_CHECK_EQ(out.len, 21);
+    MU_CHECK_EQ(out.len, 22);
     MU_CHECK_EQ((int8_t)out.data[15], -2);
     MU_CHECK_EQ(proto_get_u16(&out.data[18]), 160);
     MU_CHECK_EQ(out.data[20], 1);
+    MU_CHECK_EQ(out.data[21], 0);
     return 0;
 }
 

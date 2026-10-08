@@ -403,6 +403,8 @@ struct CalibView: View {
                 if let rec = app.calib.record {
                     HStack(spacing: 8) {
                         chip("来源：\(rec.srcText)", color: srcColor(rec))
+                        chip(rec.wheelCalibrated ? "车轮已标定" : "车轮未标定 · 闭环禁用",
+                             color: rec.wheelCalibrated ? Theme.live : Theme.crit)
                         chip(rec.crcOk ? "记录校验通过" : "DFlash 校验失败 · 已回落默认",
                              color: rec.crcOk ? Theme.live : Theme.crit)
                         Spacer(minLength: 0)
