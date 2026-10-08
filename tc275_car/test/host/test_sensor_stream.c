@@ -110,6 +110,14 @@ static void test_first_tick_emits_imu_and_three_fragments(void)
     XCORE_imuPublish(&imu);
     publishTof(7u, 1000u, 60u);
 
+    /* XCORE_imuPublish owns the seq bump (xcore.h), so the expected wire seq
+     * is whatever the snapshot now reads back as. */
+    {
+        XcoreImu published;
+        XCORE_imuRead(&published);
+        imu.seq = published.seq;
+    }
+
     SENSORSTREAM_tick(0u, (uint8_t)FUSION_MODE_OPEN);
 
     while (drain(&f))
@@ -119,7 +127,7 @@ static void test_first_tick_emits_imu_and_three_fragments(void)
         {
             imuFrames++;
             check(f.len == SENSORSTREAM_IMU_WIRE_LEN, "imu frame length");
-            check(rd32(f.payload + 0) == 42u, "imu seq");
+            check(rd32(f.payload + 0) == imu.seq, "imu seq (bumped by the publisher)");
             check(rd32(f.payload + 4) == 1234u, "imu stampMs");
             check((int16_t)rd16(f.payload + 8) == 2573, "imu tempCentiC");
             check((int16_t)rd16(f.payload + 10) == -512, "accX mg");
@@ -145,7 +153,11 @@ static void test_first_tick_emits_imu_and_three_fragments(void)
             {
                 unsigned zone = first + i;
                 uint8 cell = f.payload[SENSORSTREAM_TOF_HDR_LEN + i];
-                if (zone < 60u)
+                if (zone >= FUSION_MAX_ZONES)
+                {
+                    check(cell == 0u, "fragment padding past zone 63 is zero");
+                }
+                else if (zone < 60u)
                 {
                     /* mm/16 quantisation: 1000+zone mm -> (1000+zone)/16 */
                     check(cell == (uint8)((1000u + zone) / 16u), "zone quantised mm/16");
@@ -188,7 +200,8 @@ static void test_rate_limiting(void)
     }
     check(frames == 1u, "IMU re-fires on its own 50 ms period");
 
-    /* New TOF frame -> the three fragments again, with the new seq. */
+    /* New TOF frame 10 ms after the last IMU send -> only the 3 fragments
+     * (the IMU stream re-fires on its own 50 ms period, not the TOF's). */
     publishTof(8u, 320u, 1u);
     SENSORSTREAM_tick(60u, (uint8_t)FUSION_MODE_TRACKED);
     frames = 0;
@@ -201,8 +214,12 @@ static void test_rate_limiting(void)
             check(f.payload[4] == 1u, "valid count follows the new frame");
             check(rd16(f.payload + 5) == 320u, "nearest tracks the new frame");
         }
+        else
+        {
+            check(f.cid == SENSORSTREAM_EVT_CID_IMU, "unexpected CID");
+        }
     }
-    check(frames == 4u, "new TOF frame: 3 fragments + 1 IMU");
+    check(frames == 3u, "new TOF frame: only the 3 fragments");
 }
 
 static void test_quantisation_clamps(void)

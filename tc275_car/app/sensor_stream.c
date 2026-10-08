@@ -64,6 +64,7 @@ static void sendTofZones(const FusionTof *tof, uint8_t mode)
     uint32_t zone;
     uint16_t nearest = 0u;
     uint8_t valid = 0u;
+    uint8_t haveNearest = 0u;
     uint8 frag;
 
     for (zone = 0u; zone < FUSION_MAX_ZONES; zone++)
@@ -80,9 +81,12 @@ static void sendTofZones(const FusionTof *tof, uint8_t mode)
             mm = 0;
         }
         valid++;
-        if ((nearest == 0u) || ((uint32_t)mm < (uint32_t)nearest))
+        /* haveNearest instead of a 0 sentinel: a genuine 0 mm nearest must
+         * not let later zones overwrite it. */
+        if (!haveNearest || ((uint16_t)mm < nearest))
         {
             nearest = (uint16_t)mm;
+            haveNearest = 1u;
         }
     }
 
@@ -136,11 +140,13 @@ static void sendTofZones(const FusionTof *tof, uint8_t mode)
 void SENSORSTREAM_tick(uint32_t nowMs, uint8_t tofMode)
 {
     static uint32_t s_lastImuMs;
+    static uint8_t s_imuSeen;
     static uint32_t s_lastTofSeq;
     static uint8_t s_tofSeen;
 
-    if ((uint32_t)(nowMs - s_lastImuMs) >= SENSORSTREAM_IMU_PERIOD_MS)
+    if (!s_imuSeen || ((uint32_t)(nowMs - s_lastImuMs) >= SENSORSTREAM_IMU_PERIOD_MS))
     {
+        s_imuSeen = 1u;
         s_lastImuMs = nowMs;
         sendImu();
     }
