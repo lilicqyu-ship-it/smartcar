@@ -466,12 +466,12 @@ V1.2 及以前的闭环安全网只有一张：**编码器不 alive → 回退�
 
 ### 13.3 行为矩阵
 
-| 记录 src | 门 | `enc.alive=1` 时 SERVO 行为 | 串口 |
+| `wheelCalibrated` | 门 | `enc.alive=1` 时 SERVO 行为 | 串口 |
 |---|---|---|---|
-| 0（默认/回落/0x74 后） | 关 | **开环等价**：duty=target，积分清 | 一次性 `SERVO open-loop (record src=0; calibrate via 0x70)` |
-| 0（默认/回落/0x74 后） | 关 | `enc.alive=0` 照旧开环（原行为） | 同上（只打一次） |
-| 1 / 2 | 开 | **闭环**：Kp/Ki/FF 全参与 | `SERVO closed-loop enabled` |
-| 1 / 2 → 被 0x74 清回 0 | 关 | 回开环等价 | open-loop 行再打印一次 |
+| 0（默认/仅 IMU 标定/0x74 后） | 关 | **开环等价**：duty=target，积分清 | 一次性 `SERVO open-loop (wheels uncalibrated; calibrate via 0x70)` |
+| 0 | 关 | `enc.alive=0` 照旧开环（原行为） | 同上（只打一次） |
+| 1（0x70/0x73，或迁移的 v1 车轮记录） | 开 | **闭环**：Kp/Ki/FF 全参与 | `SERVO closed-loop enabled` |
+| 1 → 被 0x74 清回 0 | 关 | 回开环等价 | open-loop 行再打印一次 |
 
 日志每次**翻变**各打一行（开→关、关→开），同状态不重复刷。
 
