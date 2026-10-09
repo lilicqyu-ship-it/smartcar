@@ -2,16 +2,8 @@
 #ifndef APP_FUSION_H
 #define APP_FUSION_H
 #include <stdint.h>
-/* Protection master switch (bench/diagnosis). 1 = full guard (default).
- * 0 = telemetry-only bypass: FUSION_step still publishes the live scene
- * classification, braking-envelope cap, health flags and speed anchor, but
- * never limits, latches or hard-stops - the raw stick reaches the motors
- * (obstacle/overspeed/blind/encoder/tilt stops and the reverse cap are all
- * off; release keeps its immediate-brake bit). Motivated by the 480 mm mast
- * mount: ground returns bind the envelope ~0.95-1.4 m out and can phantom-
- * latch the overspeed guard, so the car needs to drive on the ground while
- * the [FUSION] log records what the protection WOULD have done. Bench use
- * only: with 0 there is NO forward protection of any kind. */
+/* 保护主开关：1 为生产保护，0 为仅遥测的台架旁路。
+ * 旁路关闭限速与近障/盲区/编码器/倾斜硬停，保留松杆立即制动。 */
 #ifndef FUSION_CFG_PROTECTION
 #define FUSION_CFG_PROTECTION 1
 #endif
@@ -25,19 +17,10 @@
 #define FUSION_SLIP 16u
 #define FUSION_BIAS_READY 32u
 #define FUSION_NEUTRAL_REQUIRED 64u
-#define FUSION_TOF_LIMITED 128u /* fresh frame: manual low-speed allowance */
-#define FUSION_SPARSE_MM_S 150u
-/* Open-space allowance (fix-plan v1.0.9). A fresh, alive frame whose field is
- * decisively empty - no trusted target, most zones report range status 255
- * "no target", few unknown - is an OPEN scene, not degraded coverage. The
- * crawl cap must not lock a healthy sensor facing empty space to
- * FUSION_SPARSE_MM_S ("the emptier the view, the slower the car"). It takes
- * several consecutive new frames so a single anomalous frame cannot instantly
- * widen the envelope. This is an internal classification only: the wire flags
- * reuse FUSION_TOF_LIMITED so every "usable frame" consumer (Cpu0/Cpu2) and
- * the iOS freshness test (flags & 129) stay correct with no protocol change.
- * 600 mm/s is the same physical anchor link.c uses for full-stick forward. */
-#define FUSION_OPENSPACE_MM_S 600u
+#define FUSION_TOF_LIMITED 128u /* 可用帧，但完全可信区不足；忽略 ToF 限速 */
+#define FUSION_TOF_TRUSTED_RATIO_NUM 2u
+#define FUSION_TOF_TRUSTED_RATIO_DEN 3u /* 严格 >2/3，不能用百分比舍入 */
+/* 空旷场景连续帧分类仅用于诊断；覆盖不足时不限速。 */
 #define FUSION_OPEN_CLEAR_FRAMES 3u
 #define FUSION_OPEN_CLEAR_RATIO_PCT 70u
 #define FUSION_OPEN_UNKNOWN_MAX_PCT 30u
@@ -46,15 +29,9 @@
  * grace window (wheel spin-up from standstill) before it counts as dead. */
 #define FUSION_ENC_EDGE_FRESH_MS 100u
 #define FUSION_ENC_GRACE_MS 500u
-/* Forward-envelope excursion guard. The per-side speed feeding the check is
- * an 8 ms window mean with tens of mm/s of quantisation ripple, and a sparse
- * frame flap can pinch the envelope far below the current speed without any
- * physical change - so an excursion must clear the hysteresis and hold for
- * the window before it latches a stop. A genuine shrinking envelope violates
- * it for far longer (1.2.4 introduced the hold for the sparse crawl only;
- * it now covers every mode). */
-#define FUSION_OVERSPEED_HYST_MM_S 100u
-#define FUSION_OVERSPEED_HOLD_MS 100u
+#define FUSION_SLOW_DISTANCE_MM 150u /* 完全可信覆盖 >2/3 时进入降速区 */
+#define FUSION_STOP_DISTANCE_MM 60u /* 原始有效距离严格 <60 mm 才近障停车 */
+#define FUSION_STOP_RELEASE_MM 80u  /* 停车后的距离迟滞，仍需三帧与松杆 */
 /* Reasons are independent of the existing robot emergency-stop fault. */
 enum
 {
@@ -66,8 +43,8 @@ enum
     FUSION_ENCODER_LOST = 5
 };
 /* ToF scene classification for diagnostics (Fusion.tofMode); not on the wire.
- * TRACKED: trusted targets present -> distance envelope. OPEN_CLEAR: healthy
- * but empty -> open-space cap. DEGRADED: fresh frame, uncertain scene -> crawl.
+ * TRACKED: targets present; only fully trusted coverage >2/3 limits speed. OPEN_CLEAR: healthy
+ * but empty. DEGRADED: fresh frame, uncertain scene. Both ignore ToF speed caps.
  * BLIND: no usable frame -> stop. */
 enum
 {
@@ -115,16 +92,12 @@ typedef struct
 {
     FusionConfig cfg;
     FusionOutput out;
-    uint32_t lastMs, imuSeq, imuMs, encSeq, encMs, tofSeq, stillMs, overspeedMs;
-    uint32_t capContMs;    /* stamp of the healthy frame that anchored capContMmS */
+    uint32_t lastMs, imuSeq, imuMs, encSeq, encMs, tofSeq, stillMs;
     int32_t counts[4];
     uint16_t encAbsentMs[2]; /* ms a commanded side has been edge-silent */
-    uint16_t capContMmS;   /* last healthy-frame envelope; the sparse crawl
-                              decays down from here at cfg.decelMmS2 instead
-                              of pinching the cap in one step */
     float bias[3], velocity, heading, roll, pitch, holdHeading, yawRate;
     uint16_t biasSamples;
-    uint8_t started, imuSeen, encSeen, countsSeen, latched, clearFrames, holding, slip, overspeedSeen;
+    uint8_t started, imuSeen, encSeen, countsSeen, latched, clearFrames, holding, slip;
     uint8_t openClearFrames; /* consecutive new frames the field read as empty */
     uint8_t tofMode;         /* last FUSION_MODE_* scene, for diagnostics only */
     uint8_t tofNoTarget, tofUnknown; /* last frame zone counts, for logging */

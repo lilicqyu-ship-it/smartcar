@@ -52,13 +52,13 @@ int main(void)
     /* 1) A near obstacle must NOT stop or limit the bypass build - but the
      *    scene telemetry (nearest, cap, mode) must still report it. */
     setup();
-    in.tof.distanceMm[7] = 100; /* one thin close return, tracked as valid */
+    in.tof.distanceMm[7] = 40; /* one thin close return, tracked as valid */
     in.request[0] = in.request[1] = 1000;
     tick(1);
     assert(s.out.effective[0] == 1000 && s.out.effective[1] == 1000);
     assert(s.out.reason == FUSION_FREE && !s.out.brake);
-    assert(s.out.nearestMm == 100);
-    assert(s.out.capMmS == 0); /* advisory envelope: nearest inside the 220 margin */
+    assert(s.out.nearestMm == 40);
+    assert(s.out.capMmS == 0); /* advisory envelope: nearest below 60 mm */
     assert(s.tofMode == FUSION_MODE_TRACKED);
     assert(!(s.out.flags & FUSION_NEUTRAL_REQUIRED) && !s.latched);
 

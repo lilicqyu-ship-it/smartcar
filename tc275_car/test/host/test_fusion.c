@@ -36,18 +36,69 @@ static void tick(int newFrame)
     }
     FUSION_step(&s, &in);
 }
+static void test_trusted_ratio(void)
+{
+    unsigned n, count, j;
+    /* 穷举两种网格的覆盖边界；分母为全网格，不是已知区域。
+     * 缺失区分别使用无目标与未知状态，不能被当作完全可信。 */
+    for (n = 16; n <= 64; n *= 4)
+        for (count = 0; count <= n; count++)
+        {
+            setup(100);
+            in.tof.zones = (uint8_t)n;
+            in.request[0] = 800;
+            in.request[1] = 400;
+            for (j = 0; j < n; j++)
+            {
+                in.tof.distanceMm[j] = 100;
+                in.tof.status[j] = j < count ? 5 : (j % 2 ? 0 : 255);
+                in.tof.targets[j] = j < count ? 1 : 0;
+            }
+            tick(1);
+            if (count * 3 > n * 2)
+            {
+                assert(s.out.flags & FUSION_TOF_OK);
+                assert(!(s.out.flags & FUSION_TOF_LIMITED));
+                assert(s.out.capMmS < 800 && s.out.effective[0] < 800);
+                assert(abs(s.out.effective[0] - 2 * s.out.effective[1]) <= 1);
+            }
+            else
+            {
+                assert(!(s.out.flags & FUSION_TOF_OK));
+                assert(s.out.flags & FUSION_TOF_LIMITED);
+                assert(s.out.capMmS == 1000 && s.out.effective[0] == 800);
+                assert(s.out.effective[1] == 400 && !s.out.brake);
+            }
+        }
+    /* 状态 9、无目标、越界距离均不能补足 10/16 的完全可信区。 */
+    for (j = 0; j < 3; j++)
+    {
+        setup(100);
+        in.request[0] = 800;
+        for (count = 10; count < 16; count++)
+        {
+            if (j == 0) in.tof.status[count] = 9;
+            if (j == 1) in.tof.targets[count] = 0;
+            if (j == 2) in.tof.distanceMm[count] = 4001;
+        }
+        tick(1);
+        assert(!(s.out.flags & FUSION_TOF_OK));
+        assert(s.out.capMmS == 1000 && s.out.effective[0] == 800);
+    }
+}
 int main(void)
 {
     unsigned i;
     int cap;
     uint8_t wire[FUSION_WIRE_LEN];
     int8_t axes[3] = {1, 2, 3};
+    test_trusted_ratio();
     setup(4000);
     in.request[0] = in.request[1] = 1000;
     tick(1);
     assert(s.out.effective[0] == 1000 && !s.out.brake);
     /* One thin close obstacle must not be erased by spatial median filtering. */
-    in.tof.distanceMm[7] = 100;
+    in.tof.distanceMm[7] = 40;
     tick(1);
     assert(s.out.brake && s.out.reason == FUSION_OBSTACLE && !s.out.effective[0]);
     in.tof.distanceMm[7] = 4000;
@@ -69,56 +120,16 @@ int main(void)
     in.request[0] = in.request[1] = -1000;
     tick(1);
     assert(s.out.effective[0] == -250 && !s.out.brake);
-    setup(500);
+    setup(100);
     in.request[0] = 800;
     in.request[1] = 400;
     tick(1);
     assert(s.out.reason == FUSION_SLOW && s.out.effective[0] > 0 && s.out.effective[0] < 800);
     assert(abs(s.out.effective[0] - 2 * s.out.effective[1]) <= 1);
-    cap = s.out.capMmS;
-    /* A single-step excursion is quantisation ripple, not an obstacle: it
-     * must clear the hysteresis AND hold the window before it latches. */
-    in.wheelMmS[0] = (int16_t)(cap + 40);
-    tick(1);
-    assert(!s.out.brake && !s.latched);
-    in.wheelMmS[0] = (int16_t)(cap + FUSION_OVERSPEED_HYST_MM_S - 1);
-    for (i = 0; i < 15; i++)
-        tick(1);
-    assert(!s.out.brake && !s.latched); /* below the hysteresis, however long */
-    in.wheelMmS[0] = (int16_t)(cap + FUSION_OVERSPEED_HYST_MM_S + 1);
-    for (i = 0; i < 9; i++)
-    {
-        tick(1);
-        assert(!s.out.brake); /* 0..80 ms: inside the hold window */
-    }
-    tick(1);
-    assert(!s.out.brake); /* 90 ms */
-    tick(1);
-    assert(s.out.brake && s.latched); /* 100 ms: sustained excursion stops */
-    /* But when the envelope is NOT tighter than full scale - a far/open view
-     * that pegs the cap at fs - the guard must not fire: the motor's real
-     * free-run speed measures above the conservative fullScaleMmS mapping, so
-     * wheel > cap + hysteresis is calibration, not a new obstacle (bench
-     * 2026-10: full throttle in empty space latched a phantom stop_obstacle at
-     * nearest>1200 mm). cap==fs disables the overspeed latch. */
-    setup(4000);
-    in.request[0] = in.request[1] = 1000;
-    tick(1);
-    assert(s.out.capMmS == 1000 && !s.out.brake);
-    in.wheelMmS[0] = in.wheelMmS[1] = 1150; /* > cap + hysteresis, cap==fs */
-    for (i = 0; i < 15; i++)
-        tick(1); /* well past the 100 ms hold window */
-    assert(!s.latched && !s.out.brake && s.out.effective[0] > 0);
-    /* The exemption is only the full-scale grant: tighten the view and the same
-     * sustained excursion latches again. */
-    for (i = 0; i < 16; i++)
-        in.tof.distanceMm[i] = 500; /* cap drops below fs */
-    tick(1);
-    assert(s.out.capMmS < 1000);
-    in.wheelMmS[0] = in.wheelMmS[1] = (int16_t)(s.out.capMmS + 200);
-    for (i = 0; i < 12; i++)
-        tick(1);
-    assert(s.out.brake && s.latched);
+    /* 距离 >=60 mm 时，即使实测轮速持续高于目标也只降速、不锁存停车。 */
+    in.wheelMmS[0] = in.wheelMmS[1] = 1150;
+    for (i = 0; i < 30; i++) tick(1);
+    assert(!s.out.brake && !s.latched && s.out.effective[0] > 0);
     setup(4000);
     in.request[0] = in.request[1] = 500;
     tick(1);
@@ -139,18 +150,18 @@ int main(void)
     for (i = 0; i < 16; i++)
         in.tof.status[i] = 0;
     tick(1);
-    assert(s.out.reason == FUSION_SLOW && !s.out.brake);
-    assert((s.out.flags & FUSION_TOF_LIMITED) && s.out.effective[0] == 150);
+    assert(s.out.reason == FUSION_FREE && !s.out.brake);
+    assert((s.out.flags & FUSION_TOF_LIMITED) && s.out.effective[0] == 500);
     setup(4000);
     in.request[0] = 500;
     for (i = 0; i < 16; i++)
         in.tof.targets[i] = 0;
     tick(1);
     assert(!(s.out.flags & FUSION_TOF_OK));
-    assert(s.out.capMmS == 150 && s.out.effective[0] == 150 && !s.out.brake);
+    assert(s.out.capMmS == 1000 && s.out.effective[0] == 500 && !s.out.brake);
     /* One trusted close zone still stops, even with 15 unknown zones. */
     in.tof.targets[7] = 1;
-    in.tof.distanceMm[7] = 100;
+    in.tof.distanceMm[7] = 40;
     tick(1);
     assert(s.out.reason == FUSION_OBSTACLE && s.out.brake);
     in.tof.distanceMm[7] = 1280;
@@ -161,65 +172,28 @@ int main(void)
     assert(!s.latched);
     in.request[0] = 500;
     tick(1);
-    assert(s.out.effective[0] == 150 && !s.out.brake);
+    assert(s.out.effective[0] == 500 && !s.out.brake);
     for (i = 0; i < 26; i++) tick(0);
     assert(s.out.reason == FUSION_BLIND && s.out.brake); /* frozen sparse frame */
-    setup(1280);
-    for (i = 0; i < 16; i++) in.tof.targets[i] = 0;
-    in.request[0] = in.request[1] = 500;
-    in.wheelMmS[0] = 300;
-    in.wheelMmS[1] = 150;
-    for (i = 0; i < 10; i++) {
-        tick(1);
-        assert(!s.out.brake && s.out.effective[0] == 150);
-    }
-    in.wheelMmS[0] = 150;
-    tick(1);
-    assert(!s.overspeedSeen);
-    in.wheelMmS[0] = 300;
-    for (i = 0; i < 11; i++) tick(1);
-    assert(s.out.brake && s.latched); /* sustained overspeed still stops */
-    /* A transient sparse frame must not slam the envelope shut on a moving
-     * robot: the cap decays from the last healthy value at the configured
-     * decel instead of pinching to the crawl in one step (bench 2026-10:
-     * valid_zones dipped 10 -> 7 for ~150 ms at ~370 mm/s and every push
-     * latched a full stop). */
-    setup(4000);
+    /* 覆盖不足无论持续多久都不爬行，也不以低置信包络锁存超速。 */
+    setup(100);
     in.request[0] = in.request[1] = 1000;
-    in.wheelMmS[0] = in.wheelMmS[1] = 500;
+    in.wheelMmS[0] = in.wheelMmS[1] = 800;
     tick(1);
-    assert((s.out.flags & FUSION_TOF_OK) && s.out.capMmS == 1000 && !s.out.brake);
-    for (i = 0; i < 10; i++) /* ten far zones drop their returns */
-        in.tof.targets[i] = 0;
-    for (i = 0; i < 30; i++)
-        tick(1);
-    assert((s.out.flags & FUSION_TOF_LIMITED) && !s.out.brake && !s.latched);
-    assert(s.out.capMmS > 700); /* 300 ms of decay, not an 850 mm/s pinch */
-    for (i = 0; i < 10; i++)
-        in.tof.targets[i] = 1;
+    for (i = 0; i < 10; i++) in.tof.targets[i] = 0;
+    for (i = 0; i < 130; i++) tick(1);
+    assert((s.out.flags & FUSION_TOF_LIMITED) && !(s.out.flags & FUSION_TOF_OK));
+    assert(s.out.capMmS == 1000 && s.out.effective[0] == 1000 && !s.latched);
+    /* 恢复充分覆盖后立即按距离限速，不锁存提前停车。 */
+    for (i = 0; i < 10; i++) in.tof.targets[i] = 1;
     tick(1);
-    assert((s.out.flags & FUSION_TOF_OK) && s.out.capMmS == 1000);
-    /* A sparse view that persists still collapses to the crawl - by braking
-     * down the decay, not by a step. */
-    for (i = 0; i < 10; i++)
-        in.tof.targets[i] = 0;
-    for (i = 0; i < 130; i++)
-    {
-        in.wheelMmS[0] = in.wheelMmS[1] = (i < 70) ? 500 : 150;
-        tick(1);
-        assert(!s.out.brake);
-    }
-    assert(s.out.capMmS == FUSION_SPARSE_MM_S && !s.latched);
-    /* A robot that fails to slow while the sparse view persists still gets
-     * latched - against the decayed cap, once the hold window elapses. */
-    in.wheelMmS[0] = in.wheelMmS[1] = 500;
-    for (i = 0; i < 12; i++)
-        tick(1);
-    assert(s.out.brake && s.latched);
+    assert((s.out.flags & FUSION_TOF_OK) && s.out.capMmS < 800);
+    for (i = 0; i < 12; i++) tick(1);
+    assert(!s.out.brake && !s.latched);
     setup(1280);
     for (i = 0; i < 16; i++) in.tof.targets[i] = 0;
     in.tof.targets[0] = 1;
-    in.tof.distanceMm[0] = 100;
+    in.tof.distanceMm[0] = 40;
     in.request[0] = 500;
     tick(1);
     assert(s.out.brake); /* sparse near obstacle does not wait 100 ms */
@@ -229,14 +203,13 @@ int main(void)
     in.tof.alive = 0;
     tick(1);
     assert(s.out.reason == FUSION_BLIND && !(s.out.flags & FUSION_TOF_LIMITED));
-    setup(1280);
-    for (i = 0; i < 16; i++) in.tof.targets[i] = 0;
+    setup(500);
     in.request[0] = 500;
-    in.wheelMmS[0] = 300;
+    in.wheelMmS[0] = 700;
     in.nowMs = 0xffffffa0u;
     for (i = 0; i < 10; i++) { tick(1); assert(!s.out.brake); }
     tick(1);
-    assert(s.out.brake); /* overspeed timer across clock wrap */
+    assert(!s.out.brake && !s.latched); /* 回绕不影响只降速的策略 */
     setup(4000);
     in.tof.zones = 65;
     in.request[0] = 500;
@@ -321,7 +294,7 @@ int main(void)
     setup(4000);
     in.request[0] = in.request[1] = 1000;
     tick(1);
-    in.tof.distanceMm[7] = 100;
+    in.tof.distanceMm[7] = 40;
     tick(1);
     assert(s.out.reason == FUSION_OBSTACLE && s.out.brake && s.latched);
     in.tof.distanceMm[7] = 4000;
@@ -337,12 +310,12 @@ int main(void)
     in.request[0] = in.request[1] = 1000;
     tick(1);
     assert(!s.out.brake && s.out.effective[0] == 1000);
-    /* Delay and distance must monotonically reduce the velocity envelope. */
-    setup(800);
+    /* 旧帧仍执行距离限速，超过新鲜期则走盲区硬停。 */
+    setup(100);
     tick(1);
     cap = s.out.capMmS;
     tick(0);
-    assert(s.out.capMmS < cap);
+    assert(s.out.capMmS == cap);
     in.tof.status[0] = 9;
     in.tof.distanceMm[0] = 400;
     tick(1);
@@ -372,7 +345,7 @@ int main(void)
     assert(!FUSION_calibrate(&s, axes, 160));
     axes[2] = 3;
     assert(!FUSION_calibrate(&s, axes, 0));
-    setup(350);
+    setup(100);
     assert(FUSION_calibrate(&s, (int8_t[]){1, 2, 3}, 160));
     s.biasSamples = 100;
     s.cfg.straightAssist = 1;
@@ -399,12 +372,7 @@ int main(void)
     s.out.speedMmS = -123;
     FUSION_encode(&s.out, wire);
     assert(wire[0] == 1 && wire[8] == 0x85 && wire[9] == 0xff && wire[27] == s.out.brake);
-    /* OPEN_CLEAR (fix-plan v1.0.9): a healthy ToF facing empty space must
-     * cruise, not crawl. A fresh frame with no trusted target anywhere, most
-     * zones at range status 255 "no target" and few unknowns opens the cap to
-     * FUSION_OPENSPACE_MM_S only after several consecutive new frames; the
-     * wire flag stays LIMITED so every not-blind consumer is unchanged, and a
-     * single trusted close zone still stops the car that same frame. */
+    /* 空旷分类仍需三个新帧，但不再施加 150/600 mm/s 上限。 */
     setup(0);
     for (i = 0; i < 16; i++)
     {
@@ -413,17 +381,15 @@ int main(void)
         in.tof.distanceMm[i] = 0;
     }
     in.request[0] = in.request[1] = 1000;
-    tick(1); /* streak 1: still the crawl envelope, no single frame reopens */
+    tick(1); /* streak 1: 已忽略限速，分类仍在确认 */
     assert((s.out.flags & FUSION_TOF_LIMITED) && !(s.out.flags & FUSION_TOF_OK));
-    assert(s.out.capMmS == FUSION_SPARSE_MM_S && s.out.effective[0] == 150 && !s.out.brake);
+    assert(s.out.capMmS == 1000 && s.out.effective[0] == 1000 && !s.out.brake);
     tick(1); /* streak 2 */
-    assert(s.out.capMmS == FUSION_SPARSE_MM_S);
+    assert(s.out.capMmS == 1000);
     tick(1); /* streak 3 -> OPEN_CLEAR */
     assert((s.out.flags & FUSION_TOF_LIMITED) && !(s.out.flags & FUSION_TOF_OK));
-    assert(s.out.capMmS == FUSION_OPENSPACE_MM_S && s.out.effective[0] == 600 && !s.out.brake);
-    /* Anomalous empties (targets 0 but status != 255) are unknown, never read
-     * as clear: a fresh anchor holds the crawl and the open streak never
-     * builds, however many such frames arrive in a row. */
+    assert(s.out.capMmS == 1000 && s.out.effective[0] == 1000 && !s.out.brake);
+    /* 未知状态不算空旷，也不计入完全可信区；同样忽略限速。 */
     setup(0);
     for (i = 0; i < 16; i++)
     {
@@ -434,12 +400,12 @@ int main(void)
     in.request[0] = in.request[1] = 1000;
     for (i = 0; i < 6; i++)
         tick(1);
-    assert(s.out.capMmS == FUSION_SPARSE_MM_S && s.out.effective[0] == 150 && !s.out.brake);
+    assert(s.out.capMmS == 1000 && s.out.effective[0] == 1000 && !s.out.brake);
     assert(s.tofMode == FUSION_MODE_DEGRADED && s.openClearFrames == 0);
     /* One trusted close zone among the empties stops it that same frame. */
     in.tof.status[7] = 5;
     in.tof.targets[7] = 1;
-    in.tof.distanceMm[7] = 100;
+    in.tof.distanceMm[7] = 40;
     tick(1);
     assert(s.out.brake && s.out.reason == FUSION_OBSTACLE && s.out.effective[0] == 0);
     /* Replaying the same stale seq must not re-anchor OPEN after a blind. */
