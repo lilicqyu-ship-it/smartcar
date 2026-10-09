@@ -180,7 +180,7 @@ struct SettingsView: View {
             sectionTitle("关于", icon: "info.circle.fill")
             row("App 版本", appVersion)
             row("操控方式", "上下前后 · 左右转向")
-            row("紧急停止", "长按停止按钮 1.2 秒")
+            row("停车方式", "松开摇杆即回中停车")
             row("连接恢复", "断开后自动尝试重连")
             Button {
                 Haptics.light()

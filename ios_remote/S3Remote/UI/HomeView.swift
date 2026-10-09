@@ -51,11 +51,6 @@ struct HomeView: View {
                     .frame(maxWidth: 680)
                     .frame(maxWidth: .infinity)
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                StopButton().padding(.horizontal, 20).padding(.vertical, 10)
-                    .frame(maxWidth: 660).frame(maxWidth: .infinity)
-                    .background(Theme.bg)
-            }
         }
     }
 
@@ -105,7 +100,7 @@ struct HomeView: View {
     private var driveHint: String {
         if app.connState != .connected { return "未连接 · 指令不会发送" }
         if !app.tcUp { return "车控未就绪" }
-        if app.sequencer.active { return "特技执行中 · STOP 可中止" }
+        if app.sequencer.active { return "特技执行中 · 触摸摇杆中止" }
         if app.tiltEnabled { return "体感驾驶中 · 倾斜手机操控" }
         return "松手自动回中"
     }
@@ -218,7 +213,7 @@ struct TiltBar: View {
                         .background(Theme.bgLift, in: Capsule())
                 }.buttonStyle(.plain)
                 if app.stopLatched && !app.emergActive {
-                    // joystick is inert while tilt drives — give the STOP
+                    // joystick is inert while tilt drives — give the stop
                     // latch a touch target here
                     Button {
                         Haptics.medium()
@@ -252,92 +247,3 @@ struct TiltBar: View {
     }
 }
 
-struct StopButton: View {
-    @Environment(AppState.self) private var app
-    @State private var longFired = false
-    @State private var pressProgress: Double = 0
-    @State private var pressTask: Task<Void, Never>?
-    @State private var pressed = false
-
-    private static let longPressS: Double = 1.2
-
-    var body: some View {
-        HStack(spacing: 14) {
-            Image(systemName: "stop.fill")
-                .font(.title3).frame(width: 42, height: 42)
-                .background(.white.opacity(0.15), in: RoundedRectangle(cornerRadius: 13))
-            VStack(alignment: .leading, spacing: 4) {
-                Text(app.emergActive ? "紧急停止" : app.stopLatched ? "已停止" : "停止车辆")
-                    .font(.headline)
-                Text(app.stopLatched ? "触摸摇杆恢复操控" : "轻点停车 · 长按 1.2 秒急停")
-                    .font(.caption).opacity(0.85)
-            }
-            Spacer(minLength: 0)
-            Text("STOP").font(Theme.mono(12)).tracking(1)
-        }
-            .foregroundStyle(.white)
-            .padding(.horizontal, 18)
-            .frame(maxWidth: .infinity, minHeight: 76)
-            .background(Theme.stopRed, in: RoundedRectangle(cornerRadius: 22))
-            .overlay(progressWipe)
-            .clipShape(RoundedRectangle(cornerRadius: 22))
-            .contentShape(RoundedRectangle(cornerRadius: 22))
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel("停止车辆")
-            .accessibilityHint("轻点停车，长按一秒二触发急停")
-            .accessibilityAddTraits(.isButton)
-            .accessibilityAction { app.stopPressed() }
-            .accessibilityAction(named: "紧急停止") { app.emergencyTriggered() }
-            .onDisappear { pressTask?.cancel(); pressTask = nil; pressProgress = 0 }
-            .onLongPressGesture(
-                minimumDuration: Self.longPressS,
-                maximumDistance: 60,
-                perform: {
-                    longFired = true
-                    Haptics.error()
-                    app.emergencyTriggered()
-                },
-                onPressingChanged: { pressing in
-                    pressed = pressing
-                    if pressing {
-                        longFired = false
-                        Haptics.light()
-                        startProgress()
-                    } else {
-                        pressTask?.cancel()
-                        pressTask = nil
-                        withAnimation(.easeOut(duration: 0.15)) { pressProgress = 0 }
-                        if !longFired {
-                            Haptics.medium()
-                            app.stopPressed() // click: immediate DRIVE(0,0) + latch
-                        }
-                    }
-                })
-    }
-
-    /// Long-press progress: warn-colored wipe across the button.
-    private var progressWipe: some View {
-        GeometryReader { geo in
-            if pressProgress > 0 {
-                Rectangle()
-                    .fill(Theme.warn.opacity(0.30))
-                    .frame(width: geo.size.width * pressProgress)
-                    .clipShape(RoundedRectangle(cornerRadius: 20))
-                    .allowsHitTesting(false)
-            }
-        }
-    }
-
-    private func startProgress() {
-        pressTask = Task {
-            let start = ContinuousClock.now
-            while !Task.isCancelled {
-                let elapsed = ContinuousClock.now - start
-                let p = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
-                pressProgress = min(p / Self.longPressS, 1)
-                if pressProgress >= 1 { break }
-                try? await Task.sleep(for: .milliseconds(33))
-            }
-        }
-    }
-}
