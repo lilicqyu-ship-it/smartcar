@@ -128,10 +128,13 @@ struct StatusDeck: View {
             Text(app.connState == .connected ? "车辆已连接" : app.connState == .connecting ? "正在连接" : "车辆未连接")
                 .font(.caption.bold())
             Spacer(minLength: 4)
+            // 电量/信号配色与 Logo 双圆环同档位（TierColor），无读数时置灰
             Label(app.teleFresh ? app.batteryDisplayPct.map { "\($0)%" } ?? "—" : "—", systemImage: "battery.75percent")
                 .font(Theme.mono(12))
+                .foregroundStyle(app.teleFresh ? TierColor.battery(app.batteryDisplayPct) : Theme.dim)
             Text(app.connState == .connected && app.rttLast > 0 ? "\(app.rttLast) ms" : "— ms")
-                .font(Theme.mono(11)).foregroundStyle(Theme.dim)
+                .font(Theme.mono(11))
+                .foregroundStyle(app.connState == .connected ? TierColor.signal(app.signalBars) : Theme.dim)
         }
         .accessibilityElement(children: .combine)
     }

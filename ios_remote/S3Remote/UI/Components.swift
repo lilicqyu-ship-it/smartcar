@@ -97,6 +97,28 @@ struct RTTSparkline: View {
 
 // ---- logo gauge (iOS home-screen battery ring style) ----------------------------
 
+/// Tier colors shared by every battery/signal readout (logo gauge rings,
+/// drive page StatusDeck) so the displays cannot drift apart:
+/// battery — green >20 %, amber ≤20 %, red ≤10 % (nil = full, C6 pill
+/// semantics); signal — same grading as SignalBarsView.
+enum TierColor {
+    static func battery(_ pct: Int?) -> Color {
+        let p = pct ?? 100
+        if p <= 10 { return Theme.crit }
+        if p <= 20 { return Theme.warn }
+        return Theme.live
+    }
+
+    static func signal(_ bars: Int) -> Color {
+        switch bars {
+        case 3...: return Theme.accent
+        case 2: return Theme.warn
+        case 1: return Theme.crit
+        default: return Theme.dim
+        }
+    }
+}
+
 /// Concentric arc rings around the app mark — outer ring = battery %, inner
 /// ring = signal quality, in the style of the iOS home-screen battery widget.
 /// Display-only: uses the debounced battery display value and the composite
@@ -153,22 +175,10 @@ struct LogoGaugeView: View {
 
     /// Same grading as the C6 page's raw battery pill: green >20 %, amber
     /// ≤20 %, red ≤10 %.
-    private var batteryColor: Color {
-        let pct = app.batteryDisplayPct ?? 100
-        if pct <= 10 { return Theme.crit }
-        if pct <= 20 { return Theme.warn }
-        return Theme.live
-    }
+    private var batteryColor: Color { TierColor.battery(app.batteryDisplayPct) }
 
     /// Same grading as SignalBarsView: ≥3 accent, 2 amber, 1 red, 0 dim.
-    private var signalColor: Color {
-        switch app.signalBars {
-        case 3...: return Theme.accent
-        case 2: return Theme.warn
-        case 1: return Theme.crit
-        default: return Theme.dim
-        }
-    }
+    private var signalColor: Color { TierColor.signal(app.signalBars) }
 }
 
 // ---- horn (synthesized locally, needs the sound toggle on) ----------------------
