@@ -710,8 +710,8 @@ static void bridge_emit_cal(const uint8_t *p, uint16_t n)
     http_broadcast_ctl(json);
 }
 
-/* EVT 0x23 -> {"t":"rec","ver":n,"src":n,"pos":[..],"invert":[..],
- *              "fullScale":n,"wheelDia":n,"crcOk":n} */
+/* EVT 0x23 -> wheel record plus optional IMU map, save status and
+ * independent wheelCalibrated bit (22 B on current TC275). */
 static void bridge_emit_rec(const uint8_t *p, uint16_t n)
 {
     char json[240];

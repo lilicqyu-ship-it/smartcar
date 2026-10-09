@@ -18,6 +18,7 @@ struct SensorsView: View {
     @State private var noseCapture: [Double]?
     @State private var trackMmText = ""
     @State private var calibrationHint = ""
+    @FocusState private var trackMmFocused: Bool
 
     private enum SensorPage: CaseIterable {
         case imu, tof
@@ -55,7 +56,9 @@ struct SensorsView: View {
                     .frame(maxWidth: 680)
                     .frame(maxWidth: .infinity)
                 }
+                .scrollDismissesKeyboard(.interactively)
                 .onChange(of: selectedSensor) { _, _ in
+                    trackMmFocused = false
                     withAnimation(.easeInOut(duration: 0.2)) {
                         proxy.scrollTo("sensor-top", anchor: .top)
                     }
@@ -81,6 +84,7 @@ struct SensorsView: View {
                 .onChange(of: app.ctrlRole) { _, ownsControl in
                     if ownsControl { app.calibRecGet() }
                 }
+                .onDisappear { trackMmFocused = false }
             }
         }
     }
@@ -382,16 +386,28 @@ struct SensorsView: View {
                     .font(.caption.weight(.semibold))
                 TextField("实测 mm", text: $trackMmText)
                     .keyboardType(.numberPad)
+                    .focused($trackMmFocused)
+                    .submitLabel(.done)
+                    .onSubmit { trackMmFocused = false }
                     .font(Theme.mono(14))
                     .multilineTextAlignment(.trailing)
-                Text("mm · 80–600")
-                    .font(.caption2)
-                    .foregroundStyle(Theme.dim)
+                if trackMmFocused {
+                    Button("完成") { trackMmFocused = false }
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(Theme.accentDeep)
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("完成轮距输入并收起键盘")
+                } else {
+                    Text("mm · 80–600")
+                        .font(.caption2)
+                        .foregroundStyle(Theme.dim)
+                }
             }
             .padding(10)
             .background(Theme.bgLift, in: RoundedRectangle(cornerRadius: 10))
             Button {
                 guard let axisCalibration, let track = Int(trackMmText) else { return }
+                trackMmFocused = false
                 app.setImuDisplayCalibration(axisCalibration, trackMm: track)
                 calibrationHint = "标定已发送；等待车端写入回执，写入后可重新读取确认。"
             } label: {

@@ -96,7 +96,7 @@ public struct CalibRecord: Equatable, Sendable {
         self.imuAxis = imuAxis
         self.trackMm = trackMm
         self.imuSaved = imuSaved
-        self.wheelCalibrated = wheelCalibrated ?? (src != 0)
+        self.wheelCalibrated = wheelCalibrated ?? (ver <= 1 && src != 0)
     }
 
     public var srcText: String {

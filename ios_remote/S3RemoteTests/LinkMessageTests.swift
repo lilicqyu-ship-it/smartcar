@@ -182,6 +182,10 @@ final class LinkMessageTests: XCTestCase {
         XCTAssertEqual(rec.imuAxis, [1, 2, 3])
         XCTAssertEqual(rec.imuSaved, 1)
         XCTAssertFalse(rec.wheelCalibrated)
+
+        let oldV2 = #"{"t":"rec","ver":2,"src":1,"pos":[0,2,3,1],"invert":[1,1,1,1],"fullScale":1000,"wheelDia":48,"crcOk":1,"imuAxis":[1,2,3],"trackMm":150,"imuSaved":1}"#
+        guard case .rec(let noBit) = parse(oldV2) else { return XCTFail("not rec") }
+        XCTAssertFalse(noBit.wheelCalibrated)
     }
 
     func testRecMalformedDropped() {
