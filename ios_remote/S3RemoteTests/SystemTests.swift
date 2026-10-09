@@ -126,6 +126,7 @@ final class SystemTests: XCTestCase {
         XCTAssertFalse(app.emergActive)
         XCTAssertTrue(app.stopLatched, "RELEASE keeps the stop latch until takeover")
         app.joystickTouch()
+        app.joystickMoved(v: 1, w: 0) // emergency() zeroed the axes; push again
         for _ in 0..<2 { app.controlTick() }
         XCTAssertEqual(app.outV, 300)
     }
@@ -161,13 +162,16 @@ final class SystemTests: XCTestCase {
         let (app, _, _, suite) = makeWorld()
         defer { UserDefaults(suiteName: suite)!.removePersistentDomain(forName: suite) }
         connectAsCtrl(app)
-        // speed EMA snaps on the first frame instead of ramping from zero
-        app.applyTelemetry(telemetry(vL: 400, vR: 400))
+        // speed EMA snaps on the first frame instead of ramping from zero;
+        // the same first frame seeds the battery display (pct 50)
+        app.applyTelemetry(telemetry(vL: 400, vR: 400, pct: 50, mv: 7500))
         XCTAssertEqual(app.displaySpeedMmS, 400, accuracy: 0.001)
-
-        // battery seeds from the first valid sample
-        app.applyTelemetry(telemetry(vL: 0, vR: 0, pct: 50, mv: 7500))
         XCTAssertEqual(app.batteryDisplayPct, 50)
+
+        // a single-frame drop must NOT move the display (5-point median +
+        // 1.5 s sustained-drop confirm, BatteryDisplayFilter)
+        app.applyTelemetry(telemetry(vL: 0, vR: 0, pct: 20, mv: 6800))
+        XCTAssertEqual(app.batteryDisplayPct, 50, "single-frame drop is debounced")
 
         // vehicle restart (uptime regression): display snaps to the truth
         app.applyTelemetry(telemetry(vL: 0, vR: 0, pct: 100, mv: 8400, uptime: 3_000))

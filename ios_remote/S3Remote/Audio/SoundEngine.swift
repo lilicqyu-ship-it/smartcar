@@ -95,7 +95,10 @@ final class SoundEngine {
 
             let eng = AVAudioEngine()
             let hum = HumParams()
-            let src = AVAudioSourceNode(format: format) { _, _, frameCount, bufferList in
+            // @Sendable detaches the closure from the enclosing MainActor
+            // isolation: the render block is pulled on the real-time audio
+            // thread, and an actor-isolated literal traps there (Debug).
+            let src = AVAudioSourceNode(format: format) { @Sendable _, _, frameCount, bufferList in
                 let abl = UnsafeMutableAudioBufferListPointer(bufferList)
                 guard abl.count >= 2,
                       let left = abl[0].mData?.assumingMemoryBound(to: Float.self),

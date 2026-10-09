@@ -59,9 +59,8 @@ just tag <别名> <版本>   # 工程版本 tag（前缀 c6/ gw-s3/ r-s3/ app/ s
 SwiftUI Canvas）；Xcode 16+ 文件系统同步组——新 .swift 文件放进 `S3Remote/`
 目录即自动入编，无需改 pbxproj。UI 走 `Theme`（暖白纸底/陶橙点缀）、
 `Page`/`.panel()`/`PageHeading` 组件族；强制浅色模式。测试在 `S3RemoteTests/`
-（纯逻辑 XCTest）。协议解析须与 C6 桥接逐字段对齐（`Link/TextMessage.swift`
-注释标注线缆真源）。本机已知的预存测试失败（与改动无关，改前先在干净 HEAD
-核实）：`CameraPipelineTests.testInterleavedSmallFeeds…`、`SystemTests` 两例。
+（纯逻辑 XCTest），本地 `just ios-test` 应全绿（CI 同口径）；协议解析须与
+C6 桥接逐字段对齐（`Link/TextMessage.swift` 注释标注线缆真源）。
 
 **C6 / S3 工程（ESP-IDF）**：构建需 ESP-IDF 环境（本 Mac 的 PATH 里没有
 idf.py——承诺构建前先确认）。改 `c6_bridge`/`c6_link` 时对照

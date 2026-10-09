@@ -6,7 +6,11 @@ import subprocess
 import tempfile
 ROOT=Path(__file__).resolve().parents[3]
 source=(ROOT/"esp32c6_car/components/c6_bridge/bridge.c").read_text(encoding="utf-8")
-func="static void bridge_emit_fusion"+source.split("static void bridge_emit_fusion",1)[1].split("\nstatic void ",1)[0]
+# Take ONLY the bridge_emit_fusion function: cutting at "pump_link_frame"
+# used to swallow whatever was published between them (tofz/imu emitters),
+# which broke the -Werror host build with unused-function/implicit-decl
+# errors unrelated to what this test verifies.
+func="static void bridge_emit_fusion"+source.split("static void bridge_emit_fusion",1)[1].split("\nstatic ",1)[0]
 cpu2=(ROOT/"tc275_car/Cpu2_Main.c").read_text(encoding="utf-8")
 producer="static void produce(void) {\n"+re.search(r"if \(LINK_isUp\(\)\) \{.*?\n            \}",cpu2,re.S).group(0)+"\n}\n"
 model=r"""

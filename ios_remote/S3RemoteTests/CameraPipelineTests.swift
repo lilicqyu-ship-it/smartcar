@@ -72,11 +72,17 @@ final class CameraPipelineTests: XCTestCase {
         let jpeg = makeJPEG(width: 20, height: 20)
         let stream = multipart([jpeg])
         var parser = MjpegParser()
-        for i in stride(from: 0, to: stream.count - 1, by: 2) {
-            XCTAssertTrue(parser.feed(stream.subdata(in: i..<i + 2)).isEmpty,
-                          "no complete frame until the body's last byte arrives")
+        var decoded: [Data] = []
+        // 2-byte nibbles; every chunk that ends before the body's last byte
+        // must emit nothing (the final chunk may complete the frame, whether
+        // the stream length is even or odd)
+        for i in stride(from: 0, to: stream.count, by: 2) {
+            decoded += parser.feed(stream.subdata(in: i..<min(i + 2, stream.count)))
+            if i + 2 < stream.count {
+                XCTAssertTrue(decoded.isEmpty,
+                              "no complete frame until the body's last byte arrives")
+            }
         }
-        let last = parser.feed(stream.subdata(in: (stream.count - 1)..<stream.count))
-        XCTAssertEqual(last.count, 1)
+        XCTAssertEqual(decoded, [jpeg])
     }
 }

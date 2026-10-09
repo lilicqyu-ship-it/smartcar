@@ -582,6 +582,8 @@ public final class AppState {
         }
         let cmd = controller.stopClick()
         link?.sendDrive(cmd) // immediate, does not wait for the next tick
+        outV = cmd.v // display must reflect the sent frame at once, not one beat later
+        outW = cmd.w
         log("WARN", "STOP — 已发送 DRIVE(0,0) 并锁存")
     }
 
@@ -593,6 +595,8 @@ public final class AppState {
         let cmd = controller.emergency()
         link?.sendEmergencyStop()
         link?.sendDrive(cmd)
+        outV = cmd.v
+        outW = cmd.w
         log("CRIT", "EMERGENCY STOP (0x32)")
     }
 
