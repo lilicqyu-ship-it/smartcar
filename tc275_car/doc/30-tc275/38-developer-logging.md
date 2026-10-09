@@ -26,20 +26,22 @@
 | 模块 / 字段 | 含义 |
 | --- | --- |
 | FUSION `action` | 本轮对驾驶请求的动作：`none` 无干预；`limit_speed` 限速；`stop_obstacle` 障碍停车；`stop_tof_unavailable` 前向距离不可用；`stop_tilt` 倾斜停车；`stop_encoder_unavailable` 编码器不可用 |
-| `forward` | 前进许可：`allowed`、`open_space`（ToF 健康但前方空旷，OPEN_CLEAR，放行 600 mm/s）、`limited_tof_coverage`（新帧可信覆盖不足，置 wire flags 128；实际仍按 `tof_mode` 取上限：tracked 按最近可信距离巡航、degraded 才低速 150 mm/s）或 `blocked_wheel_calibration`/`blocked_encoder`/`blocked_tof`/`blocked_near_obstacle`/`blocked_release_required`/`blocked_tilt`。它与 action 分开：静止时可以 action=none 但前方太近，前进仍被禁止；`limited_tof_coverage` 本身不隐含爬行 |
+| `forward` | 前进许可：`allowed`；`open_space`（诊断为空旷，忽略 ToF 限速）；`limited_tof_coverage`（完全可信区 ≤2/3，忽略 ToF 限速）；`blocked_wheel_calibration`/`blocked_encoder`/`blocked_tof`/`blocked_near_obstacle`（有效原始距离 <60 mm）/`blocked_release_required`/`blocked_tilt`。失效与锁存独立于限速门槛 |
 | `nearest_mm` | 融合有效区中的最近障碍距离；0=无有效距离，并非贴着障碍 |
 | `forward_cap_mm_s` | 当前安全包络允许的最大前进速度；0=前进不可用；不是用户请求速度 |
 | `speed_mm_s` | 融合后的纵向速度，正向前、负向后 |
 | `tof_age_ms` | 最近 ToF 帧的年龄，饱和到 65535；必须结合 tof_valid 读，不能仅凭 alive 判断帧新鲜 |
-| `tof_mode` | 本帧 ToF 场景四态：`tracked`（≥1 个可信目标，按最近可信距离的动态包络巡航，近障仍收紧/远障仍放行）/`open_clear`（整帧无可信目标且确证空旷，放行 600）/`degraded`（整帧不可信：unknown 占比>30% 或无可信目标且空旷证据不足，爬行 150）/`blind`（无可用帧，停车）。tracked 覆盖不足、open_clear、degraded 都置 wire flags bit 128，由 `tof_mode` 与 cap 区分，不新增协议位；128 不隐含爬行，只有 degraded 才 150 |
-| `trusted_zones` | 本帧通过距离与目标状态过滤的可信目标区域数（状态 5/9、目标数非零、0<d≤4000）；≥1 即判 `tracked`。另需至少半数有效（16 区≥8，64 区≥32）且中央区域有目标、帧龄≤250 ms，才置 flags bit 1（覆盖充分）；否则仍 tracked 但置 128 |
+| `tof_mode` | `tracked` 有有效目标；`open_clear` 连续三个新帧确证空旷；`degraded` 状态不确定；`blind` 无可用帧。分类仅供诊断；限速独立要求完全可信区 >2/3 且距离在 60–150 mm，其他可用帧不限速，blind 保持失效停车 |
+| `trusted_zones` | 状态 5/9、目标数非零、0<原始距离≤4000 的有效区域数；保持历史字段含义，不能直接拿它判断 >2/3 限速门槛 |
+| `fully_trusted_zones` | 状态 5、目标数非零、0<原始距离≤4000 的完全可信区数；4×4 至少 11 区、8×8 至少 43 区才限速 |
+| `nearest_raw_mm` | 有效区最近原始距离；<60 mm 判断近障停车，≥80 mm 判断恢复；区别于状态 9 已减 50 mm 的 `nearest_mm` 遥测 |
 | `no_target_zones` | 本帧明确「无目标」（状态 255）的区域数；OPEN_CLEAR 要求其在整帧占比≥70% 且 trusted=0 |
-| `unknown_zones` | 本帧不可解释/异常状态的区域数（既非可信测距也非状态 255「无目标」）；分类先查此计数：占比>30% 直接判 `degraded` 爬行，优先于可信与空旷判断，即使帧内有可信距离也不放行 |
+| `unknown_zones` | 非有效测距、非状态 255 无目标的异常区域数；完全可信区 >2/3 优先判 tracked，否则按未知占比与有效目标作诊断分类，不再因 degraded 爬行 |
 | `open_clear_frames` | 连续满足空旷条件的新帧计数（16/64 区共用），达到 3 才进入 OPEN_CLEAR；任一可信目标或降级帧归零 |
 | `protection` | 编译期融合保护主开关 `FUSION_CFG_PROTECTION` 的镜像：1=保护启用（默认），`forward_cap_mm_s` 与 `forward`/`action` 是实际执行的行为；0=旁路（台架/诊断构建），此时 cap 与 forward 只是**建议值**，融合不干预、原始摇杆直通电机，近障/超速/盲区/编码器/倾斜/倒车限速全部关闭，判读时必须先看本字段，见 [37](37-sensor-fusion.md) |
 | FUSION_CONTROL `target_left_pct_x10` / `target_right_pct_x10` | 融合限速/停车后的左右侧有效速度目标 |
 | `brake` | 本轮融合要求制动，不等同整车急停故障码 |
-| `health_flags` | 位掩码：0x01 ToF 覆盖充分，0x02 IMU 新鲜，0x04 编码器新鲜，0x08 轴向已标定，0x10 轮速与陀螺不一致，0x20 陀螺零偏就绪，0x40 停车锁存需松杆，0x80 ToF 持续更新但覆盖不足（低速降级） |
+| `health_flags` | 位掩码：0x01 ToF 完全可信区 >2/3，0x02 IMU 新鲜，0x04 编码器新鲜，0x08 轴向已标定，0x10 轮速与陀螺不一致，0x20 陀螺零偏就绪，0x40 停车锁存需松杆，0x80 ToF 持续更新但完全可信覆盖不足（忽略 ToF 限速） |
 | FUSION_HEALTH `tof_valid` / `imu_fresh` / `encoder_fresh` | 对应上述健康位，强调数据新鲜而非有无供电 |
 | `imu_axes` | `calibrated`/`uncalibrated`；未标定时不启用依赖车体轴向的航向/倾斜功能 |
 | `gyro_bias` | `learning`/`ready`；零偏就绪不能代替车体轴向标定 |

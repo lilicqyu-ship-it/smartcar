@@ -20,8 +20,6 @@ static float mapped(const int8_t *axis, const float *v, unsigned n)
 void FUSION_init(Fusion *s)
 {
     memset(s, 0, sizeof(*s));
-    s->cfg.marginMm = FUSION_STOP_DISTANCE_MM;
-    s->cfg.decelMmS2 = 800;
     s->cfg.reverseMmS = 250;
 }
 uint8_t FUSION_calibrate(Fusion *s, const int8_t a[3], uint16_t track)
@@ -313,6 +311,8 @@ void FUSION_step(Fusion *s, const FusionInput *in)
         s->openClearFrames = 0;
     }
     o->validZones = (uint8_t)valid;
+    s->tofNearestRawMm = nearestRawMm;
+    s->tofTrustedZones = (uint8_t)trusted;
     /* 完全可信区严格 >2/3 才限速；其他可用帧忽略 ToF 限速要求。
      * 盲区仍为零上限；单区域近障硬停在下方独立检查。 */
     if (o->flags & (FUSION_TOF_OK | FUSION_TOF_LIMITED))

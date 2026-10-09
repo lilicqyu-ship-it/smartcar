@@ -243,7 +243,8 @@ static void vRobotControlTask(void *pvParameters)
                         if (!g_fusionInput.wheelsCalibrated) permission = "blocked_wheel_calibration";
                         else if (!(out->flags & FUSION_ENCODER_OK)) permission = "blocked_encoder";
                         else if (!(out->flags & (FUSION_TOF_OK | FUSION_TOF_LIMITED))) permission = "blocked_tof";
-                        else if (out->nearestMm && out->nearestMm <= g_driveFusion.cfg.marginMm) permission = "blocked_near_obstacle";
+                        else if (g_driveFusion.tofNearestRawMm &&
+                                 g_driveFusion.tofNearestRawMm < FUSION_STOP_DISTANCE_MM) permission = "blocked_near_obstacle";
                         else if (out->flags & FUSION_NEUTRAL_REQUIRED) permission = "blocked_release_required";
                         else if (g_driveFusion.tofMode == FUSION_MODE_OPEN) permission = "open_space";
                         else if (out->flags & FUSION_TOF_LIMITED) permission = "limited_tof_coverage";
@@ -254,8 +255,10 @@ static void vRobotControlTask(void *pvParameters)
                             XL_S("forward", permission), XL_S("tof_mode",
                                 g_driveFusion.tofMode < 4u ? tofMode[g_driveFusion.tofMode] : "unknown"),
                             XL_U("nearest_mm", out->nearestMm),
+                            XL_U("nearest_raw_mm", g_driveFusion.tofNearestRawMm),
                             XL_U("forward_cap_mm_s", out->capMmS), XL_I("speed_mm_s", out->speedMmS),
                             XL_U("tof_age_ms", out->tofAgeMs), XL_U("trusted_zones", out->validZones),
+                            XL_U("fully_trusted_zones", g_driveFusion.tofTrustedZones),
                             XL_U("no_target_zones", g_driveFusion.tofNoTarget),
                             XL_U("unknown_zones", g_driveFusion.tofUnknown),
                             XL_U("open_clear_frames", g_driveFusion.openClearFrames),

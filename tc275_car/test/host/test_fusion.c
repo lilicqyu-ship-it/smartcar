@@ -86,6 +86,78 @@ static void test_trusted_ratio(void)
         assert(s.out.capMmS == 1000 && s.out.effective[0] == 800);
     }
 }
+static void test_distance_policy(void)
+{
+    unsigned n, j, distance, previous;
+    for (n = 16; n <= 64; n *= 4)
+    {
+        previous = 0;
+        for (distance = 59; distance <= 151; distance++)
+        {
+            setup((int)distance);
+            in.tof.zones = (uint8_t)n;
+            in.request[0] = in.request[1] = 1000;
+            in.wheelMmS[0] = in.wheelMmS[1] = 1100;
+            for (j = 0; j < n; j++)
+            {
+                in.tof.distanceMm[j] = (int16_t)distance;
+                in.tof.status[j] = 5;
+                in.tof.targets[j] = 1;
+            }
+            tick(1);
+            if (distance < 60)
+                assert(s.latched && s.out.brake && !s.out.effective[0]);
+            else
+            {
+                assert(!s.latched && !s.out.brake && s.out.effective[0] > 0);
+                assert(s.out.capMmS >= previous);
+                previous = s.out.capMmS;
+                if (distance < 150)
+                    assert(s.out.capMmS < 1000 && s.out.reason == FUSION_SLOW);
+                else
+                    assert(s.out.capMmS == 1000 && s.out.effective[0] == 1000);
+            }
+        }
+    }
+    /* 状态 9 的保守 -50 mm 遥测修正不能把原始 100 mm 判成 <60 mm。
+     * 即便其余区域完全可信，它也不参与限速距离；原始 59 mm 仍硬停。 */
+    setup(4000);
+    in.request[0] = 1000;
+    in.tof.status[7] = 9;
+    in.tof.distanceMm[7] = 100;
+    tick(1);
+    assert(s.out.nearestMm == 50 && s.out.effective[0] == 1000 && !s.out.brake);
+    in.tof.distanceMm[7] = 59;
+    tick(1);
+    assert(s.out.brake && s.latched);
+    /* 低覆盖也保留 <60 mm 硬停；80 mm 三帧 + 松杆解锁。 */
+    setup(4000);
+    for (j = 0; j < 16; j++) in.tof.targets[j] = 0;
+    in.tof.targets[7] = 1;
+    in.tof.distanceMm[7] = 59;
+    in.request[0] = 1000;
+    tick(1);
+    assert(s.out.brake && s.latched);
+    in.request[0] = 0;
+    in.tof.distanceMm[7] = 79;
+    for (j = 0; j < 4; j++) tick(1);
+    assert(s.latched);
+    in.tof.distanceMm[7] = 80;
+    tick(1);
+    tick(0);
+    tick(0);
+    assert(s.latched);
+    tick(1);
+    assert(s.latched);
+    tick(1);
+    assert(!s.latched);
+    /* 满量程极值下 60 mm 的目标仍非零，避免换算截断成提前停车。 */
+    setup(60);
+    in.fullScaleMmS = 5000;
+    in.request[0] = 1000;
+    tick(1);
+    assert(s.out.effective[0] > 0 && !s.out.brake);
+}
 int main(void)
 {
     unsigned i;
@@ -93,6 +165,7 @@ int main(void)
     uint8_t wire[FUSION_WIRE_LEN];
     int8_t axes[3] = {1, 2, 3};
     test_trusted_ratio();
+    test_distance_policy();
     setup(4000);
     in.request[0] = in.request[1] = 1000;
     tick(1);
@@ -317,9 +390,9 @@ int main(void)
     tick(0);
     assert(s.out.capMmS == cap);
     in.tof.status[0] = 9;
-    in.tof.distanceMm[0] = 400;
+    in.tof.distanceMm[0] = 80;
     tick(1);
-    assert(s.out.nearestMm == 350);
+    assert(s.out.nearestMm == 30);
     setup(4000);
     in.gyroMdps[2] = 2000;
     for (i = 0; i < 500; i++)

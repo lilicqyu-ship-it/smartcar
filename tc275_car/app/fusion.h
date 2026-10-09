@@ -77,7 +77,7 @@ typedef struct
     /* Body frame x=forward, y=left, z=up; signed sensor axes +/-1..3.
        All zero until calibrated. trackMm must be measured before enabling. */
     int8_t axis[3];
-    uint16_t trackMm, marginMm, decelMmS2, reverseMmS;
+    uint16_t trackMm, reverseMmS;
     uint8_t straightAssist;
 } FusionConfig;
 typedef struct
@@ -101,6 +101,8 @@ typedef struct
     uint8_t openClearFrames; /* consecutive new frames the field read as empty */
     uint8_t tofMode;         /* last FUSION_MODE_* scene, for diagnostics only */
     uint8_t tofNoTarget, tofUnknown; /* last frame zone counts, for logging */
+    uint16_t tofNearestRawMm; /* 未减状态 9 余量的有效最近距离，诊断用 */
+    uint8_t tofTrustedZones;  /* 状态 5 完全可信区数，诊断用 */
 } Fusion;
 void FUSION_init(Fusion *s);
 /* CPU0 stopped-only caller. Reject non-right-handed axis maps / bad geometry. */
