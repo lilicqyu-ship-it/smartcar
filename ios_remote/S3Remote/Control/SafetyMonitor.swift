@@ -1,7 +1,8 @@
 /*
  * SafetyMonitor.swift — port of scr_ctrl.c safety_watch (doc/05-ctrl.md §4):
- * radio-lost full-screen alert with 1.2 s debounce (SCR_ALERT_DEBOUNCE_MS),
- * vehicle fault watch, battery low/critical watch with +5 % hysteresis.
+ * radio-lost watch with 1.2 s debounce (SCR_ALERT_DEBOUNCE_MS) — presented
+ * as the non-blocking top banner, not a full-screen alert —, vehicle fault
+ * watch, battery low/critical watch with +5 % hysteresis.
  * Pure logic; the caller polls at the 30 Hz control beat.
  */
 

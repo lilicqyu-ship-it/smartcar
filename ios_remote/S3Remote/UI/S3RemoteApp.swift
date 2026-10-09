@@ -45,37 +45,44 @@ struct RootView: View {
     var body: some View {
         @Bindable var app = app
         ZStack {
-            TabView(selection: $selection) {
-                HomeView(selection: $selection)
-                    .tabItem { Label("驾驶", systemImage: "gamecontroller.fill") }
-                    .tag(Tab.drive.rawValue)
-                PlayView()
-                    .tabItem { Label("玩法", systemImage: "party.popper.fill") }
-                    .tag(Tab.play.rawValue)
-                VehicleView()
-                    .tabItem { Label("车辆", systemImage: "car.fill") }
-                    .tag(Tab.vehicle.rawValue)
-                SensorsView()
-                    .tabItem { Label("传感器", systemImage: "gauge.with.needle") }
-                    .tag(Tab.sensors.rawValue)
-                CalibView()
-                    .tabItem { Label("标定", systemImage: "wrench.and.screwdriver.fill") }
-                    .tag(Tab.calib.rawValue)
-                TopologyView()
-                    .tabItem { Label("拓扑", systemImage: "network") }
-                    .tag(Tab.topology.rawValue)
-                DiagView()
-                    .tabItem { Label("连接", systemImage: "waveform.path.ecg") }
-                    .tag(Tab.link.rawValue)
-                SettingsView()
-                    .tabItem { Label("设置", systemImage: "gearshape.fill") }
-                    .tag(Tab.settings.rawValue)
+            Theme.bg.ignoresSafeArea()
+            // 横幅用 VStack 占位而非 safeAreaInset：TabView（UIKit 背板）不
+            // 可靠传播祖先附加安全区，VStack 能保证各页内容不被横幅遮挡。
+            VStack(spacing: 0) {
+                RadioLostBanner(selection: $selection)
+                TabView(selection: $selection) {
+                    HomeView(selection: $selection)
+                        .tabItem { Label("驾驶", systemImage: "gamecontroller.fill") }
+                        .tag(Tab.drive.rawValue)
+                    PlayView()
+                        .tabItem { Label("玩法", systemImage: "party.popper.fill") }
+                        .tag(Tab.play.rawValue)
+                    VehicleView()
+                        .tabItem { Label("车辆", systemImage: "car.fill") }
+                        .tag(Tab.vehicle.rawValue)
+                    SensorsView()
+                        .tabItem { Label("传感器", systemImage: "gauge.with.needle") }
+                        .tag(Tab.sensors.rawValue)
+                    CalibView()
+                        .tabItem { Label("标定", systemImage: "wrench.and.screwdriver.fill") }
+                        .tag(Tab.calib.rawValue)
+                    TopologyView()
+                        .tabItem { Label("拓扑", systemImage: "network") }
+                        .tag(Tab.topology.rawValue)
+                    DiagView()
+                        .tabItem { Label("连接", systemImage: "waveform.path.ecg") }
+                        .tag(Tab.link.rawValue)
+                    SettingsView()
+                        .tabItem { Label("设置", systemImage: "gearshape.fill") }
+                        .tag(Tab.settings.rawValue)
+                }
             }
             AlertOverlayView()
 
         }
         .tint(Theme.accent)
         .animation(.easeInOut(duration: 0.25), value: app.alert)
+        .animation(.easeInOut(duration: 0.25), value: app.radioLostActive)
         .sheet(isPresented: $app.showOnboarding) {
             OnboardingView()
                 .presentationDetents([.large])
@@ -99,6 +106,8 @@ struct RootView: View {
 }
 
 // ---- full-screen alert overlay (P9, spec 20-22) -------------------------------
+// radioLost 在此只留空分支：它降级为顶部横幅 RadioLostBanner（离线不锁 UI）。
+// 其余类型（急停/故障/电量）均为刻意设计的可确认全屏遮罩。
 
 struct AlertOverlayView: View {
     @Environment(AppState.self) private var app
@@ -117,10 +126,8 @@ struct AlertOverlayView: View {
         } else if let alert = app.alert {
             switch alert.kind {
             case .radioLost:
-                overlay(title: "连接已中断",
-                        subtitle: "请靠近车辆并检查 Wi-Fi。连接恢复后将自动返回。",
-                        color: Theme.crit, icon: "wifi.exclamationmark",
-                        buttonTitle: nil, buttonAction: nil)
+                // 失联改为顶部非阻断横幅（RadioLostBanner），不再全屏锁 UI
+                EmptyView()
             case .vehicleFault:
                 overlay(title: "车辆需要检查",
                         subtitle: "\(alert.detail) — 确认后可继续观察",
@@ -185,5 +192,46 @@ struct AlertOverlayView: View {
         }
         .contentShape(Rectangle())
         .transition(.scale(scale: 0.96).combined(with: .opacity))
+    }
+}
+
+// ---- non-blocking radio-lost banner --------------------------------------------
+/// 失联提示横幅：radioLost 从全屏遮罩降级而来（离线也要能正常操作）。
+/// 持续显示、不拦截任何触摸、点击直达「连接」页，链路恢复即自动消失。
+/// 触发条件仍是 SafetyMonitor 的 1.2 s 去抖（含冷启动从未连接的场景）。
+struct RadioLostBanner: View {
+    @Environment(AppState.self) private var app
+    @Binding var selection: Int
+
+    var body: some View {
+        if ProcessInfo.processInfo.arguments.contains("--no-alert") {
+            EmptyView() // dev/screenshot hook, same as AlertOverlayView
+        } else if app.radioLostActive {
+            Button {
+                Haptics.selection()
+                selection = Tab.link.rawValue
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "wifi.exclamationmark")
+                        .font(.subheadline.weight(.bold))
+                    Text(app.hasConnected ? "连接已中断 · 请检查 Wi-Fi" : "车辆未连接 · 请检查 Wi-Fi")
+                        .font(.subheadline.bold())
+                    Spacer()
+                    Text("查看").font(.caption.bold())
+                    Image(systemName: "chevron.right").font(.caption2.weight(.bold))
+                }
+                .foregroundStyle(Theme.crit)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 10)
+                .background(Theme.crit.opacity(0.12), in: RoundedRectangle(cornerRadius: 14))
+                .overlay(RoundedRectangle(cornerRadius: 14)
+                    .strokeBorder(Theme.crit.opacity(0.35), lineWidth: 1))
+                .padding(.horizontal, 20)
+                .padding(.vertical, 8)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(app.hasConnected ? "连接已中断，前往连接页" : "车辆未连接，前往连接页")
+            .transition(.move(edge: .top).combined(with: .opacity))
+        }
     }
 }

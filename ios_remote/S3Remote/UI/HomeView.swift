@@ -83,7 +83,7 @@ struct HomeView: View {
                 }
             }
             JoystickView(deadzone: app.settings.deadzone,
-                         enabled: app.ctrlRole && !app.emergActive && !app.tiltEnabled && !app.sequencer.active,
+                         enabled: !app.emergActive && !app.tiltEnabled && !app.sequencer.active,
                          onTouch: { app.joystickTouch() },
                          onChange: { v, w in app.joystickMoved(v: v, w: w) })
             HStack {
@@ -103,7 +103,8 @@ struct HomeView: View {
     }
 
     private var driveHint: String {
-        if app.connState == .connected && !app.tcUp { return "车控未就绪" }
+        if app.connState != .connected { return "未连接 · 指令不会发送" }
+        if !app.tcUp { return "车控未就绪" }
         if app.sequencer.active { return "特技执行中 · STOP 可中止" }
         if app.tiltEnabled { return "体感驾驶中 · 倾斜手机操控" }
         return "松手自动回中"

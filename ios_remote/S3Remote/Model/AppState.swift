@@ -365,7 +365,12 @@ public final class AppState {
     public var monitor = SafetyMonitor()
     public private(set) var alert: Alert?
     private var ackDismissed: Set<AlertKind> = []
-    private var radioLostActive = false
+    /// Sustained radio loss (1.2 s debounce). Presented as the non-blocking
+    /// top banner (RadioLostBanner) — must never gate inputs or modal alerts.
+    public private(set) var radioLostActive = false
+    /// True once the WebSocket has opened this session; picks the banner
+    /// wording (「连接已中断」 vs 「车辆未连接」 on a cold start).
+    public private(set) var hasConnected = false
     private var faultActive = false
     private var batteryKind: AlertKind?
 
@@ -460,6 +465,7 @@ public final class AppState {
 
     func handleOpen() {
         connState = .connected
+        hasConnected = true
         log("INFO", "WebSocket 已连接")
     }
 
@@ -1030,6 +1036,8 @@ public final class AppState {
             radioLostActive = lost
             if lost {
                 log("CRIT", "RADIO LOST — 车辆停车（遥测断流 ≥1.2 s）")
+                // 非阻断横幅不经过下方 alert 管线，VoiceOver 播报在此补上
+                announcer.alertAppeared(Alert(kind: .radioLost, level: .critical, detail: "VEHICLE STOP"))
             } else {
                 log("INFO", "Radio recovered — 链路恢复")
             }
@@ -1061,12 +1069,12 @@ public final class AppState {
 
         // Highest-priority non-emergency alert; ACK dismissal re-arms when the
         // condition clears (overlay must not strobe, mirror spec 22/102).
+        // radioLost is NOT here — it degrades to the non-blocking banner so an
+        // offline link never locks the UI (spec 20-22 amended); the remaining
+        // overlay kinds all carry an ACK/release button.
         var kinds: Set<AlertKind> = []
         var newAlert: Alert?
-        if radioLostActive {
-            newAlert = Alert(kind: .radioLost, level: .critical, detail: "VEHICLE STOP")
-            kinds.insert(.radioLost)
-        } else if faultActive, let code = telemetry?.faultCode {
+        if faultActive, let code = telemetry?.faultCode {
             newAlert = Alert(kind: .vehicleFault, level: .warning,
                              detail: FaultText.describe(code)) // 中文 + 未知码保留 hex
             kinds.insert(.vehicleFault)

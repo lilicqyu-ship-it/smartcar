@@ -32,7 +32,7 @@ C6 ──SPI/SF帧── TC275 ── 车辆
 ![新版驾驶页](doc/ui-home-redesign.png)
 ![整车拓扑页](doc/ui-topology.png)
 
-开发参数：`--tab 0..7` 指定初始页，`--no-alert` 抑制告警覆盖层，
+开发参数：`--tab 0..7` 指定初始页，`--no-alert` 抑制告警覆盖层与失联横幅，
 `--no-onboard` 跳过首启引导（用于截图/联调）。
 截图为模拟器未连接状态，不代表实车联调结果。
 
@@ -45,7 +45,7 @@ C6 ──SPI/SF帧── TC275 ── 车辆
 | `scr_link.c`（WS/JSON 面板） | `S3Remote/Link/LinkEngine.swift` + `Link/TextMessage.swift` | `hello{role,ver,tc,pair,ctrl}` 角色判定、`tc{on}`、1 Hz `{"t":"ping"}`→`pong` RTT、`err{auth}` 控制权失效、静默 10 s 看门狗强连、3 s 失败退避 |
 | `POST /api/pair` 配对 | `LinkEngine.pair()` | 403/409/504/503 → 可动作的中文提示（doc/04 §4 口径），成功后存 token 并重连 |
 | `scr_ctrl.c` 30 Hz 控制 | `S3Remote/Control/DriveController.swift` | 闸门（连接+CTRL）、ECO/NORMAL/SPORT 50/80/100 % 限幅、满行程 v=600 mm/s / ω=300 °/s、零位心跳、STOP 单击锁存、长按 1.2 s 急停 0x32 + 双锁存、RELEASE 后保持停止、控制权丢失冻结 |
-| `safety_watch` | `S3Remote/Control/SafetyMonitor.swift` | 失联 1.2 s 去抖全屏告警 + 恢复事件、故障码、低电 20 %/临界 10 % + 5 % 回差 |
+| `safety_watch` | `S3Remote/Control/SafetyMonitor.swift` | 失联 1.2 s 去抖 → 顶部非阻断横幅提示 + 恢复事件、故障码、低电 20 %/临界 10 % + 5 % 回差 |
 | 遥测丢包统计（spec 28） | `S3Remote/Control/TelemetryLossCounter.swift` | seq 缺口 Δ∈(1,1000) 记 Δ−1，loss ‰ |
 | 电池显示防抖（C6 cee1189） | `S3Remote/Control/BatteryDisplayFilter.swift` | 电压：5 点中值 + 500 ms EMA + ≤2 Hz 显示闸 + 20 mV 下降/50 mV 上升双向迟滞；电量：5 点中值 + 持续 1.5 s 下降确认 + 持续 10 s ≥+2 % 回升确认（充电后步进回 100 %）；遥测 uptime 回退（整车重启，即充电断电重开）时双平面重置重播种；重连不解除、零电压视为未就绪；告警/颜色仍用真实遥测 |
 | 车速表 EMA 平滑（C6 renderSpeed） | `S3Remote/Control/SpeedDisplayFilter.swift` | 驾驶页大字：dt 感知 EMA（τ=150 ms）+ 首帧/断流 >400 ms/进出静止（<30 mm/s）吸附，1 位小数、静止读 0.0；轨迹/纪录/安全仍用原始遥测 |
@@ -55,7 +55,7 @@ C6 ──SPI/SF帧── TC275 ── 车辆
 | 信号强度 | `S3Remote/Control/LinkQuality.swift` + UI `SignalBarsView` | 两级：网关在 hello 带可选 `rssi` 字段或周期发 `{"t":"rssi","dbm":N}` 时显示真实 dBm（分档与 S3 遥控器 Kconfig 同源：−60/−67/−75/−85）；否则用 RTT+遥测丢包合成 4 格预估（UI 标注"预估 · x"）。状态舱与诊断页常驻显示 |
 | `app_state.c` | `S3Remote/Model/AppState.swift` | UI 单一事实源、600 ms 遥测过期（"--"）、事件环形日志、快照式发布 |
 | TC275 DPT 标定协议 0x70~0x74（esp32c6_car doc/17 / tc275_car doc/34 同源契约） | `S3Remote/Control/CalibSession.swift` + `UI/CalibView.swift` | 判向标定/逐电机点动/记录读写三族命令 + `cal`/`rec`/`jogcnt` JSON 回执解析；载荷逐字节对齐 `calib_record.c`（jog 钳 ±500、REC_SET 12 B），见下方「台架标定」 |
-| LVGL P1/P2/P4/P5/P9 | `S3Remote/UI/*.swift` | Home（摇杆/大速度/STOP）、Vehicle、Diag（统计+配对+事件日志）、Settings、全屏告警覆盖层（急停 RELEASE / 失联自动清除 / 其余 ACK） |
+| LVGL P1/P2/P4/P5/P9 | `S3Remote/UI/*.swift` | Home（摇杆/大速度/STOP）、Vehicle、Diag（统计+配对+事件日志）、Settings、全屏告警覆盖层（急停 RELEASE / 其余 ACK）、失联顶部横幅（非阻断、点击直达连接页、恢复自动清除） |
 | —（App 侧玩法，零固件改动） | `Control/StuntSequencer.swift` 等 | 详见下方「玩法功能」 |
 
 ## 玩法功能（v1.2.0，全部纯 App 侧实现）
@@ -190,7 +190,9 @@ Swift 文件放进 `S3Remote/` 或 `S3RemoteTests/` 目录即自动入编。
    （与 S3 遥控器同口径；手机 Web 是备用端，不抢占）。
 3. 摇杆驾驶；**STOP 单击**立即停车锁存，**长按 1.2 s** 发 0x32 急停并全屏锁定，
    按 RELEASE 后仍需触摸摇杆才恢复运动（spec 105）。
-4. 失联/故障/低电按等级全屏告警；链路断开即停发 DRIVE，TC275 心跳看门狗自行停车。
+4. 故障/低电按等级全屏告警；失联（含未连接 Wi-Fi）为顶部横幅提示，不锁 UI、
+   点击直达连接页，恢复自动清除。链路断开即停发 DRIVE，TC275 心跳看门狗自行停车；
+   离线时摇杆仍可拖动（本地 UI 跟手），指令被发送闸门拦下，不会上线。
 
 ## 已知限制
 
